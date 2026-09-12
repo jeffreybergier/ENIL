@@ -58,3 +58,6 @@ __pycache__/
 # Release staging output
 /dist/
 /release.env
+
+# Repository-root native outputs
+/build/

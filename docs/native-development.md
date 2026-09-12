@@ -32,7 +32,7 @@ required. Archived protocol research lives separately in ENIL-extras/cloudflare.
 ### Build / deploy
 
 ```sh
-cd source/macOS && make clean && make debug
+make clean && make -j2 debug release
 ```
 
 All four architectures (ppc, x86, x64, arm64) must produce zero warnings.
@@ -42,8 +42,8 @@ builds from the repository root. For platform-only changes, build the affected
 target. These requirements do not apply to Worker-only changes.
 
 ```sh
-make -C source/macOS clean && make -C source/macOS debug
-make -C source/iOS clean && make -C source/iOS debug
+make clean
+make -j2 debug release
 ```
 
 Check compiler errors and warnings, especially non-deprecation warnings.
@@ -51,11 +51,11 @@ When a device or Mac deployment is performed, also check launch output for
 `NSException` and `does not recognize selector`. Report device launch testing
 separately from cross-compilation; a successful build does not prove launch.
 
-If the user asks you to deploy you are probably going to deploy to x4-vm
-using the following command. But note that the destination machine could change
+When the user requests deployment, pass the built app path and the requested
+device hostname. For example:
 
 ```sh
-/altivec/bin/altivec-deploy source/macOS -d x4-vm --yes 60
+/altivec/bin/altivec-deploy build/macOS/debug/ENIL.app -d <device-host> --yes 60
 ```
 
 ## Dependencies & Build Inputs
@@ -130,14 +130,14 @@ live in `source/macOS/XPAppKit.{h,m}`. Caller code stays clean.
 ### ARC on iOS (UI only)
 
 The iOS target compiles its **UI-only** Objective-C — `source/iOS/*.m`, the
-Makefile `SOURCES` list — with ARC (`-fobjc-arc`). All shared code
+`build.mk` `SOURCES` list — with ARC (`-fobjc-arc`). All shared code
 (`source/shared/*`, carried in `EXTRA_SOURCES`) stays manual-retain/release
 (MRC): it also builds into the Tiger PPC macOS target, where ARC does not exist
 and `retain` / `release` / `[super dealloc]` are required. (The macOS target is
 MRC throughout.)
 
 - ARC and MRC objects interoperate at the binary level with zero runtime cost;
-  the flag is per translation unit. It is scoped in `source/iOS/Makefile` via a
+  the flag is per translation unit. It is scoped in `source/iOS/build.mk` via a
   target-specific variable, `$(SOURCES:.m=.o): IOS_FLAGS += -fobjc-arc`, so the
   shared engine (`altivec_common_phone.mk`) is untouched. Convention: UI files
   go in `SOURCES` (ARC); portable C (cJSON, qrcodegen, the eventual shared
@@ -700,17 +700,30 @@ nil object". Copy manually into a fresh dictionary and skip nil values instead.
 
 ## Static analysis (`make analyze`)
 
-Run from `source/macOS`: `make analyze`. It compiles every C source with
-`clang --analyze` (checkers `core,unix,deadcode,security`, one arch, to
-`/dev/null`) and appends diagnostics to `build-analyze/analyze.txt`. Covers
-`source/shared/*.c`, bundled `cJSON`, and `source/macOS/*.c` — **C only**, no
-`.m` and no iOS. Not incremental: every run truncates and re-analyzes.
+Run `make analyze` from the repository root for both native targets, or
+`make macOS-analyze` / `make iOS-analyze` for one. The existing Altivec analyzer
+rules resolve app and shared sources from their child working directories,
+including Objective-C and C translation units. Reports are written to
+`build/macOS/analyze/analyze.txt` and `build/iOS/analyze/analyze.txt` (or under
+`BUILD_ROOT` when overridden). Each run replaces its report.
 
-**Gotcha — the report is diagnostics-only.** An empty `analyze.txt` (0 bytes)
-means **CLEAN**, not "didn't run". There are deliberately no `.o`/`.plist`
-artifacts (sources go to `/dev/null`, output is text), so their absence is not
-evidence it was skipped. To prove the tool can go red, plant a
-`{ int *p = NULL; *p = 1; }` canary, confirm it fires, then remove it.
+An empty report means no emitted diagnostics. Check the command output and
+exit status as well; a cross-build or analyzer run does not test device launch.
 
-**Gotcha — `ANALYZE_SRcS`** (lowercase `c`) is an intentional, consistent
-Makefile variable name. Do not "fix" it or the source list breaks.
+## Build entry points and output layout
+
+The root Makefile forwards native commands to platform Makefiles. These
+wrappers use `source/make/native-targets.mk`; the original compiler settings
+and source lists live in `source/macOS/build.mk` and `source/iOS/build.mk`.
+The installed `/altivec` build engine remains unchanged.
+
+Both root and child invocations resolve the output root beside ENIL's root
+Makefile. `BUILD_ROOT` may select a different location; relative values are
+relative to the repository. macOS and iOS debug/release configurations have
+separate `Intermediates` directories, app bundles, symbols, and ZIP/IPA files.
+The iOS wrapper packages the already signed app using an absolute IPA path.
+
+Use `make clean && make -j2 debug release` for all four clean builds.
+`make macOS-clean` and `make iOS-clean` clean just one platform.
+`make test-host` runs the Linux-hosted build-system tests and Worker suite;
+these tests do not produce a native debug/release test binary.

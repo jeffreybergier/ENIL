@@ -65,3 +65,15 @@ QR-code submodule recursively. `.env`, SDK archives, generated headers,
 
 This migration preserves the current app version, but does not migrate old
 Git tags or GitHub release assets from ENIL-cocoa.
+
+## Native build outputs
+
+The release configuration invokes `make macOS-clean` / `make macOS-release`
+and `make iOS-clean` / `make iOS-release` from the repository root. Native
+release artifacts are `build/macOS/release/ENIL.zip` and
+`build/iOS/release/ENIL.ipa`. Per-platform cleaning preserves the other
+platform's assets while release automation builds and stages both targets.
+
+Manual builds may override `BUILD_ROOT`; release staging uses the canonical
+`build/` artifact paths configured in `.altivec-release.yml`. GitHub release
+assets are still staged in the ignored root `dist/` directory.

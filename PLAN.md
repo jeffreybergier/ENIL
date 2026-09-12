@@ -523,7 +523,7 @@ already lives with:
   UI code may use `^{}` and `dispatch_async`, simplifying the async / `try…catch`
   patterns the global rules ask for.
 
-Every new `.m` lands in the Makefile `SOURCES` list, inheriting ARC via the
+Every new `.m` lands in the platform `build.mk` `SOURCES` list, inheriting ARC via the
 existing `$(SOURCES:.m=.o): IOS_FLAGS += -fobjc-arc` rule. Portable C stays in
 `EXTRA_SOURCES` (never ARC), per [docs/native-development.md](docs/native-development.md).
 

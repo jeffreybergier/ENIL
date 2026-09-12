@@ -11,10 +11,18 @@ configuration, or native release automation, read
 native architecture, C/Objective-C boundaries, compatibility rules, and build
 requirements. Outstanding app work is in [PLAN.md](PLAN.md).
 
-Native validation: clean-build macOS and iOS when shared code or common build
-inputs change. For platform-only code, build the affected target. Inspect
+Native validation: from the repository root, use `make clean` followed by
+`make -j2 debug release` when shared build inputs change. Clean-build macOS and
+iOS when shared code changes. For platform-only code, build the affected target. Inspect
 compiler warnings and errors. A container cross-build does not establish that
 the app launches on a Mac or iOS device; report separately whether that was tested.
+
+Native outputs live in `build/<platform>/<configuration>/Intermediates` and
+the surrounding configuration directory. `BUILD_ROOT` overrides the root.
+Use platform-prefixed root targets (`macOS-debug`, `iOS-release`, etc.) for
+individual builds. Child source lists and flags live in `build.mk`; the
+platform `Makefile` files forward through `source/make/native-targets.mk`.
+Run `make test-host` for the build-system and Worker tests hosted on Linux.
 
 The native clients must not execute LINE extension code. They call the Worker
 for LTSM crypto and LINE directly for normal API traffic.
