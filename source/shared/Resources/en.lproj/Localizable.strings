@@ -1,0 +1,195 @@
+/* ENIL English localization
+ * Keys mirror the original UI strings exactly; the NSLocalizedString lookup
+ * substitutes the value below when "en" is the active language and falls
+ * back to the key itself when no entry is found. */
+
+/* --- App menu --- */
+"About ENIL"                              = "About ENIL";
+"Preferences…"                            = "Preferences…";
+"Hide ENIL"                               = "Hide ENIL";
+"Hide Others"                             = "Hide Others";
+"Show All"                                = "Show All";
+"Quit ENIL"                               = "Quit ENIL";
+
+/* --- Preferences window --- */
+"Preferences"                                                  = "Preferences";
+"Worker"                                                       = "Worker";
+"Worker URL:"                                                  = "Worker URL:";
+"Shared Secret:"                                               = "Shared Secret:";
+"Save"                                                         = "Save";
+"Cancel"                                                       = "Cancel";
+"Environment variables override these settings while set."     = "Environment variables override these settings while set.";
+"Both fields are required"                                     = "Both fields are required";
+"Worker URL and Shared Secret must both be set."               = "Worker URL and Shared Secret must both be set.";
+"Could not save credentials"                                   = "Could not save credentials";
+"The keychain refused the write. See Console.app for details." = "The keychain refused the write. See Console.app for details.";
+
+/* --- Chat menu --- */
+"Chat"                                    = "Chat";
+"Send Message"                            = "Send Message";
+"Mark as Seen"                            = "Mark as Seen";
+"Load More Messages"                      = "Load More Messages";
+"Close Chat"                              = "Close Chat";
+"Leave Chat"                              = "Leave Chat";
+"Delete Chat"                             = "Delete Chat";
+
+/* --- Edit menu --- */
+"Edit"                                    = "Edit";
+"Undo"                                    = "Undo";
+"Redo"                                    = "Redo";
+"Cut"                                     = "Cut";
+"Copy"                                    = "Copy";
+"Paste"                                   = "Paste";
+"Select All"                              = "Select All";
+
+/* --- View menu --- */
+"View"                                    = "View";
+"Toggle Sidebar"                          = "Toggle Sidebar";
+"Hide Attachments"                        = "Hide Attachments";
+"Show Stickers"                           = "Show Stickers";
+"Show Emoji"                              = "Show Emoji";
+"Attach Photo"                            = "Attach Photo";
+
+/* --- Accounts menu --- */
+"Accounts"                                = "Accounts";
+"Add Account"                             = "Add Account";
+"Log Out"                                 = "Log Out";
+"Reauthenticate"                          = "Reauthenticate";
+
+/* --- Window menu --- */
+"Window"                                  = "Window";
+"Minimize"                                = "Minimize";
+"Zoom"                                    = "Zoom";
+"Bring All to Front"                      = "Bring All to Front";
+
+/* --- About window --- */
+"Key"                                     = "Key";
+"Value"                                   = "Value";
+"no version provided"                     = "no version provided";
+
+/* --- Sheets & alerts --- */
+"Done"                                    = "Done";
+"Cancel"                                  = "Cancel";
+"Dismiss"                                 = "Dismiss";
+"Open Chat"                               = "Open Chat";
+"Start Chat"                              = "Start Chat";
+"Open chat with \"%@\"?"                  = "Open chat with \"%@\"?";
+"Start a new chat with \"%@\"?"           = "Start a new chat with \"%@\"?";
+"A 1:1 chat will be created when you send your first message." = "A 1:1 chat will be created when you send your first message.";
+
+"Log out of this account?"                = "Log out of this account?";
+"All of this account's data on this device — messages, chats, and downloaded media — will be permanently deleted. This cannot be undone. You will need to scan a QR code to log in again." = "All of this account's data on this device — messages, chats, and downloaded media — will be permanently deleted. This cannot be undone. You will need to scan a QR code to log in again.";
+
+"Leave \"%@\"?"                           = "Leave \"%@\"?";
+"You will be removed from this chat and its messages will be deleted from this device. This cannot be undone." = "You will be removed from this chat and its messages will be deleted from this device. This cannot be undone.";
+
+"Delete \"%@\"?"                          = "Delete \"%@\"?";
+"This chat and its messages will be deleted from this device. It is not deleted on LINE — it will reappear if a new message arrives. This cannot be undone." = "This chat and its messages will be deleted from this device. It is not deleted on LINE — it will reappear if a new message arrives. This cannot be undone.";
+
+"Different account scanned"               = "Different account scanned";
+"You signed in as \"%@\", not \"%@\". \"%@\" will be left signed out. Add \"%@\" as a separate account instead?" = "You signed in as \"%@\", not \"%@\". \"%@\" will be left signed out. Add \"%@\" as a separate account instead?";
+
+/* --- QR login window --- */
+"Starting…"                               = "Starting…";
+"Scan with LINE on your phone"            = "Scan with LINE on your phone";
+"Couldn't finish adding the account"      = "Couldn't finish adding the account";
+"Couldn't Add Account"                    = "Couldn't Add Account";
+"Sign-in worked, but the account couldn't be saved on this Mac. Please try Add Account again." = "Sign-in worked, but the account couldn't be saved on this Mac. Please try Add Account again.";
+"Login cancelled"                         = "Login cancelled";
+"Login Cancelled"                         = "Login Cancelled";
+"The QR sign-in was cancelled or timed out. No account was added." = "The QR sign-in was cancelled or timed out. No account was added.";
+
+/* --- QR login statuses emitted by enil_qrlogin.c via status_cb --- */
+"creating QR session"                     = "Creating QR session…";
+"waiting for scan"                        = "Waiting for scan…";
+"waiting for scan (%d/%d)"                = "Waiting for scan (%d/%d)…";
+"scan detected — finalizing"              = "Scan detected — finalizing…";
+"confirm the PIN in the LINE app"         = "Confirm the PIN in the LINE app";
+"running post-login handshake"            = "Running post-login handshake…";
+"logged in"                               = "Logged in";
+
+/* --- Chat list sections --- */
+"Account"                                 = "Account";
+"Chats"                                   = "Chats";
+"Friends"                                 = "Friends";
+"Delete"                                  = "Delete";
+
+/* --- Chat window toolbar --- */
+"Attachment"                              = "Attachment";
+"Stickers"                                = "Stickers";
+"Emoji"                                   = "Emoji";
+"Photo"                                   = "Photo";
+"None"                                    = "None";
+"More Messages"                           = "More Messages";
+
+/* --- Send bar --- */
+"Send"                                    = "Send";
+
+/* --- Sync mini-view --- */
+"Sync"                                    = "Sync";
+"Working…"                                = "Working…";
+"Sync Required"                           = "Sync Required";
+"Syncing Live"                            = "Syncing Live";
+"Sync Requested"                          = "Sync Requested";
+"Sync Error"                              = "Sync Error";
+"Syncing"                                 = "Syncing";
+"Reconnecting"                            = "Reconnecting";
+
+/* Mini-view phase labels (mapped from sync.* keys posted by C) */
+"Connecting"                              = "Connecting";
+"Messages"                                = "Messages";
+"Decrypting"                              = "Decrypting";
+"Purchases"                               = "Purchases";
+"Downloads"                               = "Downloads";
+
+/* --- C-side progress messages (from enil_sync.c → enil_progress_post) --- */
+"Connecting..."                           = "Connecting…";
+"Syncing account..."                      = "Syncing account…";
+"Syncing messages..."                     = "Syncing messages…";
+"Decrypting..."                           = "Decrypting…";
+"Preparing downloads..."                  = "Preparing downloads…";
+"Downloading..."                          = "Downloading…";
+
+/* --- C-side error messages --- */
+"Token refresh failed"                    = "Token refresh failed";
+"Profile fetch failed"                    = "Profile fetch failed";
+"Profile write failed"                    = "Profile write failed";
+"Friends fetch failed"                    = "Friends fetch failed";
+"Friends write failed"                    = "Friends write failed";
+"Chat mids fetch failed"                  = "Chat mids fetch failed";
+"Chat mids alloc failed"                  = "Chat mids alloc failed";
+"Chats fetch failed"                      = "Chats fetch failed";
+"Chats write failed"                      = "Chats write failed";
+"Message boxes fetch failed"              = "Message boxes fetch failed";
+"Message boxes write failed"              = "Message boxes write failed";
+"Could not enable SSE"                    = "Could not enable SSE";
+
+/* --- C-side transient send/SSE statuses (from ENILAccount.m) --- */
+"Sending message"                         = "Sending message";
+"Sending sticker"                         = "Sending sticker";
+"Sending image"                           = "Sending image";
+"Received message"                        = "Received message";
+
+/* --- iOS-specific UI (no macOS counterpart) --- */
+"ENIL"                                    = "ENIL";
+"Settings"                                = "Settings";
+"Cloudflare Worker"                       = "Cloudflare Worker";
+"Shared Secret"                           = "Shared Secret";
+"Message"                                 = "Message";
+"Connect"                                 = "Connect";
+"Disconnect"                              = "Disconnect";
+"(unknown)"                               = "(unknown)";
+"Image unavailable."                      = "Image unavailable.";
+"Linked Libraries"                        = "Linked Libraries";
+"Swipe an account to log out."            = "Swipe an account to log out.";
+"Enter the Cloudflare Worker URL and shared secret. Both are stored in the keychain." = "Enter the Cloudflare Worker URL and shared secret. Both are stored in the keychain.";
+"Could not save to the keychain. Check the URL and try again." = "Could not save to the keychain. Check the URL and try again.";
+"Set the Worker URL and shared secret first." = "Set the Worker URL and shared secret first.";
+
+/* --- Shared state / notification labels (ENILSyncStatusQueue.m, ENILAccount.m;
+       also surface on macOS) --- */
+"LINE Error"                              = "LINE Error";
+"Worker Error"                            = "Worker Error";
+"Link Off"                                = "Link Off";
+"Sticker"                                 = "Sticker";
+"New message"                             = "New message";

@@ -45,3 +45,16 @@ fastlane/test_output
 
 # Finder metadata
 .DS_Store
+
+# Native app builds and local SDK/credential inputs
+.altivec-sdk/
+build-*
+tarballs
+.env
+source/shared/gen_env.h
+__pycache__/
+*.py[cod]
+
+# Release staging output
+/dist/
+/release.env

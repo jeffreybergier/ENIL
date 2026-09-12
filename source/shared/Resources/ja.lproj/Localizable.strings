@@ -1,0 +1,194 @@
+/* ENIL Japanese localization
+ * スタンプ is the LINE-standard translation for "Sticker".
+ * 絵文字 is used for "Emoji" and similarly for inline sticons. */
+
+/* --- App menu --- */
+"About ENIL"                              = "ENIL について";
+"Preferences…"                            = "環境設定…";
+"Hide ENIL"                               = "ENIL を隠す";
+"Hide Others"                             = "ほかを隠す";
+"Show All"                                = "すべてを表示";
+"Quit ENIL"                               = "ENIL を終了";
+
+/* --- Preferences window --- */
+"Preferences"                                                  = "環境設定";
+"Worker"                                                       = "ワーカー";
+"Worker URL:"                                                  = "ワーカー URL:";
+"Shared Secret:"                                               = "共有シークレット:";
+"Save"                                                         = "保存";
+"Cancel"                                                       = "キャンセル";
+"Environment variables override these settings while set."     = "環境変数が設定されている場合、この設定よりも優先されます。";
+"Both fields are required"                                     = "両方の項目を入力してください";
+"Worker URL and Shared Secret must both be set."               = "ワーカー URL と共有シークレットの両方を入力してください。";
+"Could not save credentials"                                   = "認証情報を保存できませんでした";
+"The keychain refused the write. See Console.app for details." = "キーチェーンへの書き込みが拒否されました。詳細は Console.app を確認してください。";
+
+/* --- Chat menu --- */
+"Chat"                                    = "トーク";
+"Send Message"                            = "メッセージを送信";
+"Mark as Seen"                            = "既読にする";
+"Load More Messages"                      = "メッセージをさらに読み込む";
+"Close Chat"                              = "トークを閉じる";
+"Leave Chat"                              = "トークから退出";
+"Delete Chat"                             = "トークを削除";
+
+/* --- Edit menu --- */
+"Edit"                                    = "編集";
+"Undo"                                    = "取り消す";
+"Redo"                                    = "やり直す";
+"Cut"                                     = "カット";
+"Copy"                                    = "コピー";
+"Paste"                                   = "ペースト";
+"Select All"                              = "すべてを選択";
+
+/* --- View menu --- */
+"View"                                    = "表示";
+"Toggle Sidebar"                          = "サイドバーの表示切り替え";
+"Hide Attachments"                        = "添付パネルを隠す";
+"Show Stickers"                           = "スタンプを表示";
+"Show Emoji"                              = "絵文字を表示";
+"Attach Photo"                            = "写真を添付";
+
+/* --- Accounts menu --- */
+"Accounts"                                = "アカウント";
+"Add Account"                             = "アカウントを追加";
+"Log Out"                                 = "ログアウト";
+"Reauthenticate"                          = "再認証";
+
+/* --- Window menu --- */
+"Window"                                  = "ウインドウ";
+"Minimize"                                = "しまう";
+"Zoom"                                    = "拡大/縮小";
+"Bring All to Front"                      = "すべてを手前に移動";
+
+/* --- About window --- */
+"Key"                                     = "キー";
+"Value"                                   = "値";
+"no version provided"                     = "バージョン情報なし";
+
+/* --- Sheets & alerts --- */
+"Done"                                    = "完了";
+"Cancel"                                  = "キャンセル";
+"Dismiss"                                 = "閉じる";
+"Open Chat"                               = "トークを開く";
+"Start Chat"                              = "トークを開始";
+"Open chat with \"%@\"?"                  = "「%@」とのトークを開きますか?";
+"Start a new chat with \"%@\"?"           = "「%@」と新しいトークを開始しますか?";
+"A 1:1 chat will be created when you send your first message." = "最初のメッセージを送信すると1対1トークが作成されます。";
+
+"Log out of this account?"                = "このアカウントからログアウトしますか?";
+"All of this account's data on this device — messages, chats, and downloaded media — will be permanently deleted. This cannot be undone. You will need to scan a QR code to log in again." = "このアカウントのこのデバイス上のデータ(メッセージ、トーク、ダウンロード済みメディア)はすべて完全に削除されます。この操作は取り消せません。再度ログインするにはQRコードを読み取る必要があります。";
+
+"Leave \"%@\"?"                           = "「%@」から退出しますか?";
+"You will be removed from this chat and its messages will be deleted from this device. This cannot be undone." = "このトークから退出し、メッセージはこのデバイスから削除されます。この操作は取り消せません。";
+
+"Delete \"%@\"?"                          = "「%@」を削除しますか?";
+"This chat and its messages will be deleted from this device. It is not deleted on LINE — it will reappear if a new message arrives. This cannot be undone." = "このトークとそのメッセージはこのデバイスから削除されます。LINE 側からは削除されないため、新しいメッセージが届くと再表示されます。この操作は取り消せません。";
+
+"Different account scanned"               = "別のアカウントが読み取られました";
+"You signed in as \"%@\", not \"%@\". \"%@\" will be left signed out. Add \"%@\" as a separate account instead?" = "「%2$@」ではなく「%1$@」としてサインインしました。「%3$@」はログアウトされたままになります。代わりに「%4$@」を別のアカウントとして追加しますか?";
+
+/* --- QR login window --- */
+"Starting…"                               = "開始しています…";
+"Scan with LINE on your phone"            = "スマートフォンの LINE で読み取ってください";
+"Couldn't finish adding the account"      = "アカウントの追加を完了できませんでした";
+"Couldn't Add Account"                    = "アカウントを追加できませんでした";
+"Sign-in worked, but the account couldn't be saved on this Mac. Please try Add Account again." = "サインインは成功しましたが、この Mac にアカウントを保存できませんでした。もう一度「アカウントを追加」をお試しください。";
+"Login cancelled"                         = "ログインがキャンセルされました";
+"Login Cancelled"                         = "ログインがキャンセルされました";
+"The QR sign-in was cancelled or timed out. No account was added." = "QR サインインがキャンセルされたかタイムアウトしました。アカウントは追加されていません。";
+
+/* --- QR login statuses emitted by enil_qrlogin.c via status_cb --- */
+"creating QR session"                     = "QR セッションを作成中…";
+"waiting for scan"                        = "読み取り待機中…";
+"waiting for scan (%d/%d)"                = "読み取り待機中 (%d/%d)…";
+"scan detected — finalizing"              = "読み取りを検出 — 確定中…";
+"confirm the PIN in the LINE app"         = "LINE アプリで PIN を確認してください";
+"running post-login handshake"            = "ログイン後ハンドシェイクを実行中…";
+"logged in"                               = "ログインしました";
+
+/* --- Chat list sections --- */
+"Account"                                 = "アカウント";
+"Chats"                                   = "トーク";
+"Friends"                                 = "友だち";
+"Delete"                                  = "削除";
+
+/* --- Chat window toolbar --- */
+"Attachment"                              = "添付";
+"Stickers"                                = "スタンプ";
+"Emoji"                                   = "絵文字";
+"Photo"                                   = "写真";
+"None"                                    = "なし";
+"More Messages"                           = "メッセージをさらに読み込む";
+
+/* --- Send bar --- */
+"Send"                                    = "送信";
+
+/* --- Sync mini-view --- */
+"Sync"                                    = "同期";
+"Working…"                                = "処理中…";
+"Sync Required"                           = "同期が必要です";
+"Syncing Live"                            = "リアルタイム同期中";
+"Sync Requested"                          = "同期を要求中";
+"Sync Error"                              = "同期エラー";
+"Syncing"                                 = "同期中";
+"Reconnecting"                            = "再接続中";
+
+/* Mini-view phase labels (mapped from sync.* keys posted by C) */
+"Connecting"                              = "接続中";
+"Messages"                                = "メッセージ";
+"Decrypting"                              = "復号中";
+"Purchases"                               = "購入アイテム";
+"Downloads"                               = "ダウンロード";
+
+/* --- C-side progress messages (from enil_sync.c → enil_progress_post) --- */
+"Connecting..."                           = "接続中…";
+"Syncing account..."                      = "アカウントを同期中…";
+"Syncing messages..."                     = "メッセージを同期中…";
+"Decrypting..."                           = "復号中…";
+"Preparing downloads..."                  = "ダウンロード準備中…";
+"Downloading..."                          = "ダウンロード中…";
+
+/* --- C-side error messages --- */
+"Token refresh failed"                    = "トークン更新に失敗しました";
+"Profile fetch failed"                    = "プロフィールの取得に失敗しました";
+"Profile write failed"                    = "プロフィールの書き込みに失敗しました";
+"Friends fetch failed"                    = "友だちの取得に失敗しました";
+"Friends write failed"                    = "友だちの書き込みに失敗しました";
+"Chat mids fetch failed"                  = "トーク ID の取得に失敗しました";
+"Chat mids alloc failed"                  = "トーク ID の確保に失敗しました";
+"Chats fetch failed"                      = "トークの取得に失敗しました";
+"Chats write failed"                      = "トークの書き込みに失敗しました";
+"Message boxes fetch failed"              = "メッセージボックスの取得に失敗しました";
+"Message boxes write failed"              = "メッセージボックスの書き込みに失敗しました";
+"Could not enable SSE"                    = "SSE を有効にできませんでした";
+
+/* --- C-side transient send/SSE statuses (from ENILAccount.m) --- */
+"Sending message"                         = "メッセージを送信中";
+"Sending sticker"                         = "スタンプを送信中";
+"Sending image"                           = "画像を送信中";
+"Received message"                        = "メッセージを受信しました";
+
+/* --- iOS-specific UI (no macOS counterpart) --- */
+"ENIL"                                    = "ENIL";
+"Settings"                                = "設定";
+"Cloudflare Worker"                       = "Cloudflare ワーカー";
+"Shared Secret"                           = "共有シークレット";
+"Message"                                 = "メッセージ";
+"Connect"                                 = "接続";
+"Disconnect"                              = "切断";
+"(unknown)"                               = "(不明)";
+"Image unavailable."                      = "画像を表示できません。";
+"Linked Libraries"                        = "使用ライブラリ";
+"Swipe an account to log out."            = "アカウントをスワイプするとログアウトできます。";
+"Enter the Cloudflare Worker URL and shared secret. Both are stored in the keychain." = "Cloudflare ワーカーの URL と共有シークレットを入力してください。どちらもキーチェーンに保存されます。";
+"Could not save to the keychain. Check the URL and try again." = "キーチェーンに保存できませんでした。URL を確認してもう一度お試しください。";
+"Set the Worker URL and shared secret first." = "先にワーカー URL と共有シークレットを設定してください。";
+
+/* --- Shared state / notification labels (ENILSyncStatusQueue.m, ENILAccount.m;
+       also surface on macOS) --- */
+"LINE Error"                              = "LINE エラー";
+"Worker Error"                            = "ワーカーエラー";
+"Link Off"                                = "接続オフ";
+"Sticker"                                 = "スタンプ";
+"New message"                             = "新着メッセージ";
