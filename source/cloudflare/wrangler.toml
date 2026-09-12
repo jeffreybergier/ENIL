@@ -1,0 +1,10 @@
+name = "enil-cloud"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+[build]
+command = "npm run build"
+watch_dir = "scripts"
+
+[observability]
+enabled = true

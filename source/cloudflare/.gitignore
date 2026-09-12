@@ -1,0 +1,8 @@
+node_modules/
+.wrangler/
+.cache/
+dist/
+.dev.vars*
+.env*
+src/ltsm-worker.js
+src/ltsm.wasm

@@ -1,0 +1,9 @@
+{
+  "id": "ophjlpahpchlmihnnnihgmmeilfjmjjc",
+  "version": "3.7.2",
+  "chromeVersion": "145.0.0.0",
+  "files": {
+    "static/js/ltsmSandbox.js": "5c66cba945cc039d817e87fef2aa1e28c8adb7be0f94fca5b95bb6bcf5a07c94",
+    "static/js/ltsm.wasm": "58bb4e189ab9bbd7d72ed415258da36afd50e306cb019bab75329d4f5f1b65b3"
+  }
+}

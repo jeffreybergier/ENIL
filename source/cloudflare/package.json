@@ -1,0 +1,23 @@
+{
+  "name": "enil-cloud",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "npm run build && vitest run",
+    "test:unit": "vitest run test/worker.test.js"
+  },
+  "devDependencies": {
+    "acorn": "8.18.0",
+    "astring": "1.9.0",
+    "fflate": "0.8.3",
+    "vitest": "5.0.0",
+    "wrangler": "4.131.1"
+  }
+}
