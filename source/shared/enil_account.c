@@ -459,6 +459,7 @@ int enil_account_send_text(enil_health_t *health, sqlite3 *db,
 
   if (out_message_id) *out_message_id = NULL;
   enil_health_bind(health);
+  if (!enil_session_bind_identity(session_path)) return 0;
   memset(&result, 0, sizeof(result));
   ok = enil_line_send_text(session_path, chat_id, text, &result);
   if (ok) ok = enil_account_finish_send(db, chat_id, &result, out_message_id);
@@ -486,6 +487,7 @@ int enil_account_send_inline_sticon(enil_health_t *health, sqlite3 *db,
   if (out_message_id) *out_message_id = NULL;
   if (count <= 0 || !package_ids || !sticon_ids) return 0;
   enil_health_bind(health);
+  if (!enil_session_bind_identity(session_path)) return 0;
 
   resource_types = (const char **)calloc((size_t)count, sizeof(char *));
   versions = (const char **)calloc((size_t)count, sizeof(char *));
@@ -539,6 +541,7 @@ int enil_account_send_sticker(enil_health_t *health, sqlite3 *db,
 
   if (out_message_id) *out_message_id = NULL;
   enil_health_bind(health);
+  if (!enil_session_bind_identity(session_path)) return 0;
 
   memset(&meta, 0, sizeof(meta));
   memset(&sp, 0, sizeof(sp));
@@ -570,6 +573,7 @@ int enil_account_send_image(enil_health_t *health, sqlite3 *db,
   if (out_message_id) *out_message_id = NULL;
   if (!params) return 0;
   enil_health_bind(health);
+  if (!enil_session_bind_identity(session_path)) return 0;
 
   memset(&sp, 0, sizeof(sp));
   sp.jpeg_data    = params->jpeg_data;
@@ -590,11 +594,13 @@ int enil_account_send_image(enil_health_t *health, sqlite3 *db,
 }
 
 int enil_account_mark_chat_seen(enil_health_t *health,
+                                const char *session_path,
                                 const char *access_token,
                                 const char *chat_id,
                                 const char *message_id)
 {
   enil_health_bind(health);
+  if (!enil_session_bind_identity(session_path)) return 0;
   if (!access_token || !chat_id || !message_id) return 0;
   if (talk_send_chat_checked(access_token, chat_id, message_id) != 0) {
     ENIL_LOG("ENILAccount.markChatSeen", "RPC failed for %s", chat_id);
@@ -611,6 +617,7 @@ int enil_account_remove_chat(enil_health_t *health, sqlite3 *db,
 {
   int ok;
   enil_health_bind(health);
+  if (!enil_session_bind_identity(session_path)) return 0;
   ok = enil_line_send_chat_removed(session_path, chat_id,
                                    last_read_message_id,
                                    last_read_message_time);
@@ -937,6 +944,7 @@ int enil_account_process_sse_event(enil_health_t *health,
   if (!db || !event_type || !event_data) return 0;
 
   if (health) enil_health_bind(health);
+  if (!enil_session_bind_identity(session_path)) return 0;
 
   if (strcmp(event_type, "message") == 0)
     enil_status_post("sse.message", "Received message", 1);

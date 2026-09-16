@@ -477,13 +477,16 @@ static int finalize_login(cJSON *s) {
   cJSON *data, *issue;
   const char *access, *refresh, *cert;
   int captured = 0;
+  const enil_identity_t *identity = enil_identity_current();
+
+  if (!identity) return 0;
 
   {
     char *body;
     cJSON *req = cJSON_CreateArray();
     cJSON *o = cJSON_CreateObject();
-    cJSON_AddStringToObject(o, "systemName", "CHROMEOS");
-    cJSON_AddStringToObject(o, "modelName", "CHROME");
+    cJSON_AddStringToObject(o, "systemName", identity->system_name);
+    cJSON_AddStringToObject(o, "modelName", identity->model_name);
     cJSON_AddBoolToObject(o, "autoLoginIsRequired", 0);
     cJSON_AddStringToObject(o, "authSessionId", jstr_def(s, "authSessionId", ""));
     cJSON_AddItemToArray(req, o);
@@ -575,6 +578,7 @@ int enil_qrlogin_run(const char *account_dir,
   char *qr_url = NULL;
   const char *cb_url, *pubkey, *token;
   int rc = 0;
+  enil_identity_t identity;
 
   if (!account_dir) { LOG("run", "NULL account_dir"); return 0; }
   if (!session_path_of(account_dir, path, sizeof(path))) {
@@ -582,12 +586,31 @@ int enil_qrlogin_run(const char *account_dir,
     return 0;
   }
 
+  if (!enil_identity_bind(NULL)) return 0;
   s = enil_session_read(path);
-  if (!s) s = cJSON_CreateObject();
-  if (!s) return 0;
+  /* Selection must have been persisted by prepare_login. Never start as
+   * Chrome because the selected Windows staging file became unreadable. */
+  if (!cJSON_IsObject(s) || !cJSON_GetObjectItemCaseSensitive(s, "clientIdentity")) {
+    cJSON_Delete(s);
+    emit_status(cb, "Invalid client identity");
+    return 0;
+  }
+  if (!enil_identity_parse(cJSON_GetObjectItemCaseSensitive(s, "clientIdentity"),
+                           &identity) || !enil_identity_bind(&identity)) {
+    emit_status(cb, "Invalid client identity");
+    cJSON_Delete(s);
+    return 0;
+  }
+  /* Persist the exact identity before the first LINE request. */
+  if (cancelled(cb) || !enil_session_write(path, s)) {
+    cJSON_Delete(s);
+    enil_identity_bind(NULL);
+    return 0;
+  }
 
   if (jstr(s, "accessToken")) {
     LOG("run", "already logged in");
+    enil_identity_bind(NULL);
     cJSON_Delete(s);
     return 1;
   }
@@ -600,7 +623,7 @@ int enil_qrlogin_run(const char *account_dir,
   emit_status(cb, "creating QR session");
   if (!ensure_qr_session(s)) goto done;
   if (!ensure_e2ee_key(s))   goto done;
-  enil_session_write(path, s); /* persist QR + key state before the long poll */
+  if (!enil_session_write(path, s)) goto done; /* QR + key state before poll */
 
   cb_url = jstr(s, "callbackUrl");
   pubkey = jstr(s, "e2eePublicKey");
@@ -630,7 +653,7 @@ int enil_qrlogin_run(const char *account_dir,
   emit_status(cb, "running post-login handshake");
   if (!post_login_handshake(s, token)) goto done;
 
-  enil_session_write(path, s);
+  if (!enil_session_write(path, s)) goto done;
   emit_status(cb, "logged in");
   LOG("run", "logged in successfully");
   rc = 1;
@@ -638,6 +661,7 @@ int enil_qrlogin_run(const char *account_dir,
 done:
   if (!rc) enil_session_write(path, s); /* keep resumable QR/key state */
   free(qr_url);
+  enil_identity_bind(NULL);
   cJSON_Delete(s);
   return rc;
 }

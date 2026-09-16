@@ -634,6 +634,7 @@ typedef struct {
   int downloaded;
   int error;
   int started;
+  enil_identity_t identity;
 } ENILStickerDownloadJob;
 
 static int download_if_missing(const char *url, const char *dest_path,
@@ -806,6 +807,7 @@ static int run_sticonshop_download(ENILStickerDownloadJob *job) {
 static void *sticker_download_thread(void *arg) {
   ENILStickerDownloadJob *job = (ENILStickerDownloadJob *)arg;
   if (!job || !job->sticker_id || !job->package_id || !job->shop) return NULL;
+  if (!enil_identity_bind(&job->identity)) { job->error = 1; return NULL; }
   mkdir(job->pkg_dir, 0755);
   if (strcmp(job->shop, "stickershop") == 0)
     job->error = run_stickershop_download(job) != 0;
@@ -832,6 +834,8 @@ static void set_account_dir(const char *session_path, char *buf, size_t buf_size
 static int init_sticker_job(ENILStickerDownloadJob *job, cJSON *entry,
                             const char *stk_dir) {
   memset(job, 0, sizeof(*job));
+  if (!enil_identity_current()) return 0;
+  job->identity = *enil_identity_current();
   job->sticker_id  = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "sticker_id"));
   job->package_id  = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "package_id"));
   job->shop        = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "shop"));
@@ -1837,6 +1841,10 @@ static char *sync_phase_connecting(const char *access_token,
   char *current_token;
 
   report(ENIL_SYNC_PHASE_CONNECTING, 0, 2, "Connecting...", 0);
+  if (!enil_session_bind_identity(session_path)) {
+    report(ENIL_SYNC_PHASE_CONNECTING, 0, 2, "Invalid client identity", 1);
+    return NULL;
+  }
   if (!access_token || !access_token[0]) {
     report(ENIL_SYNC_PHASE_CONNECTING, 0, 2, "Token refresh failed", 1);
     return NULL;

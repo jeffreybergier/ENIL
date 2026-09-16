@@ -193,3 +193,9 @@
 "Link Off"                                = "Link Off";
 "Sticker"                                 = "Sticker";
 "New message"                             = "New message";
+
+/* QR client identity selection */
+"Chrome" = "Chrome";
+"Windows" = "Windows";
+"Choose a client identity" = "Choose a client identity";
+"Could not save client identity" = "Could not save client identity";

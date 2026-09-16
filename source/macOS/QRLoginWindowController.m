@@ -8,6 +8,8 @@ static const int kQRPixels = 256;
  * now lives behind +[ENILAccount runQRLoginAtPath:observer:cancelFlag:]; this
  * controller is the observer and receives all callbacks on the main thread. */
 @interface QRLoginWindowController () <ENILQRLoginObserver>
+- (void)beginLoginWithProfile:(NSString *)profile;
+- (void)chooseClient:(id)sender;
 @end
 
 @implementation QRLoginWindowController
@@ -65,10 +67,26 @@ static const int kQRPixels = 256;
   qrImageView_ = [[NSImageView alloc]
     initWithFrame:NSMakeRect(32, 120, kQRPixels, kQRPixels)];
   [qrImageView_ setImageScaling:XPImageScaleAxesIndependently];
+  [qrImageView_ setHidden:YES];
   [cv addSubview:qrImageView_];
 
+  chromeButton_ = [[NSButton alloc] initWithFrame:NSMakeRect(55, 255, 210, 36)];
+  [chromeButton_ setTitle:NSLocalizedString(@"Chrome", nil)];
+  [chromeButton_ setTarget:self];
+  [chromeButton_ setAction:@selector(chooseClient:)];
+  [chromeButton_ setTag:0];
+  [cv addSubview:chromeButton_];
+  windowsButton_ = [[NSButton alloc] initWithFrame:NSMakeRect(55, 200, 210, 36)];
+  [windowsButton_ setTitle:NSLocalizedString(@"Windows", nil)];
+  [windowsButton_ setTarget:self];
+  [windowsButton_ setAction:@selector(chooseClient:)];
+  [windowsButton_ setTag:1];
+  [cv addSubview:windowsButton_];
+  [chromeButton_ setHidden:expectedMid_ != nil];
+  [windowsButton_ setHidden:expectedMid_ != nil];
+
   statusField_ = [[self labelInRect:NSMakeRect(8, 80, 304, 20)] retain];
-  [statusField_ setStringValue:NSLocalizedString(@"Starting…", nil)];
+  [statusField_ setStringValue:NSLocalizedString(@"Choose a client identity", nil)];
   [cv addSubview:statusField_];
 
   pinField_ = [[self labelInRect:NSMakeRect(8, 36, 304, 36)] retain];
@@ -80,9 +98,30 @@ static const int kQRPixels = 256;
 
 - (void)start;
 {
-  if (running_) return;
-  running_ = YES;
+  if (running_ || done_) return;
   [self showWindow:self];
+  if (expectedMid_) [self beginLoginWithProfile:nil];
+}
+
+- (void)chooseClient:(id)sender;
+{
+  [self beginLoginWithProfile:[sender tag] == 1 ? @"desktopwin" : @"chrome"];
+}
+
+- (void)beginLoginWithProfile:(NSString *)profile;
+{
+  if (running_ || done_) return;
+  if (![ENILAccount prepareQRLoginAtPath:accountDir_
+                          clientProfile:profile
+                    reauthenticatingMid:expectedMid_]) {
+    [statusField_ setStringValue:NSLocalizedString(@"Could not save client identity", nil)];
+    return;
+  }
+  running_ = YES;
+  [chromeButton_ setHidden:YES];
+  [windowsButton_ setHidden:YES];
+  [qrImageView_ setHidden:NO];
+  [statusField_ setStringValue:NSLocalizedString(@"Starting…", nil)];
   [NSThread detachNewThreadSelector:@selector(loginThreadMain)
                            toTarget:self
                          withObject:nil];
@@ -237,6 +276,8 @@ static const int kQRPixels = 256;
   [qrImageView_ release];
   [statusField_ release];
   [pinField_ release];
+  [chromeButton_ release];
+  [windowsButton_ release];
   [super dealloc];
 }
 

@@ -192,3 +192,9 @@
 "Link Off"                                = "接続オフ";
 "Sticker"                                 = "スタンプ";
 "New message"                             = "新着メッセージ";
+
+/* QR client identity selection */
+"Chrome" = "Chrome";
+"Windows" = "Windows";
+"Choose a client identity" = "クライアントの種類を選択";
+"Could not save client identity" = "クライアント情報を保存できませんでした";

@@ -21,14 +21,6 @@
 #include "enil_cocoa_log.h"
 #include "enil_health.h"
 
-#define LINE_GW    "https://line-chrome-gw.line-apps.com"
-#define CHROME_VER "3.7.2"
-#define LINE_ORIGIN "chrome-extension://ophjlpahpchlmihnnnihgmmeilfjmjjc"
-#define LINE_UA    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " \
-                   "AppleWebKit/537.36 (KHTML, like Gecko) " \
-                   "Chrome/145.0.0.0 Safari/537.36"
-#define X_LINE_APP "CHROMEOS\t3.7.2\tChrome_OS"
-
 /* Thin wrapper: routes fixed-string call sites through NSLog with a
  * "Line.<fn>" tag. Formatted sites should call ENIL_LOG directly. */
 #define LOG(fn, msg) enil_log("Line." fn, "%s", msg)
@@ -109,7 +101,10 @@ ENILLineResponse enil_line_post_ex(
   struct curl_slist *hdrs = NULL;
   CURLcode rc;
   int i;
+  const enil_identity_t *identity = enil_identity_current();
+  char application_header[192], version_header[64];
 
+  if (!identity) { LOG("post", "no client identity bound"); return result; }
   if (!path || !body || !access_token) { LOG("post", "NULL argument"); return result; }
 
   /* Sticky-failure gate, scoped to the calling thread's bound account (see
@@ -129,18 +124,22 @@ ENILLineResponse enil_line_post_ex(
   hmac = enil_worker_sign(path, body, access_token);
   if (!hmac) { LOG("post", "sign failed"); return result; }
 
-  snprintf(url, sizeof(url), "%s%s", LINE_GW, path);
+  snprintf(url, sizeof(url), "%s%s", ENIL_LINE_GATEWAY, path);
   curl = enil_curl_new(&buf);
   if (!curl) { free(hmac); LOG("post", "enil_curl_new failed"); return result; }
 
   hdrs = curl_slist_append(hdrs, "Accept: application/json, text/plain, */*");
   hdrs = curl_slist_append(hdrs, accept_lang_hdr);
   hdrs = curl_slist_append(hdrs, "Content-Type: application/json");
-  hdrs = curl_slist_append(hdrs, "X-Line-Chrome-Version: " CHROME_VER);
-  hdrs = curl_slist_append(hdrs, "X-Line-Application: " X_LINE_APP);
+  snprintf(version_header, sizeof(version_header), "X-Line-Chrome-Version: %s",
+           identity->gateway_version);
+  snprintf(application_header, sizeof(application_header), "X-Line-Application: %s",
+           identity->application);
+  hdrs = curl_slist_append(hdrs, version_header);
+  hdrs = curl_slist_append(hdrs, application_header);
   hdrs = curl_slist_append(hdrs, x_lal_hdr);
-  hdrs = curl_slist_append(hdrs, "Origin: " LINE_ORIGIN);
-  hdrs = curl_slist_append(hdrs, "User-Agent: " LINE_UA);
+  hdrs = curl_slist_append(hdrs, "Origin: " ENIL_LINE_ORIGIN);
+  curl_easy_setopt(curl, CURLOPT_USERAGENT, identity->user_agent);
 
   hmac_hdr   = make_header("X-Hmac", hmac);
   access_hdr = access_token[0] ? make_header("X-Line-Access", access_token) : NULL;
@@ -300,7 +299,7 @@ char *enil_line_token_refresh(const char *session_path, int *out_line_code) {
   talk_token_v3_issue_result_t parsed;
 
   if (out_line_code) *out_line_code = 0;
-  if (!session_path) { LOG("token_refresh", "NULL session_path"); return NULL; }
+  if (!session_path || !enil_session_bind_identity(session_path)) return NULL;
 
   memset(&session, 0, sizeof(session));
   if (!enil_session_load(session_path, &session)) {
@@ -389,6 +388,8 @@ char *enil_line_acquire_obs_token(const char *session_path,
     LOG("acquire_obs_token", "NULL argument");
     return NULL;
   }
+
+  if (!enil_session_bind_identity(session_path)) return NULL;
 
   /* Body is a JSON array [scope]; scope 2 = OBS general */
   resp = enil_line_post(

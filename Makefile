@@ -20,7 +20,10 @@ cloudflare-%: FORCE
 	@cd "$(ENIL_PROJECT_ROOT)/source/cloudflare" && npm run "$*"
 
 test: test-host
-test-host: test-build-system cloudflare-test
+test-host: test-build-system test-client-identity cloudflare-test
+
+test-client-identity:
+	@python3 -B -m unittest discover -s "$(ENIL_PROJECT_ROOT)/source/tests" -p 'test_client_identity.py' -v
 
 test-build-system:
 	@python3 -B -m unittest discover -s "$(ENIL_PROJECT_ROOT)/source/tests" -p 'test_build_system.py' -v
@@ -30,9 +33,10 @@ help:
 	@echo 'make macOS-<target> / iOS-<target>    Forward any child Makefile target'
 	@echo 'make clean                           Remove native outputs for both platforms'
 	@echo 'make macOS-clean / iOS-clean          Remove only one platform output tree'
-	@echo 'make test-host                       Run build-system and Worker tests on Linux'
+	@echo 'make test-host                       Run build-system, identity, and Worker tests on Linux'
+	@echo 'make test-client-identity             Check session identity and loopback HTTP requests'
 	@echo 'make cloudflare-<script>              Run a Worker npm script (e.g. test, build)'
 	@echo 'BUILD_ROOT=/path                     Override the default repository-root build/'
 
 FORCE:
-.PHONY: debug release analyze validate clean test test-host test-build-system help FORCE
+.PHONY: debug release analyze validate clean test test-host test-build-system test-client-identity help FORCE

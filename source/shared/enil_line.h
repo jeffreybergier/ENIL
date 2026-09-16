@@ -17,6 +17,8 @@ typedef struct {
  * any LINE request fires. NULL/empty args leave the existing value in place. */
 void enil_line_set_language(const char *accept_lang, const char *x_lal);
 
+/* Requires this operation's identity to be bound via enil_session_bind_identity
+ * (or enil_identity_bind during QR login). Missing binding sends no request. */
 ENILLineResponse enil_line_post(
   const char *path,
   const char *body,

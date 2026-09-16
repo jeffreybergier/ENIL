@@ -1231,7 +1231,8 @@ static int enil_sticon_arrays(NSArray *resources, const char ***pkg,
   NSString *chatId    = [params objectForKey:@"chat_id"];
   NSString *messageId = [params objectForKey:@"message_id"];
   const char *token = accessToken_ ? [accessToken_ UTF8String] : NULL;
-  enil_account_mark_chat_seen(health_, token,
+  NSString *sessionPath = [enilDir_ stringByAppendingPathComponent:@"session.json"];
+  enil_account_mark_chat_seen(health_, [sessionPath fileSystemRepresentation], token,
                               [chatId UTF8String],
                               [messageId UTF8String]);
   [pool release];
@@ -1838,6 +1839,22 @@ static void sse_event_cb(const ENILSSEEvent *ev, void *ctx)
   return [NSData dataWithBytesNoCopy:raw
                                length:(NSUInteger)(size * size)
                          freeWhenDone:YES];
+}
+
++ (BOOL)prepareQRLoginAtPath:(NSString *)accountDir
+               clientProfile:(NSString *)profile
+         reauthenticatingMid:(NSString *)mid;
+{
+  if (![accountDir length]) return NO;
+  NSString *path = [accountDir stringByAppendingPathComponent:@"session.json"];
+  NSString *source = nil;
+  if ([mid length]) {
+    source = [[[accountDir stringByDeletingLastPathComponent]
+      stringByAppendingPathComponent:mid] stringByAppendingPathComponent:@"session.json"];
+  }
+  return enil_session_prepare_login([path fileSystemRepresentation],
+                                    [profile UTF8String],
+                                    [source fileSystemRepresentation]) ? YES : NO;
 }
 
 + (BOOL)runQRLoginAtPath:(NSString *)accountDir

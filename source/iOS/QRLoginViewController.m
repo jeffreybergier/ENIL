@@ -29,6 +29,8 @@ static const NSInteger kENILTextAlignCenter = 1;
 @property (nonatomic, strong) UIImageView *qrImageView;
 @property (nonatomic, strong) UILabel *statusLabel;
 @property (nonatomic, strong) UILabel *pinLabel;
+@property (nonatomic, strong) UIButton *chromeButton;
+@property (nonatomic, strong) UIButton *windowsButton;
 @property (nonatomic, assign) BOOL running;
 @property (nonatomic, assign) BOOL done;     /* terminal handling reached */
 @end
@@ -71,8 +73,28 @@ static const NSInteger kENILTextAlignCenter = 1;
   qr.autoresizingMask =
     UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin;
   qr.contentMode = UIViewContentModeScaleAspectFit;
+  qr.hidden = YES;
   [self.view addSubview:qr];
   self.qrImageView = qr;
+
+  UIButton *chrome = [UIButton buttonWithType:UIButtonTypeRoundedRect];
+  chrome.frame = CGRectMake((w - 210.0f) / 2.0f, 110.0f, 210.0f, 44.0f);
+  chrome.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin;
+  [chrome setTitle:NSLocalizedString(@"Chrome", nil) forState:UIControlStateNormal];
+  [chrome addTarget:self action:@selector(chooseClient:) forControlEvents:UIControlEventTouchUpInside];
+  chrome.tag = 0;
+  chrome.hidden = self.expectedMid != nil;
+  [self.view addSubview:chrome];
+  self.chromeButton = chrome;
+  UIButton *windows = [UIButton buttonWithType:UIButtonTypeRoundedRect];
+  windows.frame = CGRectMake((w - 210.0f) / 2.0f, 175.0f, 210.0f, 44.0f);
+  windows.autoresizingMask = chrome.autoresizingMask;
+  [windows setTitle:NSLocalizedString(@"Windows", nil) forState:UIControlStateNormal];
+  [windows addTarget:self action:@selector(chooseClient:) forControlEvents:UIControlEventTouchUpInside];
+  windows.tag = 1;
+  windows.hidden = self.expectedMid != nil;
+  [self.view addSubview:windows];
+  self.windowsButton = windows;
 
   UILabel *status = [[UILabel alloc] initWithFrame:
     CGRectMake(16.0f, 40.0f + kQRPixels + 16.0f, w - 32.0f, 22.0f)];
@@ -80,7 +102,7 @@ static const NSInteger kENILTextAlignCenter = 1;
   status.textAlignment = kENILTextAlignCenter;
   status.font = [UIFont systemFontOfSize:15.0];
   status.textColor = [UIColor darkGrayColor];
-  status.text = NSLocalizedString(@"Starting…", nil);
+  status.text = NSLocalizedString(@"Choose a client identity", nil);
   [self.view addSubview:status];
   self.statusLabel = status;
 
@@ -97,13 +119,28 @@ static const NSInteger kENILTextAlignCenter = 1;
 - (void)viewDidAppear:(BOOL)animated
 {
   [super viewDidAppear:animated];
-  [self startLogin];
+  if (self.expectedMid) [self startLoginWithProfile:nil];
 }
 
-- (void)startLogin
+- (void)chooseClient:(id)sender
 {
-  if (self.running) return;
+  [self startLoginWithProfile:[sender tag] == 1 ? @"desktopwin" : @"chrome"];
+}
+
+- (void)startLoginWithProfile:(NSString *)profile
+{
+  if (self.running || self.done) return;
+  if (![ENILAccount prepareQRLoginAtPath:self.accountDir
+                          clientProfile:profile
+                    reauthenticatingMid:self.expectedMid]) {
+    self.statusLabel.text = NSLocalizedString(@"Could not save client identity", nil);
+    return;
+  }
   self.running = YES;
+  self.chromeButton.hidden = YES;
+  self.windowsButton.hidden = YES;
+  self.qrImageView.hidden = NO;
+  self.statusLabel.text = NSLocalizedString(@"Starting…", nil);
   /* The detached thread retains self for its duration, so &cancelFlag_ and the
    * observer callbacks stay valid until runQRLoginAtPath: returns — even if the
    * modal is dismissed first. */

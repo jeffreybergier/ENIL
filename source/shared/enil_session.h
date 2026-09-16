@@ -24,8 +24,16 @@ cJSON *enil_session_to_json(const session_t *s);
  * must cJSON_Delete), or NULL on failure. */
 cJSON *enil_session_read(const char *path);
 
-/* Serialises root and writes it to path, replacing the existing file. */
-void enil_session_write(const char *path, cJSON *root);
+/* Serialises root and atomically replaces path. Returns 1 on success. */
+int enil_session_write(const char *path, cJSON *root);
+
+/* Bind the saved identity for the calling account operation. Clears any old
+ * binding on failure. Also works for a staged session without an access token. */
+int enil_session_bind_identity(const char *path);
+/* Seed a fresh QR session. Reauthentication copies only the old identity, not
+ * credentials/QR keys. Never overwrites an existing staged session. */
+int enil_session_prepare_login(const char *path, const char *profile_id,
+                                const char *reauth_session_path);
 
 /* Validates session.json and extracts required fields.
  * Returns 1 on success; *access_token_out is malloc'd, *mid_out is malloc'd or NULL.

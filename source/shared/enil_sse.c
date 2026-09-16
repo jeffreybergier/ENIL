@@ -19,13 +19,7 @@
 #include "enil_health.h"
 #include "cJSON.h"
 
-#define SSE_HOST    "https://line-chrome-gw.line-apps.com"
-#define SSE_PATH    "/api/operation/receive"
-#define CHROME_VER  "3.7.2"
-#define LINE_ORIGIN "chrome-extension://ophjlpahpchlmihnnnihgmmeilfjmjjc"
-#define LINE_UA     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " \
-                    "AppleWebKit/537.36 (KHTML, like Gecko) " \
-                    "Chrome/145.0.0.0 Safari/537.36"
+#define SSE_PATH "/api/operation/receive"
 
 /* Idle watchdog. The gateway sends a `ping` event every ~20s, so any healthy
  * stream produces bytes well inside this window. If no byte arrives for this
@@ -40,7 +34,7 @@
 
 struct ENILSSEClient {
   char          *access_token;
-  char          *session_path;  /* only for the lastPartialFullSyncs query param */
+  char          *session_path;  /* identity snapshot + lastPartialFullSyncs */
   sqlite3       *db;            /* localRev persistence target; not owned */
   enil_health_t *health;        /* owning account's health; not owned */
   long long      local_rev;
@@ -209,10 +203,21 @@ static void *sse_thread(void *arg)
   ENILSSEState       state;
   size_t             n;
   CURLcode           rc;
+  enil_identity_t identity;
+  char application_header[192], version_header[64];
 
   /* Bind this account's health so the reconnect gate below and any LINE work
    * the event callback drives are scoped to this account, not the process. */
   enil_health_bind(c->health);
+  if (!enil_session_bind_identity(c->session_path)) {
+    enil_health_set_failure(ENIL_ERR_LINE, "Cannot load client identity");
+    return NULL;
+  }
+  identity = *enil_identity_current();
+  snprintf(application_header, sizeof(application_header), "X-Line-Application: %s",
+           identity.application);
+  snprintf(version_header, sizeof(version_header), "X-Line-Chrome-Version: %s",
+           identity.gateway_version);
 
   while (!c->stop) {
     /* Top-of-loop health gate. If a previous event handler (or any other
@@ -250,7 +255,7 @@ static void *sse_thread(void *arg)
                                          partials ? partials : "{}", 0);
       snprintf(url, sizeof(url),
                "%s%s?version=%s&localRev=%lld&lastPartialFullSyncs=%s",
-               SSE_HOST, SSE_PATH, CHROME_VER, c->local_rev,
+               ENIL_LINE_GATEWAY, SSE_PATH, identity.gateway_version, c->local_rev,
                encoded ? encoded : "%7B%7D");
       if (encoded) curl_free(encoded);
       free(partials);
@@ -269,10 +274,11 @@ static void *sse_thread(void *arg)
     hdrs = curl_slist_append(NULL, "Accept: text/event-stream");
     hdrs = curl_slist_append(hdrs,  "Cache-Control: no-cache");
     hdrs = curl_slist_append(hdrs,  "Pragma: no-cache");
-    hdrs = curl_slist_append(hdrs,  "X-Line-Chrome-Version: " CHROME_VER);
+    hdrs = curl_slist_append(hdrs, version_header);
+    hdrs = curl_slist_append(hdrs, application_header);
     hdrs = curl_slist_append(hdrs,  "X-LAL: en_US");
-    hdrs = curl_slist_append(hdrs,  "Origin: " LINE_ORIGIN);
-    hdrs = curl_slist_append(hdrs,  "User-Agent: " LINE_UA);
+    hdrs = curl_slist_append(hdrs,  "Origin: " ENIL_LINE_ORIGIN);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, identity.user_agent);
     if (access_hdr) hdrs = curl_slist_append(hdrs, access_hdr);
     if (cookie_hdr) hdrs = curl_slist_append(hdrs, cookie_hdr);
 

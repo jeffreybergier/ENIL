@@ -136,6 +136,7 @@ int enil_account_send_image(enil_health_t *health, sqlite3 *db,
                             char **out_message_id);
 
 int enil_account_mark_chat_seen(enil_health_t *health,
+                                const char *session_path,
                                 const char *access_token,
                                 const char *chat_id,
                                 const char *message_id);

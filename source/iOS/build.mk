@@ -23,7 +23,7 @@ EXTRA_FLAGS = -I$(QRCODEGEN_DIR) -I$(SHARED_DIR)
 # (AIFontAwesome -> CoreText, XPFoundation -> SecItem keychain, enil_cocoa ->
 # ImageIO/CoreFoundation). They stay MRC (EXTRA_SOURCES never gets -fobjc-arc).
 EXTRA_SOURCES = qrcodegen.c \
-  enil_http.c enil_worker.c enil_health.c enil_session.c enil_b64.c \
+  enil_http.c enil_worker.c enil_health.c enil_session.c enil_identity.c enil_b64.c \
   enil_line.c enil_qrlogin.c enil_api_json.c enil_api_call.c enil_talkserv.c \
   enil_db.c enil_sync.c enil_obs.c enil_crypto.c enil_strbuf.c enil_html.c \
   enil_message_format.c enil_sse.c enil_account.c \

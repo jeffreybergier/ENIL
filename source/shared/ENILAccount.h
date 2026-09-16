@@ -79,6 +79,11 @@ typedef enum {
  * bad input / encode failure. *outSize (may be NULL) = modules per side,
  * excluding the quiet zone (a render-side concern). */
 + (NSData *)qrModulesForString:(NSString *)string size:(int *)outSize;
+/* Prepare fresh staging before requesting a QR. profile is chrome/desktopwin
+ * for Add Account. Reauthentication copies the existing MID's exact identity. */
++ (BOOL)prepareQRLoginAtPath:(NSString *)accountDir
+               clientProfile:(NSString *)profile
+         reauthenticatingMid:(NSString *)mid;
 /* Runs the blocking LINE QR-login handshake for the account at `accountDir`,
  * writing <accountDir>/session.json on success. This BLOCKS on long-polls for
  * tens of seconds — call it on a background thread, never the main runloop.

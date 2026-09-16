@@ -727,3 +727,24 @@ Use `make clean && make -j2 debug release` for all four clean builds.
 `make macOS-clean` and `make iOS-clean` clean just one platform.
 `make test-host` runs the Linux-hosted build-system tests and Worker suite;
 these tests do not produce a native debug/release test binary.
+
+It also runs `make test-client-identity`, which compiles the native session and
+network code against host libraries and redirects all HTTP traffic to a local
+fixture server. Install `libcjson-dev`, `libcurl4-openssl-dev`, `libssl-dev`,
+`pkg-config`, and a host C compiler for this check. It uses synthetic tokens and
+crypto results; it does not contact LINE or verify live Windows compatibility.
+
+Client identity is an exact snapshot in `session.json` (`clientIdentity`).
+Missing identity on a legacy session resolves to the frozen Chrome profile;
+invalid or unknown identities fail validation. The QR UI seeds fresh staging
+with Chrome/Windows selection, or copies only the old identity for reauthentication.
+Both profiles currently use the Chrome JSON gateway and its V2 QR flow.
+
+Account operations bind a copied identity to their thread before network work,
+alongside the existing health binding. `enil_line_post` requires that binding;
+it never silently defaults to Chrome. New account operations must bind from
+their session before calling token-only Talk helpers. SSE and parallel asset
+downloads also carry the snapshot across their pthread boundaries. Public
+LINE assets use its User-Agent; authenticated API/media/event requests use
+both the application header and User-Agent. Worker requests keep their own
+transport behavior. Changes to defaults affect new logins, not saved snapshots.

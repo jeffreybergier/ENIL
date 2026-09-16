@@ -67,20 +67,34 @@ Configure the Worker URL and secret in the app's preferences. The native
 client also accepts `ENIL_WORKER_URL` and `ENIL_WORKER_SECRET` through its
 environment; credentials are not embedded in the committed app source.
 
+When adding an account, choose **Chrome** or **Windows** before requesting the
+QR code. ENIL saves the exact application identity, User-Agent, login device
+names, and gateway version in `session.json`; subsequent requests and
+reauthentication reuse them. Existing sessions default to Chrome.
+Windows is experimental and uses the same Chrome gateway. Its candidate
+profile is `DESKTOPWIN` with User-Agent `Line/9.7.0.3556`, based on LINEJS's
+Windows profile, not a verified capture of the official Windows application.
+LINE's acceptance of that profile and concurrent Chrome/Windows sessions
+still require live testing.
+
 See [native development](docs/native-development.md), [outstanding work](PLAN.md),
 and [release instructions](RELEASE.md).
 
 ## Linux-hosted tests
 
 ```sh
+apt-get install libcjson-dev libcurl4-openssl-dev libssl-dev pkg-config build-essential
 npm --prefix source/cloudflare ci
-make test-host               # Build-system checks plus real-WASM Worker tests
+make test-host               # Build-system, client identity, and Worker checks
 make test-build-system       # Fast wrapper/cleanup checks without Apple SDKs
+make test-client-identity    # Synthetic session and loopback HTTP integration
 make cloudflare-test         # Worker suite only
 ```
 
-These tests have no native debug/release executable. Build-system tests create
-and remove temporary fixtures; Worker tests use the existing ignored download
+These tests do not launch a Mac/iOS app. Identity tests compile a temporary
+host executable and capture synthetic QR/API/media/SSE requests on loopback,
+including concurrent profiles; they never contact LINE or the Worker.
+Build-system tests create and remove temporary fixtures; Worker tests use the existing ignored download
 cache and generated JS/WASM under `source/cloudflare`. Native source outputs
 are always under the selected root build directory.
 

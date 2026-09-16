@@ -29,6 +29,8 @@
   NSImageView   *qrImageView_;
   NSTextField   *statusField_;
   NSTextField   *pinField_;
+  NSButton      *chromeButton_;
+  NSButton      *windowsButton_;
   NSString      *expectedMid_; /* nil = Add Account; non-nil = Reauthenticate
                                   (the mid we expect the scan to match) */
   id <QRLoginWindowControllerDelegate> delegate_; /* weak */

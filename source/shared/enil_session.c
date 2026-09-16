@@ -64,10 +64,47 @@ cJSON *enil_session_read(const char *path) {
   return root;
 }
 
-/* ============================================================================
- * Load a session and return malloc'd accessToken (and optional mid).
- * Returns 1 if a usable accessToken is present, 0 otherwise.
- * ==========================================================================*/
+/* Load a snapshot before the calling account operation touches the network. */
+int enil_session_bind_identity(const char *path) {
+  cJSON *root;
+  enil_identity_t identity;
+  int ok;
+  if (!enil_identity_bind(NULL)) return 0;
+  root = enil_session_read(path);
+  if (!cJSON_IsObject(root)) { cJSON_Delete(root); return 0; }
+  ok = enil_identity_parse(cJSON_GetObjectItemCaseSensitive(root, "clientIdentity"),
+                           &identity);
+  cJSON_Delete(root);
+  return ok && enil_identity_bind(&identity);
+}
+
+int enil_session_prepare_login(const char *path, const char *profile_id,
+                                const char *reauth_session_path) {
+  enil_identity_t identity;
+  cJSON *root, *json;
+  int ok;
+  /* Staging is fresh. Refuse to overwrite QR state or an authenticated token. */
+  if (!path || access(path, F_OK) == 0) return 0;
+  if (reauth_session_path) {
+    root = enil_session_read(reauth_session_path);
+    if (!cJSON_IsObject(root)) { cJSON_Delete(root); return 0; }
+    ok = enil_identity_parse(cJSON_GetObjectItemCaseSensitive(root, "clientIdentity"),
+                             &identity);
+    cJSON_Delete(root);
+  } else {
+    ok = enil_identity_default(profile_id, &identity);
+  }
+  if (!ok) return 0;
+  json = enil_identity_to_json(&identity);
+  root = cJSON_CreateObject();
+  if (!json || !root) { cJSON_Delete(json); cJSON_Delete(root); return 0; }
+  cJSON_AddItemToObject(root, "clientIdentity", json);
+  ok = enil_session_write(path, root);
+  cJSON_Delete(root);
+  return ok;
+}
+
+/* Load a session and return malloc'd accessToken (and optional mid). */
 int enil_session_validate(const char *path, char **access_token_out, char **mid_out) {
   session_t s;
   if (!path || !access_token_out) { LOG("validate", "NULL argument"); return 0; }
@@ -88,32 +125,35 @@ int enil_session_validate(const char *path, char **access_token_out, char **mid_
 /* ============================================================================
  * Serialise root to pretty-printed JSON and overwrite session.json.
  * ==========================================================================*/
-void enil_session_write(const char *path, cJSON *root) {
+int enil_session_write(const char *path, cJSON *root) {
   char *text, *tmp;
   size_t plen, tlen;
   FILE *f;
-  if (!path || !root) { LOG("write", "NULL argument"); return; }
+  if (!path || !root) { LOG("write", "NULL argument"); return 0; }
   text = cJSON_Print(root);
-  if (!text) { LOG("write", "cJSON_Print failed"); return; }
+  if (!text) { LOG("write", "cJSON_Print failed"); return 0; }
   tlen = strlen(text);
   plen = strlen(path);
   tmp = (char *)malloc(plen + 5);
-  if (!tmp) { LOG("write", "alloc failed"); free(text); return; }
+  if (!tmp) { LOG("write", "alloc failed"); free(text); return 0; }
   memcpy(tmp, path, plen);
   memcpy(tmp + plen, ".tmp", 5);
   f = fopen(tmp, "wb");
-  if (!f) { LOG("write", "cannot open tmp for writing"); free(tmp); free(text); return; }
+  if (!f) { LOG("write", "cannot open tmp for writing"); free(tmp); free(text); return 0; }
   if (fwrite(text, 1, tlen, f) != tlen || fflush(f) != 0) {
     LOG("write", "write failed");
-    fclose(f); unlink(tmp); free(tmp); free(text); return;
+    fclose(f); unlink(tmp); free(tmp); free(text); return 0;
   }
-  fclose(f);
+  if (fclose(f) != 0) { unlink(tmp); free(tmp); free(text); return 0; }
   if (rename(tmp, path) != 0) {
     LOG("write", "rename failed");
     unlink(tmp);
+    free(tmp); free(text);
+    return 0;
   }
   free(tmp);
   free(text);
+  return 1;
 }
 
 /* ============================================================================
@@ -208,6 +248,11 @@ static void set_obj_field(cJSON *root, const char *key, cJSON *value) {
 int enil_session_parse(cJSON *root, session_t *out) {
   if (!root || !out) { LOG("parse", "NULL argument"); return 0; }
   memset(out, 0, sizeof(*out));
+  if (!enil_identity_parse(cJSON_GetObjectItemCaseSensitive(root, "clientIdentity"),
+                           &out->clientIdentity)) {
+    LOG("parse", "invalid clientIdentity");
+    return 0;
+  }
   out->accessToken           = dup_str_field(root, "accessToken");
   if (!out->accessToken) { LOG("parse", "missing accessToken"); return 0; }
   out->refreshToken          = dup_str_field(root, "refreshToken");
@@ -285,6 +330,11 @@ cJSON *enil_session_to_json(const session_t *s) {
   if (!s) { LOG("to_json", "NULL session"); return NULL; }
   root = cJSON_CreateObject();
   if (!root) return NULL;
+  {
+    cJSON *identity = enil_identity_to_json(&s->clientIdentity);
+    if (!identity) { cJSON_Delete(root); return NULL; }
+    cJSON_AddItemToObject(root, "clientIdentity", identity);
+  }
   set_str_field(root, "certificate",         s->certificate);
   set_obj_field(root, "e2eeKeys",            s->e2eeKeys);
   set_i64_num_field(root, "e2eeLatestKeyId", s->e2eeLatestKeyId);

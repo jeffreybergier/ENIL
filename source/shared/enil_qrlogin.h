@@ -36,7 +36,8 @@ typedef struct {
   const volatile int *cancel;
 } enil_qrlogin_callbacks_t;
 
-/* Runs the full flow. account_dir is the per-account folder; session.json is
+/* Requires staging seeded by enil_session_prepare_login before any requests.
+ * Runs the full flow. account_dir is the per-account folder; session.json is
  * written as <account_dir>/session.json on success. Returns 1 on success,
  * 0 on any failure (details logged to stderr / surfaced via on_status).
  * If a usable accessToken is already present, returns 1 immediately. */
