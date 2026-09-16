@@ -7,6 +7,7 @@
 #import "ENILQRImage.h"
 #import "ENILAccount.h"
 #import "XPFoundation.h"
+#import "XPUIKit.h"
 
 static const int kQRPixels = 256;
 
@@ -50,6 +51,7 @@ static const NSInteger kENILTextAlignCenter = 1;
                                 userInfo:nil];
   }
   if ((self = [super initWithNibName:nil bundle:nil])) {
+    [self XP_layoutBelowBars];
     _accountDir = [accountDir copy];
     _expectedMid = [expectedMid copy];  /* nil-safe: copy of nil is nil */
     _delegate = delegate;

@@ -10,6 +10,12 @@
  * -Wunguarded-availability against the iOS 8.4 SDK / 4.3 deployment floor, the
  * same way XPAppKit's XP_* category methods hide -Wdeprecated-declarations. */
 
+@interface UIViewController (XPUIKit)
+/* Keep fixed-frame content below navigation/status bars on iOS 7+.
+ * Earlier iOS versions already lay out this way; leave them unchanged. */
+- (void)XP_layoutBelowBars;
+@end
+
 @interface UIColor (XPUIKit)
 /* The shared chat-surface background: RGB(220, 226, 236), a soft blue-grey.
  * Used behind the (now transparent) message and sticker-picker web views so the

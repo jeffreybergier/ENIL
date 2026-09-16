@@ -6,6 +6,24 @@
 #import "XPUIKit.h"
 #import "XPFoundation.h"   /* ENILLog */
 
+@implementation UIViewController (XPUIKit)
+
+- (void)XP_layoutBelowBars
+{
+  if (![self respondsToSelector:@selector(setEdgesForExtendedLayout:)]) return;
+  /* The runtime guard keeps this iOS-7-only setter off the iOS 6 path. */
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunguarded-availability"
+#endif
+  self.edgesForExtendedLayout = UIRectEdgeNone;
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+}
+
+@end
+
 static id XPUIKitInvokeObjectGetter(id target, SEL selector)
 {
   NSMethodSignature *signature;
