@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { parse } from 'acorn';
 import { generate } from 'astring';
 import { unzipSync } from 'fflate';
+import { adaptNativeMids } from './native-mids.mjs';
 
 const root = new URL('../', import.meta.url);
 const config = JSON.parse(await readFile(new URL('extension.json', import.meta.url), 'utf8'));
@@ -183,6 +184,7 @@ await Promise.all(['ltsm-worker.js', 'ltsm.wasm'].map(name => rm(new URL(name, o
 const files = await inputs();
 const generated = extract(new TextDecoder().decode(files['static/js/ltsmSandbox.js']));
 ast(generated);
+const wasm = adaptNativeMids(files['static/js/ltsm.wasm']);
 await writeFile(new URL('ltsm-worker.js', output), generated);
-await writeFile(new URL('ltsm.wasm', output), files['static/js/ltsm.wasm']);
+await writeFile(new URL('ltsm.wasm', output), wasm);
 console.log(`[build] Generated Worker assets in ${fileURLToPath(output)}`);
