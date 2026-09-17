@@ -16,6 +16,11 @@
 - (void)XP_layoutBelowBars;
 @end
 
+@interface UIDevice (XPUIKit)
+/* Runtime version check using APIs available at the iOS 4.3 floor. */
+- (BOOL)XP_isOperatingSystemAtLeastMajorVersion:(NSInteger)majorVersion;
+@end
+
 @interface UIColor (XPUIKit)
 /* The shared chat-surface background: RGB(220, 226, 236), a soft blue-grey.
  * Used behind the (now transparent) message and sticker-picker web views so the

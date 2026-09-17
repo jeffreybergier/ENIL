@@ -6,6 +6,16 @@
 #import "XPUIKit.h"
 #import "XPFoundation.h"   /* ENILLog */
 
+@implementation UIDevice (XPUIKit)
+
+- (BOOL)XP_isOperatingSystemAtLeastMajorVersion:(NSInteger)majorVersion
+{
+  NSString *systemVersion = [self systemVersion];
+  return ([systemVersion integerValue] >= majorVersion) ? YES : NO;
+}
+
+@end
+
 @implementation UIViewController (XPUIKit)
 
 - (void)XP_layoutBelowBars
