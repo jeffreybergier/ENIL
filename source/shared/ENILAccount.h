@@ -93,6 +93,11 @@ typedef enum {
 + (BOOL)runQRLoginAtPath:(NSString *)accountDir
                 observer:(id <ENILQRLoginObserver>)observer
               cancelFlag:(const volatile int *)cancelFlag;
+/* Isolated Windows test: durable native session, no account promotion/sync.
+ * Existing saved tokens return YES without requesting another login. */
++ (BOOL)runWindowsLoginProbeAtPath:(NSString *)directory
+                         observer:(id <ENILQRLoginObserver>)observer
+                       cancelFlag:(const volatile int *)cancelFlag;
 /* Process-global network-health gate (see enil_health.h). These are sticky
  * failure flags shared across every account and network funnel, so they are
  * class-level — they read no per-instance state. */

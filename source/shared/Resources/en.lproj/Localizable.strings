@@ -199,3 +199,14 @@
 "Windows" = "Windows";
 "Choose a client identity" = "Choose a client identity";
 "Could not save client identity" = "Could not save client identity";
+"Windows login test" = "Windows login test";
+"Windows session saved. Check LINE's logged-in devices on your phone." = "Windows session saved. Check LINE's logged-in devices on your phone.";
+"Preparing Windows login key" = "Preparing Windows login key";
+"Creating native Windows QR session" = "Creating Windows QR code";
+"Enter the PIN in LINE on your phone" = "Enter the PIN in LINE on your phone";
+"Completing Windows login" = "Completing Windows login";
+"Windows login succeeded. Session saved." = "Windows login succeeded. Session saved.";
+"Windows session already saved. No new login requested." = "Windows session already saved. No new login requested.";
+"Windows login stopped. Session state saved; see log for details." = "Windows login stopped. Session state saved; see log for details.";
+
+"Windows desktop" = "Windows desktop";

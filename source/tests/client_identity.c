@@ -82,6 +82,7 @@ static void *parallel_request(void *arg) {
   ENILLineResponse response;
   int i;
   assert(enil_identity_default((const char *)arg, &id));
+  strcpy(id.transport, "chrome-gateway"); /* legacy experiment snapshot */
   assert(enil_identity_bind(&id));
   for (i = 0; i < 5; ++i) {
     response = enil_line_post("/parallel", "[]", id.profile_id);
@@ -108,6 +109,10 @@ static void check_profile(const char *root, const char *profile) {
   snprintf(path, sizeof(path), "%s/session.json", dir);
   assert(!enil_qrlogin_run(dir, NULL)); /* missing staging never defaults to Chrome */
   assert(enil_session_prepare_login(path, profile, NULL));
+  json = enil_session_read(path);
+  snapshot = cJSON_GetObjectItem(json, "clientIdentity");
+  cJSON_ReplaceItemInObjectCaseSensitive(snapshot, "transport", cJSON_CreateString("chrome-gateway"));
+  assert(enil_session_write(path, json)); cJSON_Delete(json);
   assert(!enil_session_prepare_login(path, "chrome", NULL));
   assert(enil_session_bind_identity(path));
   identity = *enil_identity_current();
@@ -189,6 +194,7 @@ int main(int argc, char **argv) {
   assert(cJSON_HasObjectItem(json, "clientIdentity"));
   enil_session_free(&session); cJSON_Delete(json);
   assert(enil_identity_default("desktopwin", &id));
+  assert(strcmp(id.transport, "native-thrift") == 0);
   json = enil_identity_to_json(&id);
   cJSON_ReplaceItemInObjectCaseSensitive(json, "userAgent", cJSON_CreateString("bad\r\nInjected: header"));
   assert(!enil_identity_parse(json, &id)); cJSON_Delete(json);
@@ -200,3 +206,5 @@ int main(int argc, char **argv) {
   puts("Client identity integration checks passed");
   return 0;
 }
+
+cJSON *enil_worker_decrypt(const char *p, cJSON *v) { (void)p; (void)v; assert(0); return NULL; }

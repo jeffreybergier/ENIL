@@ -3,10 +3,10 @@
 
 #include "cJSON.h"
 
-/* Exact session-owned wire identity. Both profiles currently use the Chrome
- * JSON gateway; DESKTOPWIN is an interoperability experiment on that gateway. */
+/* Exact session-owned identity and protocol selection. */
 typedef struct {
   char profile_id[16];
+  char transport[24];
   char application[160];
   char user_agent[256];
   char system_name[64];

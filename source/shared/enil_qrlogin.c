@@ -13,6 +13,7 @@
 #include "enil_session.h"
 #include "enil_worker.h"
 #include "enil_qrlogin.h"
+#include "enil_windows_probe.h"
 #include "enil_cocoa_log.h"
 
 #define SVC    "/api/talk/thrift/LoginQrCode"
@@ -397,10 +398,10 @@ static int unwrap_and_store(cJSON *s, cJSON *meta, const char *fn) {
   /* e2eeKeys: worker returns exactly [{keyId,exportedKey}] — store as-is. */
   set_obj(s, "e2eeKeys", cJSON_Duplicate(u.keys, 1));
   set_num(s, "e2eeLatestKeyId", (double)atoi(kid));
-  store_login_meta(s, meta);
   set_str(s, "e2eeLoginPublicKey", pub);
   set_str(s, "e2eeVersion", jstr_def(meta, "e2eeVersion", "1"));
   set_str(s, "e2eeHashKeyChain", jstr_def(meta, "hashKeyChain", ""));
+  store_login_meta(s, meta);
   set_obj(s, "workerRestoreState", cJSON_Parse(u.worker_restore_state));
   cJSON_DeleteItemFromObject(s, "e2eeKeyCaptureError"); /* recovered/clean */
   enil_worker_unwrap_keychain_free(&u);
@@ -601,6 +602,13 @@ int enil_qrlogin_run(const char *account_dir,
     cJSON_Delete(s);
     return 0;
   }
+  if (!strcmp(identity.transport, "native-thrift")) {
+    cJSON_Delete(s);
+    rc = enil_windows_probe_run(account_dir, cb);
+    if (rc) rc = enil_qrlogin_recover_e2ee(account_dir);
+    enil_identity_bind(NULL);
+    return rc;
+  }
   /* Persist the exact identity before the first LINE request. */
   if (cancelled(cb) || !enil_session_write(path, s)) {
     cJSON_Delete(s);
@@ -700,6 +708,11 @@ int enil_qrlogin_recover_e2ee(const char *account_dir) {
   }
 
   meta = cJSON_GetObjectItem(s, "e2eeLoginMetaData");
+  if (!meta) {
+    cJSON *native = cJSON_GetObjectItem(s, "nativeLoginResult");
+    meta = cJSON_GetObjectItem(native, "10");
+    if (meta) { meta = cJSON_Duplicate(meta, 1); cJSON_AddItemToObject(s, "e2eeLoginMetaData", meta); }
+  }
   if (!meta) {
     LOG("recover_e2ee",
         "no e2eeKeys and no persisted metaData — full re-login required");

@@ -67,16 +67,35 @@ Configure the Worker URL and secret in the app's preferences. The native
 client also accepts `ENIL_WORKER_URL` and `ENIL_WORKER_SECRET` through its
 environment; credentials are not embedded in the committed app source.
 
-When adding an account, choose **Chrome** or **Windows** before requesting the
-QR code. ENIL saves the exact application identity, User-Agent, login device
-names, and gateway version in `session.json`; subsequent requests and
-reauthentication reuse them. Existing sessions default to Chrome.
-Windows is experimental and uses the same Chrome gateway. Its candidate
-profile is `DESKTOPWIN` with User-Agent `Line/9.7.0.3556`, based on LINEJS's
-Windows profile, not a verified capture of the official Windows application.
-LINE's acceptance of that profile and concurrent Chrome/Windows sessions
-still require live testing.
+Each account's `session.json` saves `clientIdentity.profileId` (the client kind),
+`transport`, and the exact application/User-Agent/device values. New Chrome
+sessions use `chrome-gateway`; new Windows desktop sessions use `native-thrift`.
+Missing identity on old sessions retains the frozen Chrome defaults. The earlier
+Windows-header experiment explicitly saved `chrome-gateway` and remains on that
+transport; it is never silently converted into a native session.
 
+Both native apps route Windows QR login, Talk RPCs, token refresh, media identity,
+and event delivery according to that saved snapshot. Talk and polling use Compact
+Thrift inside LEGY encrypted framing; Shop and refresh use their native endpoints.
+The Worker handles framing crypto and E2EE, while the app makes every LINE request.
+**Deploy the updated Worker before using the Windows account transport.**
+
+A successful `.windows-login-probe/session.json` is reused when choosing Windows
+in Add Account, including offline E2EE recovery. No new QR is needed. Windows
+login also retains durable `.native-login-*` pending folders outside disposable
+staging, so cancellation cannot discard issued credentials. Once an account is
+active, its rotating tokens take precedence over old pending copies.
+
+Normal session updates preserve unknown login fields and merge changes against
+the loaded snapshot. Saves are atomic, fsynced, and private (0600). Refresh replies
+are journaled in `session.json.refresh-pending` before applying rotating tokens;
+an interrupted update replays that saved reply without another refresh request.
+Native polling persists separate global/individual cursors as decimal strings.
+
+The protocol definitions are based on pinned LINEJS research (see
+[source/tools/native-schema/generate.py](source/tools/native-schema/generate.py)).
+A standalone [Windows login probe](source/tools/windows-login/README.md) remains
+available for protocol diagnostics.
 See [native development](docs/native-development.md), [outstanding work](PLAN.md),
 and [release instructions](RELEASE.md).
 

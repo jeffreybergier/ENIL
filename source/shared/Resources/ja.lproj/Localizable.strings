@@ -198,3 +198,14 @@
 "Windows" = "Windows";
 "Choose a client identity" = "クライアントの種類を選択";
 "Could not save client identity" = "クライアント情報を保存できませんでした";
+"Windows login test" = "Windowsログインテスト";
+"Windows session saved. Check LINE's logged-in devices on your phone." = "Windowsセッションを保存しました。スマートフォンのLINEでログイン中の端末を確認してください。";
+"Preparing Windows login key" = "Windowsログインの鍵を準備中";
+"Creating native Windows QR session" = "Windows用QRコードを作成中";
+"Enter the PIN in LINE on your phone" = "スマートフォンのLINEに認証番号を入力してください";
+"Completing Windows login" = "Windowsログインを完了中";
+"Windows login succeeded. Session saved." = "Windowsログイン成功。セッションを保存しました。";
+"Windows session already saved. No new login requested." = "Windowsセッションは保存済みです。新しいログインは行いません。";
+"Windows login stopped. Session state saved; see log for details." = "Windowsログインを停止しました。状態は保存済みです。詳細はログをご確認ください。";
+
+"Windows desktop" = "Windows デスクトップ";

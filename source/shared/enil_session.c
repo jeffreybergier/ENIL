@@ -7,6 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <pthread.h>
 #include "enil_session.h"
 #include "enil_api_json.h"
 #include "enil_cocoa_log.h"
@@ -64,18 +67,35 @@ cJSON *enil_session_read(const char *path) {
   return root;
 }
 
+static pthread_key_t bound_path_key;
+static pthread_once_t bound_path_once = PTHREAD_ONCE_INIT;
+static int bound_path_ready;
+static void make_bound_path_key(void) { bound_path_ready = pthread_key_create(&bound_path_key, free) == 0; }
+static int bind_path(const char *path) {
+  char *copy = path ? strdup(path) : NULL; void *old;
+  pthread_once(&bound_path_once, make_bound_path_key);
+  if (!bound_path_ready) { free(copy); return 0; }
+  old = pthread_getspecific(bound_path_key);
+  if (pthread_setspecific(bound_path_key, copy)) { free(copy); return 0; }
+  free(old); return !path || copy != NULL;
+}
+static const char *bound_path(void) {
+  pthread_once(&bound_path_once, make_bound_path_key);
+  return bound_path_ready ? pthread_getspecific(bound_path_key) : NULL;
+}
+
 /* Load a snapshot before the calling account operation touches the network. */
 int enil_session_bind_identity(const char *path) {
   cJSON *root;
   enil_identity_t identity;
   int ok;
-  if (!enil_identity_bind(NULL)) return 0;
+  if (!bind_path(NULL) || !enil_identity_bind(NULL)) return 0;
   root = enil_session_read(path);
   if (!cJSON_IsObject(root)) { cJSON_Delete(root); return 0; }
   ok = enil_identity_parse(cJSON_GetObjectItemCaseSensitive(root, "clientIdentity"),
                            &identity);
   cJSON_Delete(root);
-  return ok && enil_identity_bind(&identity);
+  return ok && enil_identity_bind(&identity) && bind_path(path);
 }
 
 int enil_session_prepare_login(const char *path, const char *profile_id,
@@ -129,18 +149,22 @@ int enil_session_write(const char *path, cJSON *root) {
   char *text, *tmp;
   size_t plen, tlen;
   FILE *f;
+  int fd;
   if (!path || !root) { LOG("write", "NULL argument"); return 0; }
   text = cJSON_Print(root);
   if (!text) { LOG("write", "cJSON_Print failed"); return 0; }
   tlen = strlen(text);
   plen = strlen(path);
-  tmp = (char *)malloc(plen + 5);
+  tmp = (char *)malloc(plen + 12);
   if (!tmp) { LOG("write", "alloc failed"); free(text); return 0; }
   memcpy(tmp, path, plen);
-  memcpy(tmp + plen, ".tmp", 5);
-  f = fopen(tmp, "wb");
+  memcpy(tmp + plen, ".tmp.XXXXXX", 12);
+  fd = mkstemp(tmp);
+  if (fd < 0) { free(tmp); free(text); return 0; }
+  f = fdopen(fd, "wb");
+  if (!f) { close(fd); unlink(tmp); free(tmp); free(text); return 0; }
   if (!f) { LOG("write", "cannot open tmp for writing"); free(tmp); free(text); return 0; }
-  if (fwrite(text, 1, tlen, f) != tlen || fflush(f) != 0) {
+  if (fwrite(text, 1, tlen, f) != tlen || fflush(f) != 0 || fsync(fileno(f)) != 0) {
     LOG("write", "write failed");
     fclose(f); unlink(tmp); free(tmp); free(text); return 0;
   }
@@ -241,8 +265,7 @@ static void set_obj_field(cJSON *root, const char *key, cJSON *value) {
 }
 
 /* ============================================================================
- * Populate session_t from a cJSON tree. Nested cJSON fields are shared
- * (non-owning) references — do not free them while root is alive.
+ * Populate an owning session_t from a cJSON tree. Every field is copied.
  * Returns 1 on success.
  * ==========================================================================*/
 int enil_session_parse(cJSON *root, session_t *out) {
@@ -255,6 +278,7 @@ int enil_session_parse(cJSON *root, session_t *out) {
   }
   out->accessToken           = dup_str_field(root, "accessToken");
   if (!out->accessToken) { LOG("parse", "missing accessToken"); return 0; }
+  out->snapshot = cJSON_Duplicate(root, 1);
   out->refreshToken          = dup_str_field(root, "refreshToken");
   out->mid                   = dup_str_field(root, "mid");
   out->displayName           = dup_str_field(root, "displayName");
@@ -275,6 +299,13 @@ int enil_session_parse(cJSON *root, session_t *out) {
   out->workerRestoreState    = cJSON_GetObjectItem(root, "workerRestoreState");
   out->refreshApiRetryPolicy = cJSON_GetObjectItem(root, "refreshApiRetryPolicy");
   out->lastPartialFullSyncs  = cJSON_GetObjectItem(root, "lastPartialFullSyncs");
+  /* Deep-copy nested cJSON so the session_t owns them once root is freed. */
+  out->e2eeKeys              = out->e2eeKeys              ? cJSON_Duplicate(out->e2eeKeys, 1)              : NULL;
+  out->e2eeLoginMetaData     = out->e2eeLoginMetaData     ? cJSON_Duplicate(out->e2eeLoginMetaData, 1)     : NULL;
+  out->encryptedAccessTokens = out->encryptedAccessTokens ? cJSON_Duplicate(out->encryptedAccessTokens, 1) : NULL;
+  out->workerRestoreState    = out->workerRestoreState    ? cJSON_Duplicate(out->workerRestoreState, 1)    : NULL;
+  out->refreshApiRetryPolicy = out->refreshApiRetryPolicy ? cJSON_Duplicate(out->refreshApiRetryPolicy, 1) : NULL;
+  out->lastPartialFullSyncs  = out->lastPartialFullSyncs  ? cJSON_Duplicate(out->lastPartialFullSyncs, 1)  : NULL;
   return 1;
 }
 
@@ -288,13 +319,6 @@ int enil_session_load(const char *path, session_t *out) {
   root = enil_session_read(path);
   if (!root) return 0;
   if (!enil_session_parse(root, out)) { cJSON_Delete(root); return 0; }
-  /* Deep-copy nested cJSON so the session_t owns them once root is freed. */
-  out->e2eeKeys              = out->e2eeKeys              ? cJSON_Duplicate(out->e2eeKeys, 1)              : NULL;
-  out->e2eeLoginMetaData     = out->e2eeLoginMetaData     ? cJSON_Duplicate(out->e2eeLoginMetaData, 1)     : NULL;
-  out->encryptedAccessTokens = out->encryptedAccessTokens ? cJSON_Duplicate(out->encryptedAccessTokens, 1) : NULL;
-  out->workerRestoreState    = out->workerRestoreState    ? cJSON_Duplicate(out->workerRestoreState, 1)    : NULL;
-  out->refreshApiRetryPolicy = out->refreshApiRetryPolicy ? cJSON_Duplicate(out->refreshApiRetryPolicy, 1) : NULL;
-  out->lastPartialFullSyncs  = out->lastPartialFullSyncs  ? cJSON_Duplicate(out->lastPartialFullSyncs, 1)  : NULL;
   cJSON_Delete(root);
   return 1;
 }
@@ -304,6 +328,7 @@ int enil_session_load(const char *path, session_t *out) {
  * ==========================================================================*/
 void enil_session_free(session_t *s) {
   if (!s) return;
+  cJSON_Delete(s->snapshot);
   free(s->accessToken);
   free(s->refreshToken);
   free(s->mid);
@@ -328,11 +353,12 @@ void enil_session_free(session_t *s) {
 cJSON *enil_session_to_json(const session_t *s) {
   cJSON *root;
   if (!s) { LOG("to_json", "NULL session"); return NULL; }
-  root = cJSON_CreateObject();
+  root = s->snapshot ? cJSON_Duplicate(s->snapshot, 1) : cJSON_CreateObject();
   if (!root) return NULL;
   {
     cJSON *identity = enil_identity_to_json(&s->clientIdentity);
     if (!identity) { cJSON_Delete(root); return NULL; }
+    cJSON_DeleteItemFromObject(root, "clientIdentity");
     cJSON_AddItemToObject(root, "clientIdentity", identity);
   }
   set_str_field(root, "certificate",         s->certificate);
@@ -355,6 +381,7 @@ cJSON *enil_session_to_json(const session_t *s) {
   set_obj_field(root, "workerRestoreState",  s->workerRestoreState);
   set_obj_field(root, "refreshApiRetryPolicy", s->refreshApiRetryPolicy);
   set_obj_field(root, "lastPartialFullSyncs",  s->lastPartialFullSyncs);
+  cJSON_DeleteItemFromObject(root, "needsReauth");
   if (s->needsReauth) cJSON_AddBoolToObject(root, "needsReauth", 1);
   return root;
 }
@@ -387,7 +414,7 @@ char *enil_session_get_partial_full_syncs_json(const char *path) {
 int enil_session_update_partial_full_syncs(const char *path,
                                            cJSON      *target_categories) {
   session_t s;
-  cJSON    *child, *root;
+  cJSON    *child;
   int       changed = 0;
   if (!path || !cJSON_IsObject(target_categories)) return 0;
   if (!enil_session_load(path, &s)) return 0;
@@ -413,12 +440,9 @@ int enil_session_update_partial_full_syncs(const char *path,
   }
 
   if (!changed) { enil_session_free(&s); return 0; }
-  root = enil_session_to_json(&s);
+  changed = enil_session_save(path, &s);
   enil_session_free(&s);
-  if (!root) return 0;
-  enil_session_write(path, root);
-  cJSON_Delete(root);
-  return 1;
+  return changed;
 }
 
 /* ============================================================================
@@ -427,7 +451,7 @@ int enil_session_update_partial_full_syncs(const char *path,
  * ==========================================================================*/
 int enil_session_reset_partial_full_syncs(const char *path) {
   session_t s;
-  cJSON    *root;
+  int ok;
   if (!path) return 0;
   if (!enil_session_load(path, &s)) return 0;
   if (!s.lastPartialFullSyncs ||
@@ -438,12 +462,9 @@ int enil_session_reset_partial_full_syncs(const char *path) {
   }
   if (s.lastPartialFullSyncs) cJSON_Delete(s.lastPartialFullSyncs);
   s.lastPartialFullSyncs = cJSON_CreateObject();
-  root = enil_session_to_json(&s);
+  ok = enil_session_save(path, &s);
   enil_session_free(&s);
-  if (!root) return 0;
-  enil_session_write(path, root);
-  cJSON_Delete(root);
-  return 1;
+  return ok;
 }
 
 /* ============================================================================
@@ -453,16 +474,13 @@ int enil_session_reset_partial_full_syncs(const char *path) {
  * ==========================================================================*/
 int enil_session_set_reauth_needed(const char *path) {
   session_t s;
-  cJSON *root;
+  int ok;
   if (!path) { LOG("set_reauth_needed", "NULL path"); return 0; }
   if (!enil_session_load(path, &s)) return 0;
   s.needsReauth = 1;
-  root = enil_session_to_json(&s);
+  ok = enil_session_save(path, &s);
   enil_session_free(&s);
-  if (!root) return 0;
-  enil_session_write(path, root);
-  cJSON_Delete(root);
-  return 1;
+  return ok;
 }
 
 /* Returns 1 if session.json is flagged needsReauth, 0 otherwise. */
@@ -491,13 +509,70 @@ int enil_session_get_sse_enabled(const char *path) {
 }
 
 int enil_session_set_sse_enabled(const char *path, int enabled) {
-  cJSON *root;
-  if (!path) { LOG("set_sse_enabled", "NULL path"); return 0; }
-  root = enil_session_read(path);
-  if (!root) return 0;
-  cJSON_DeleteItemFromObject(root, "sseEnabled");
-  cJSON_AddBoolToObject(root, "sseEnabled", enabled ? 1 : 0);
-  enil_session_write(path, root);
-  cJSON_Delete(root);
-  return 1;
+  cJSON *patch;int ok;
+  if(!path)return 0;
+  patch=cJSON_CreateObject();cJSON_AddBoolToObject(patch,"sseEnabled",enabled?1:0);
+  ok=enil_session_patch(path,patch);cJSON_Delete(patch);return ok;
+}
+
+/* Serialize account updates without replaying stale credentials from a reader.
+ * Network operations occur outside this mutex. Only the local merge is locked. */
+static pthread_mutex_t session_mutex = PTHREAD_MUTEX_INITIALIZER;
+int enil_session_save(const char *path, const session_t *session) {
+  cJSON *next=enil_session_to_json(session), *current, *item, *baseline=NULL;
+  session_t original; int ok=0;
+  if(!next)return 0;
+  if(session->snapshot && enil_session_parse(session->snapshot,&original)) {
+    baseline=enil_session_to_json(&original);enil_session_free(&original);
+    if(!baseline){cJSON_Delete(next);return 0;}
+  }
+  pthread_mutex_lock(&session_mutex);
+  current=enil_session_read(path);
+  if(!current)current=cJSON_CreateObject();
+  for(item=next->child;item;item=item->next) {
+    cJSON *old=cJSON_GetObjectItemCaseSensitive(baseline,item->string);
+    if(old && cJSON_Compare(old,item,1))continue;
+    cJSON_DeleteItemFromObjectCaseSensitive(current,item->string);
+    cJSON_AddItemToObject(current,item->string,cJSON_Duplicate(item,1));
+  }
+  for(item=baseline?baseline->child:NULL;item;item=item->next)
+    if(!cJSON_HasObjectItem(next,item->string))cJSON_DeleteItemFromObjectCaseSensitive(current,item->string);
+  if(current)ok=enil_session_write(path,current);
+  cJSON_Delete(current);pthread_mutex_unlock(&session_mutex);cJSON_Delete(next);cJSON_Delete(baseline);return ok;
+}
+int enil_session_patch(const char *path,cJSON *patch) {
+  cJSON *root,*item;int ok=0;
+  pthread_mutex_lock(&session_mutex);root=enil_session_read(path);
+  if(root) {
+    for(item=patch?patch->child:NULL;item;item=item->next) {
+      cJSON_DeleteItemFromObjectCaseSensitive(root,item->string);
+      cJSON_AddItemToObject(root,item->string,cJSON_Duplicate(item,1));
+    }
+    ok=enil_session_write(path,root);
+  }
+  cJSON_Delete(root);pthread_mutex_unlock(&session_mutex);return ok;
+}
+
+char *enil_session_bound_access_token(void) {
+  const char *path=bound_path(); const enil_identity_t *current=enil_identity_current();
+  cJSON *root,*token; enil_identity_t saved; char *copy=NULL;
+  if(!path||!current)return NULL;
+  root=enil_session_read(path);
+  if(enil_identity_parse(cJSON_GetObjectItemCaseSensitive(root,"clientIdentity"),&saved) &&
+     !memcmp(current,&saved,sizeof(saved))) {
+    token=cJSON_GetObjectItemCaseSensitive(root,"accessToken");
+    if(cJSON_IsString(token))copy=strdup(token->valuestring);
+  }
+  cJSON_Delete(root);return copy;
+}
+int enil_session_accept_next_access(const char *previous,const char *next) {
+  const char *path=bound_path();cJSON *root,*token;int ok=0;
+  if(!path||!previous||!next||!*next||strpbrk(next,"\r\n"))return 0;
+  pthread_mutex_lock(&session_mutex);root=enil_session_read(path);
+  token=cJSON_GetObjectItemCaseSensitive(root,"accessToken");
+  if(cJSON_IsString(token)&&!strcmp(token->valuestring,previous)) {
+    cJSON_ReplaceItemInObjectCaseSensitive(root,"accessToken",cJSON_CreateString(next));
+    ok=enil_session_write(path,root);
+  } else if(cJSON_IsString(token)) ok=1; /* another request already rotated it */
+  cJSON_Delete(root);pthread_mutex_unlock(&session_mutex);return ok;
 }

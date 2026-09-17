@@ -697,6 +697,7 @@ extern const size_t       sticon_row_fields_count;
  * enil_session_free. */
 typedef struct {
   enil_identity_t clientIdentity;
+  cJSON *snapshot; /* complete original session, including native recovery data */
   char      *accessToken;
   char      *refreshToken;
   char      *mid;

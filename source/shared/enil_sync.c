@@ -107,13 +107,9 @@ static void save_restore_state(const char *session_path,
                                 session_t *session,
                                 cJSON *new_state)
 {
-  cJSON *root;
   if (session->workerRestoreState) cJSON_Delete(session->workerRestoreState);
   session->workerRestoreState = cJSON_Duplicate(new_state, 1);
-  root = enil_session_to_json(session);
-  if (!root) return;
-  enil_session_write(session_path, root);
-  cJSON_Delete(root);
+  enil_session_save(session_path, session);
 }
 
 /* Find exportedKey for a given keyId in the e2eeKeys array. Returns NULL if missing. */

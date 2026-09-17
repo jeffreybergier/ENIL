@@ -91,7 +91,7 @@ static const NSInteger kENILTextAlignCenter = 1;
   UIButton *windows = [UIButton buttonWithType:UIButtonTypeRoundedRect];
   windows.frame = CGRectMake((w - 210.0f) / 2.0f, 175.0f, 210.0f, 44.0f);
   windows.autoresizingMask = chrome.autoresizingMask;
-  [windows setTitle:NSLocalizedString(@"Windows", nil) forState:UIControlStateNormal];
+  [windows setTitle:NSLocalizedString(@"Windows desktop", nil) forState:UIControlStateNormal];
   [windows addTarget:self action:@selector(chooseClient:) forControlEvents:UIControlEventTouchUpInside];
   windows.tag = 1;
   windows.hidden = self.expectedMid != nil;
@@ -99,7 +99,8 @@ static const NSInteger kENILTextAlignCenter = 1;
   self.windowsButton = windows;
 
   UILabel *status = [[UILabel alloc] initWithFrame:
-    CGRectMake(16.0f, 40.0f + kQRPixels + 16.0f, w - 32.0f, 22.0f)];
+    CGRectMake(16.0f, 40.0f + kQRPixels + 8.0f, w - 32.0f, 60.0f)];
+  status.numberOfLines = 3;
   status.autoresizingMask = UIViewAutoresizingFlexibleWidth;
   status.textAlignment = kENILTextAlignCenter;
   status.font = [UIFont systemFontOfSize:15.0];
@@ -109,7 +110,7 @@ static const NSInteger kENILTextAlignCenter = 1;
   self.statusLabel = status;
 
   UILabel *pin = [[UILabel alloc] initWithFrame:
-    CGRectMake(16.0f, 40.0f + kQRPixels + 44.0f, w - 32.0f, 40.0f)];
+    CGRectMake(16.0f, 40.0f + kQRPixels + 72.0f, w - 32.0f, 40.0f)];
   pin.autoresizingMask = UIViewAutoresizingFlexibleWidth;
   pin.textAlignment = kENILTextAlignCenter;
   pin.font = [UIFont boldSystemFontOfSize:30.0];
@@ -154,9 +155,9 @@ static const NSInteger kENILTextAlignCenter = 1;
 - (void)loginThreadMain
 {
   @autoreleasepool {
-    BOOL ok = [ENILAccount runQRLoginAtPath:self.accountDir
-                                   observer:self
-                                 cancelFlag:&cancelFlag_];
+    BOOL ok;
+    ok = [ENILAccount runQRLoginAtPath:self.accountDir
+                            observer:self cancelFlag:&cancelFlag_];
     [self performSelectorOnMainThread:@selector(finishWithResult:)
                            withObject:[NSNumber numberWithBool:ok]
                         waitUntilDone:NO];
@@ -167,7 +168,7 @@ static const NSInteger kENILTextAlignCenter = 1;
 
 - (void)qrLoginDidEmitURL:(NSString *)url
 {
-  if (![url length]) return;
+  if (self.done || ![url length]) return;
   self.qrImageView.image = [ENILQRImage imageForString:url pixelSize:kQRPixels];
   self.statusLabel.text =
     NSLocalizedString(@"Scan with LINE on your phone", nil);
@@ -175,7 +176,7 @@ static const NSInteger kENILTextAlignCenter = 1;
 
 - (void)qrLoginDidEmitPIN:(NSString *)pin
 {
-  if (![pin length]) return;
+  if (self.done || ![pin length]) return;
   self.pinLabel.text = pin;
   self.pinLabel.hidden = NO;
 }
@@ -186,7 +187,7 @@ static const NSInteger kENILTextAlignCenter = 1;
  * format key with %d/%d placeholders the strings file owns. */
 - (void)qrLoginDidEmitStatus:(NSString *)status
 {
-  if (![status length]) return;
+  if (self.done || ![status length]) return;
   int cur = 0, total = 0;
   if (sscanf([status UTF8String], "waiting for scan (%d/%d)", &cur, &total) == 2) {
     self.statusLabel.text = [NSString stringWithFormat:

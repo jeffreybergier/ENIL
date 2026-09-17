@@ -4,9 +4,8 @@
 #include "cJSON.h"
 #include "enil_api_types.h"
 
-/* Parses an existing cJSON tree into a session_t. Takes shared (non-owning)
- * references to nested cJSON; do not cJSON_Delete those — they live in root.
- * Returns 1 on success. */
+/* Parses an existing cJSON tree into an owning session_t. All fields are
+ * copied; release with enil_session_free. Returns 1 on success. */
 int  enil_session_parse(cJSON *root, session_t *out);
 
 /* Loads session.json from disk, parses, and copies/dups all fields so the
@@ -26,10 +25,17 @@ cJSON *enil_session_read(const char *path);
 
 /* Serialises root and atomically replaces path. Returns 1 on success. */
 int enil_session_write(const char *path, cJSON *root);
+/* Merge changes relative to the loaded snapshot, preserving concurrent token
+ * rotation and unknown fields. Atomic, private, fsynced replacement. */
+int enil_session_save(const char *path, const session_t *session);
+int enil_session_patch(const char *path, cJSON *patch);
 
 /* Bind the saved identity for the calling account operation. Clears any old
  * binding on failure. Also works for a staged session without an access token. */
 int enil_session_bind_identity(const char *path);
+/* Native APIs reload rotating tokens from the bound account. */
+char *enil_session_bound_access_token(void);
+int enil_session_accept_next_access(const char *previous, const char *next);
 /* Seed a fresh QR session. Reauthentication copies only the old identity, not
  * credentials/QR keys. Never overwrites an existing staged session. */
 int enil_session_prepare_login(const char *path, const char *profile_id,

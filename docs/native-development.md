@@ -735,10 +735,56 @@ fixture server. Install `libcjson-dev`, `libcurl4-openssl-dev`, `libssl-dev`,
 crypto results; it does not contact LINE or verify live Windows compatibility.
 
 Client identity is an exact snapshot in `session.json` (`clientIdentity`).
-Missing identity on a legacy session resolves to the frozen Chrome profile;
-invalid or unknown identities fail validation. The QR UI seeds fresh staging
-with Chrome/Windows selection, or copies only the old identity for reauthentication.
-Both profiles currently use the Chrome JSON gateway and its V2 QR flow.
+`profileId` identifies the client kind; `transport` selects its complete protocol.
+Missing identity resolves to the frozen Chrome profile; unknown identities fail.
+New Windows sessions use `native-thrift`. Existing `chrome-gateway` snapshots,
+including the old Windows-header experiment, keep their original behavior.
+
+`enil_native.c` adapts the existing named-JSON Talk call sites to Compact Thrift
+using `enil_thrift.c` and its checked-in schema. Talk `/S4` and sync `/SYNC4` use
+LEGY encryption and `https://gf.line.naver.jp/enc`. Shop `/TSHOP4` and refresh
+`/EXT/auth/tokenrefresh/v1` use `https://legy.line-apps.com`. The native transport
+sends no Chrome Origin, cookies, HMAC, or Chrome-version headers. OBS already uses
+the per-session application and User-Agent. E2EE bytes are base64 at the JSON
+boundary; i64 revisions remain exact decimal strings.
+
+The Worker adds `/transport/legy/encode` and `/transport/legy/decode`. Deploy it
+before the native app. It performs crypto only; LINE requests remain in ENIL.
+`enil_sse.c` branches to native sync polling for Windows, then dispatches the same
+message/full-sync/partial-sync/error callbacks. Global and individual cursors are
+saved only after successful handling. Idle poll timeouts reconnect without
+invalidating the session; permanent errors use the existing account error flow.
+
+`enil_windows_probe.c` also supplies the production native QR flow. Both UIs use
+`ENILAccount` to keep pending Windows logins outside `.staging-*` cleanup.
+The successful historical `.windows-login-probe` is importable without another
+QR. Metadata field 10 supplies offline E2EE keychain recovery. Raw login replies
+and private QR state are saved before optional unwrap. An uncertain token request
+is never automatically repeated. Active sessions never restore older pending
+credentials over rotated tokens.
+
+`enil_session_save` merges only fields changed from a normalized loaded snapshot,
+so a stale sync save cannot undo token rotation. Unknown native fields survive.
+`enil_session_write` uses a unique 0600 temporary file, fsync, and atomic rename.
+Refresh responses have a private recovery journal until the session commit
+succeeds. `x-line-next-access` inside LEGY responses is also persisted, and native
+calls reload the bound account's access token.
+
+Host protocol tests require the dependencies in
+`source/tools/windows-login/requirements.txt`, plus the normal C host libraries:
+
+```sh
+python -m pip install -r source/tools/windows-login/requirements.txt
+python -B -m unittest discover -s source/tests -p 'test_native*.py' -v
+python -B -m unittest discover -s source/tests -p test_windows_login_probe.py -v
+```
+
+These use synthetic tokens and loopback traffic. Apache Thrift independently
+checks message bytes and i64 handling. Tests cover native routes/headers, malformed
+replies, polling success/failure cursors, stale-save token preservation, and
+interrupted refresh/login recovery. Live read-only validation of the saved
+Windows session covered profile, contacts, chats/history, E2EE negotiation,
+purchases, and sync; sending still needs a user-driven device test.
 
 Account operations bind a copied identity to their thread before network work,
 alongside the existing health binding. `enil_line_post` requires that binding;

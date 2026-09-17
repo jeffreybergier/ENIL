@@ -6,7 +6,7 @@
 /* Frozen migration value. Introduce a separate default if new Chrome logins
  * ever need newer values; never change this fallback for old sessions. */
 static const enil_identity_t legacy_chrome_identity = {
-  "chrome", "CHROMEOS\t3.7.2\tChrome_OS",
+  "chrome", "chrome-gateway", "CHROMEOS\t3.7.2\tChrome_OS",
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
   "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
   "CHROMEOS", "CHROME", "3.7.2"
@@ -14,7 +14,7 @@ static const enil_identity_t legacy_chrome_identity = {
 /* Reference profile: evex-dev/linejs ef6c3d9, devices.ts / request/mod.ts.
  * Persist the resolved values; future default updates must not mutate sessions. */
 static const enil_identity_t windows_identity = {
-  "desktopwin", "DESKTOPWIN\t9.7.0.3556\tWINDOWS\t10.0.0-NT-x64",
+  "desktopwin", "native-thrift", "DESKTOPWIN\t9.7.0.3556\tWINDOWS\t10.0.0-NT-x64",
   "Line/9.7.0.3556", "WINDOWS", "DESKTOPWIN", "3.7.2"
 };
 
@@ -53,7 +53,8 @@ int enil_identity_parse(const cJSON *json, enil_identity_t *out) {
   transport = cJSON_GetObjectItemCaseSensitive(json, "transport");
   if (!cJSON_IsNumber(version) || version->valuedouble != 1 ||
       !cJSON_IsString(transport) ||
-      strcmp(transport->valuestring, "chrome-gateway") != 0) return 0;
+      (strcmp(transport->valuestring, "chrome-gateway") != 0 &&
+       strcmp(transport->valuestring, "native-thrift") != 0)) return 0;
   memset(&value, 0, sizeof(value));
   if (!read_string(json, "profileId", value.profile_id, sizeof(value.profile_id), 0) ||
       !enil_identity_default(value.profile_id, &known) ||
@@ -63,6 +64,8 @@ int enil_identity_parse(const cJSON *json, enil_identity_t *out) {
       !read_string(json, "modelName", value.model_name, sizeof(value.model_name), 0) ||
       !read_string(json, "gatewayVersion", value.gateway_version, sizeof(value.gateway_version), 0))
     return 0;
+  if (!strcmp(transport->valuestring, "native-thrift") && strcmp(value.profile_id, "desktopwin")) return 0;
+  strcpy(value.transport, transport->valuestring);
   prefix = strcmp(value.profile_id, "chrome") == 0 ? "CHROMEOS\t" : "DESKTOPWIN\t";
   if (strncmp(value.application, prefix, strlen(prefix)) != 0) return 0;
   *out = value;
@@ -75,7 +78,7 @@ cJSON *enil_identity_to_json(const enil_identity_t *identity) {
   json = cJSON_CreateObject();
   if (!json) return NULL;
   if (!cJSON_AddNumberToObject(json, "schemaVersion", 1) ||
-      !cJSON_AddStringToObject(json, "transport", "chrome-gateway") ||
+      !cJSON_AddStringToObject(json, "transport", identity->transport) ||
       !cJSON_AddStringToObject(json, "profileId", identity->profile_id) ||
       !cJSON_AddStringToObject(json, "application", identity->application) ||
       !cJSON_AddStringToObject(json, "userAgent", identity->user_agent) ||
