@@ -36,9 +36,10 @@ versions available. Review the extractor and tests before updating the pin.
 
 The committed integration tests use synthetic requests and freshly generated
 keys; they do not include captured account keys or messages. They cover real
-WASM signing, key generation, reset, and portable key restoration. Routing tests
-cover the E2EE endpoints with mocks; full real-message E2EE fixtures remain in
-the original research repo.
+WASM signing, key generation, reset, and portable key restoration. Independent
+Node X25519/AES-GCM and Compact Thrift fixtures verify E2EE keychain recovery,
+native user/group/room message decryption, encryption, and rejection of tampered
+messages. Routing tests also cover the endpoints with mocks.
 
 ## Local Wrangler
 
@@ -79,3 +80,35 @@ required for building. The tests use their own test-only secret.
 
 The repository excludes downloaded LINE code and binaries; the deployed Worker
 bundle still includes the extracted JavaScript and WASM it needs at runtime.
+
+## Native Windows transport crypto
+
+`POST /transport/legy/encode` accepts `{path, body, accessToken}` with a base64
+Compact Thrift body. It returns `{body, key, xLcs}`: LEGY 7 encrypted framing, the
+per-request AES key, and the RSA-OAEP key header. The native app sends that body to
+LINE itself, then calls `POST /transport/legy/decode` with `{key, body}`. Decode
+checks the framing/checksum/padding and returns `{body, headers, status}`.
+Both routes require the existing Worker secret. No LINE network requests or
+account state are stored by these endpoints. Request/response bodies and keys
+must never be logged. Deploy this Worker before enabling native Windows accounts
+in the updated apps. Tests use synthetic framing and independent Node crypto.
+
+### Native IDs in E2EE authentication data
+
+LINE's Chrome LTSM runtime decrypts protected Chrome MIDs before building the
+E2EE V2 authentication data. Native Talk returns literal MIDs instead. Feeding
+those into the Chrome MID decoder raises `Ciphertext MAC is invalid` before
+message encryption/decryption even begins.
+
+`scripts/native-mids.mjs` adds a native-ID branch to the pinned WASM MID helper.
+It accepts only `u`, `c`, or `r` followed by exactly 32 lowercase hexadecimal
+digits and supplies those literal bytes as the identifier's authentication
+data. All other inputs retain the original Chrome decoder. Message AES-GCM
+authentication remains intact, and existing exported keys/restore state work
+without another login or an app update.
+
+The build verifies the upstream WASM hash before adapting it and separately
+verifies the helper's exact body hash/private ABI. An upstream update must
+explicitly review the adapter. Tests check that every other function and the
+original Chrome instruction sequence remain unchanged. Generated WASM stays
+out of Git; the deploy build reproduces the adaptation from verified inputs.

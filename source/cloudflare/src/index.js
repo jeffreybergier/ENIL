@@ -1,3 +1,4 @@
+import { legyEncode, legyDecode } from "./legy.js";
 import {
   ensureInit,
   computeHmac,
@@ -594,6 +595,15 @@ export default {
 
       const authError = checkAuth(request, env);
       if (authError) return new Response(authError, { status: 401 });
+
+      if ((pathname === "/transport/legy/encode" || pathname === "/transport/legy/decode") && request.method === "POST") {
+        const text = await request.text();
+        if (text.length > MAX_PAYLOAD_SIZE) return badRequest("payload too large");
+        try {
+          const payload = JSON.parse(text);
+          return Response.json(await (pathname.endsWith("/encode") ? legyEncode(payload) : legyDecode(payload)));
+        } catch (_) { return badRequest("invalid LEGY payload"); }
+      }
 
       if (pathname === "/sign" && request.method === "POST") {
         await ensureInit();
