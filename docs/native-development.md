@@ -732,7 +732,7 @@ these tests do not produce a native debug/release test binary.
 It also runs `make test-client-identity`, which compiles the native session and
 network code against host libraries and redirects all HTTP traffic to a local
 fixture server. Install `libcjson-dev`, `libcurl4-openssl-dev`, `libssl-dev`,
-`pkg-config`, and a host C compiler for this check. It uses synthetic tokens and
+`libsqlite3-dev`, `zlib1g-dev`, `pkg-config`, and a host C compiler for these checks. It uses synthetic tokens and
 crypto results; it does not contact LINE or verify live Windows compatibility.
 
 Client identity is an exact snapshot in `session.json` (`clientIdentity`).
@@ -748,13 +748,29 @@ LEGY encryption and `https://gf.line.naver.jp/enc`. Shop `/TSHOP4` and refresh
 sends no Chrome Origin, cookies, HMAC, or Chrome-version headers. OBS already uses
 the per-session application and User-Agent. E2EE bytes are base64 at the JSON
 boundary; i64 revisions remain exact decimal strings.
+The native `sendChatRemoved` adapter omits the gateway-only last-read timestamp;
+native Talk's optional fourth field is a byte session ID, not that timestamp.
 
 The Worker adds `/transport/legy/encode` and `/transport/legy/decode`. Deploy it
 before the native app. It performs crypto only; LINE requests remain in ENIL.
 `enil_sse.c` branches to native sync polling for Windows, then dispatches the same
 message/full-sync/partial-sync/error callbacks. Global and individual cursors are
-saved only after successful handling. Idle poll timeouts reconnect without
-invalidating the session; permanent errors use the existing account error flow.
+saved only after successful handling. Event callbacks report persistence errors
+to the poller; message or cursor write failures retain the last saved revision
+and stop delivery of later operations in that response. Message inserts and
+their unread-count changes commit together so redelivery does not double-count.
+Reactions to messages outside the local history cache are successful no-ops;
+actual database read/write failures still retain the cursor for retry.
+Full-sync responses stop event delivery
+without advancing any cursor and schedule the account's full data sync. That
+sync captures its operation revision before fetching data and commits it only
+after success; fetch/write failures keep the previous cursor for retry. Each
+account resumes polling from its own worker completion, so a concurrent token
+refresh or another account's progress notification cannot resume it early.
+Wake/reconnect cancels an outstanding native poll, including either LEGY Worker
+request, and retries immediately without consuming the failure budget or setting
+the Worker health gate. Idle poll timeouts reconnect without invalidating
+the session; permanent errors use the existing account error flow.
 
 `enil_native_login.c` supplies the production native QR flow and uses the shared
 Compact Thrift encoder/decoder in `enil_thrift.c`. `enil_login_store.c` owns the
@@ -771,9 +787,19 @@ active login ID also prevents replay if activation was interrupted before
 retirement. Older reauth attempts without a baseline ID cannot replace an active
 account. Failed sign-ins offer Retry saved login / Start new QR; the explicit
 start-new action retires the previous attempt without deleting its evidence.
+The shared `enil_qrlogin_run_user_attempt` entry point clears a prior Worker
+failure once when the user starts, retries, or restarts login. A failed request
+closes the gate again. Automatic key recovery on account open does not clear it.
 
 `enil_session_save` merges only fields changed from a normalized loaded snapshot,
 so a stale sync save cannot undo token rotation. Unknown native fields survive.
+It rejects snapshots from a superseded `loginId` and refuses to recreate a removed
+account. Account startup persists a login ID for legacy sessions before starting
+background work, so the first refresh cannot invalidate in-flight send or sync
+snapshots merely by assigning that ID. The generation check, merge, and write
+share a lock with activation and other session writes. Activation also retires
+the old refresh journal under that lock, before a refresh of the newly activated
+login can write its journal.
 `enil_session_write` uses a unique 0600 temporary file, fsync, and atomic rename.
 Refresh responses have a private recovery journal with the owning `loginId`
 and a unique `refreshId`. The session commits `refreshJournalId` with its new

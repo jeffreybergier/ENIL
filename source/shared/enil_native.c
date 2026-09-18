@@ -50,6 +50,8 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
   int len, encrypted, contacts = 0;
   if (!identity || strcmp(identity->transport, "native-thrift") || !path || !body || !token)
     return out;
+  if (cancel && *cancel)
+    return out;
   bound_token = enil_session_bound_access_token();
   if (bound_token)
     token = bound_token;
@@ -91,6 +93,14 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
     method = "getContacts";
     contacts = 1;
   }
+  if (!strcmp(method, "sendChatRemoved")) {
+    /* The gateway's fourth argument is lastReadMessageTime. Native Talk's
+     * fourth field is an optional byte sessionId, not a timestamp. Omit it,
+     * as for sendChatChecked; preserve seq, chatMid, and lastMessageId. */
+    if (!cJSON_IsArray(args) || cJSON_GetArraySize(args) != 4)
+      goto done;
+    cJSON_DeleteItemFromArray(args, 3);
+  }
   if (!enil_thrift_encode(method, args, &request)) {
     ENIL_LOG("Native.post", "unsupported or invalid request: %s", method);
     goto done;
@@ -103,12 +113,12 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
     cJSON_AddStringToObject(payload, "path", endpoint);
     cJSON_AddStringToObject(payload, "body", base64);
     cJSON_AddStringToObject(payload, "accessToken", token);
-    encoded = enil_worker_decrypt("/transport/legy/encode", payload);
+    encoded = enil_worker_decrypt_ex("/transport/legy/encode", payload, cancel);
     cJSON_Delete(payload);
     payload = NULL;
     free(base64);
     base64 = NULL;
-    if (!s(encoded, "body") || !s(encoded, "key") || !s(encoded, "xLcs"))
+    if ((cancel && *cancel) || !s(encoded, "body") || !s(encoded, "key") || !s(encoded, "xLcs"))
       goto done;
     len = enil_b64_decode_alloc(s(encoded, "body"), &wire);
     if (len < 0)
@@ -143,12 +153,16 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
   curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)request.size);
   curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, timeout_ms > 0 ? timeout_ms : 60000L);
   curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
   if (cancel) {
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, cancel_request);
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, (void *)cancel);
   }
+  ENIL_LOG("Native.post", "POST %s %s (%lu bytes)", url, method, (unsigned long)request.size);
   rc = curl_easy_perform(curl);
+  curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &out.status);
+  ENIL_LOG("Native.post", "%s %s HTTP %ld curl=%d", url, method, out.status, (int)rc);
   if (rc != CURLE_OK) {
     if (rc == CURLE_OPERATION_TIMEDOUT && !strcmp(method, "sync"))
       out.status = 204;
@@ -156,7 +170,6 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
       ENIL_LOG("Native.post", "%s: transport %d", method, (int)rc);
     goto done;
   }
-  curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &out.status);
   if (out.status != 200)
     goto done;
   if (encrypted) {
@@ -166,10 +179,12 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
       goto done;
     cJSON_AddStringToObject(payload, "key", s(encoded, "key"));
     cJSON_AddStringToObject(payload, "body", base64);
-    decoded = enil_worker_decrypt("/transport/legy/decode", payload);
+    decoded = enil_worker_decrypt_ex("/transport/legy/decode", payload, cancel);
     if (!s(decoded, "body"))
       goto done;
     data = cJSON_GetObjectItemCaseSensitive(decoded, "status");
+    ENIL_LOG("Native.post", "%s %s LEGY status=%d", endpoint, method,
+             cJSON_IsNumber(data) ? data->valueint : 200);
     if (cJSON_IsNumber(data) && data->valueint != 200) {
       out.status = data->valueint;
       goto done;

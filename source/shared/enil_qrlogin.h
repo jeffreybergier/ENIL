@@ -36,6 +36,13 @@ typedef struct {
   const volatile int *cancel;
 } enil_qrlogin_callbacks_t;
 
+/* Entry point for the login UI's Start / Retry / Restart actions. Clears the
+ * Worker failure gate once per user attempt, then runs or recovers the saved
+ * login and stages native credentials. Automatic account-open recovery must
+ * use enil_qrlogin_recover_e2ee instead, which preserves the failure gate. */
+int enil_qrlogin_run_user_attempt(const char *staging_dir,
+                                  const enil_qrlogin_callbacks_t *cb);
+
 /* Requires staging seeded by enil_session_prepare_login before any requests.
  * Runs the full flow. account_dir is the per-account folder; session.json is
  * written as <account_dir>/session.json on success. Returns 1 on success,

@@ -14,6 +14,8 @@
 #include "enil_worker.h"
 #include "enil_qrlogin.h"
 #include "enil_native_login.h"
+#include "enil_login_store.h"
+#include "enil_health.h"
 #include "enil_cocoa_log.h"
 
 #define SVC    "/api/talk/thrift/LoginQrCode"
@@ -571,6 +573,41 @@ static int post_login_handshake(cJSON *s, const char *token) {
 }
 
 /* ---- public entry point -------------------------------------------------- */
+
+int enil_qrlogin_run_user_attempt(const char *staging_dir,
+                                  const enil_qrlogin_callbacks_t *cb) {
+  char path[1024];
+  char *durable = NULL;
+  int native, ok = 0;
+  if (!staging_dir || cancelled(cb) ||
+      !session_path_of(staging_dir, path, sizeof(path)))
+    return 0;
+  if (!enil_session_bind_identity(path)) {
+    emit_status(cb, "Invalid client identity");
+    return 0;
+  }
+  native = !strcmp(enil_identity_current()->transport, "native-thrift");
+  if (native) {
+    durable = enil_login_store_select(staging_dir);
+    if (!durable)
+      goto done;
+  }
+  if (cancelled(cb))
+    goto done;
+  /* Only an explicit login action reopens the gate. A failure during this
+   * attempt sets it again, including before the follow-up key recovery. */
+  enil_health_clear_failure(ENIL_ERR_WORKER);
+  if (native)
+    ok = enil_native_login_run(durable, cb) && !cancelled(cb) &&
+         enil_qrlogin_recover_e2ee(durable) &&
+         enil_login_store_stage(staging_dir, durable);
+  else
+    ok = enil_qrlogin_run(staging_dir, cb);
+done:
+  free(durable);
+  enil_identity_bind(NULL);
+  return ok;
+}
 
 int enil_qrlogin_run(const char *account_dir,
                      const enil_qrlogin_callbacks_t *cb) {

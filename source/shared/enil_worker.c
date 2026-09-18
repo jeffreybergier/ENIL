@@ -49,7 +49,13 @@ void enil_worker_set_credentials(const char *url, const char *secret) {
   enil_health_clear_failure(ENIL_ERR_WORKER);
 }
 
-static char *worker_post(const char *path, const char *json_body) {
+static int worker_cancel(void *ctx, curl_off_t a, curl_off_t b, curl_off_t c, curl_off_t d) {
+  (void)a; (void)b; (void)c; (void)d;
+  return ctx && *(const volatile int *)ctx;
+}
+
+static char *worker_post(const char *path, const char *json_body,
+                         const volatile int *cancel) {
   char url[512];
   char secret_hdr[256];
   ENILBuf buf = {NULL, 0};
@@ -58,6 +64,7 @@ static char *worker_post(const char *path, const char *json_body) {
   CURLcode rc;
   long status = 0;
 
+  if (cancel && *cancel) return NULL;
   if (!g_worker_url || !g_worker_secret) {
     LOG("worker_post", "credentials not configured");
     return NULL;
@@ -65,8 +72,9 @@ static char *worker_post(const char *path, const char *json_body) {
 
   /* Sticky-failure gate. Once any worker call has failed (auth, transport,
    * or HTTP 5xx), every subsequent worker_post() returns NULL without
-   * hitting the wire. The flag clears only when the user re-saves credentials
-   * in Preferences (enil_worker_set_credentials calls enil_health_clear_failure).
+   * hitting the wire. The flag clears when the user re-saves credentials
+   * in Preferences or explicitly starts/retries login. Automatic key recovery
+   * and requests within a login attempt never clear it.
    * This keeps us from hammering a broken worker — and, more importantly,
    * keeps us from issuing LINE API calls that will fail at the /sign step
    * with the gateway's auth-rejection counter ticking up toward a lockout. */
@@ -100,6 +108,11 @@ static char *worker_post(const char *path, const char *json_body) {
   curl_easy_setopt(curl, CURLOPT_NOSIGNAL,       1L);
   curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
   curl_easy_setopt(curl, CURLOPT_TIMEOUT,        30L);
+  if (cancel) {
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, worker_cancel);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, (void *)cancel);
+  }
 
   ENIL_LOG("Worker.post", "POST %s (%lu bytes)",
            path, json_body ? (unsigned long)strlen(json_body) : 0UL);
@@ -108,6 +121,12 @@ static char *worker_post(const char *path, const char *json_body) {
   curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
   curl_slist_free_all(hdrs);
   curl_easy_cleanup(curl);
+
+  if (cancel && *cancel) {
+    ENIL_LOG("Worker.post", "cancelled: %s", path);
+    enil_buf_free(&buf);
+    return NULL;
+  }
 
   if (rc != CURLE_OK) {
     char msg[160];
@@ -176,7 +195,7 @@ static cJSON *worker_call(const char *path, cJSON *req, const char *fn) {
   cJSON_Delete(req);
   if (!req_str) { ENIL_LOG("Worker.call", "%s: serialize failed", fn); return NULL; }
 
-  resp_str = worker_post(path, req_str);
+  resp_str = worker_post(path, req_str, NULL);
   free(req_str);
   if (!resp_str) { ENIL_LOG("Worker.call", "%s: no response", fn); return NULL; }
 
@@ -488,6 +507,11 @@ int enil_worker_unwrap_keychain(const char *worker_restore_state,
  * returns the parsed JSON response. Caller must cJSON_Delete the result.
  * ==========================================================================*/
 cJSON *enil_worker_decrypt(const char *path, cJSON *payload) {
+  return enil_worker_decrypt_ex(path, payload, NULL);
+}
+
+cJSON *enil_worker_decrypt_ex(const char *path, cJSON *payload,
+                               const volatile int *cancel) {
   char *body, *resp_str;
   cJSON *resp;
 
@@ -496,7 +520,7 @@ cJSON *enil_worker_decrypt(const char *path, cJSON *payload) {
   body = cJSON_PrintUnformatted(payload);
   if (!body) return NULL;
 
-  resp_str = worker_post(path, body);
+  resp_str = worker_post(path, body, cancel);
   free(body);
   if (!resp_str) { LOG("decrypt", "no response"); return NULL; }
 

@@ -2515,10 +2515,17 @@ int enil_db_message_reactions_update(sqlite3    *db,
     "SELECT reactions_json FROM messages_v2 WHERE id = ?", -1, &stmt, NULL);
   if (rc != SQLITE_OK) return rc;
   sqlite3_bind_text(stmt, 1, message_id, -1, SQLITE_TRANSIENT);
-  if (sqlite3_step(stmt) != SQLITE_ROW) {
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_ROW) {
     sqlite3_finalize(stmt);
-    ENIL_LOG("Db.reactions_update", "message %s not found", message_id);
-    return SQLITE_ERROR;
+    /* Only recent history is cached. A reaction to an older message has
+     * nothing to update locally and must not block subsequent events.
+     * Keep real read failures retryable, just like write failures below. */
+    if (rc == SQLITE_DONE) {
+      ENIL_LOG("Db.reactions_update", "message %s not cached; skipping reaction", message_id);
+      return SQLITE_OK;
+    }
+    return rc;
   }
   existing = sqlite3_column_text(stmt, 0);
   arr = (existing && existing[0])

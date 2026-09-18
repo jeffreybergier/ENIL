@@ -371,6 +371,17 @@ static char *token_refresh_locked(const char *session_path, int *out_line_code) 
   if (!login_id || !enil_session_load(session_path, &session) || !session.accessToken ||
       !session.refreshToken)
     goto done;
+  /* Activation can run between the ID migration and the load. Associate the
+   * journal with the same snapshot as the credentials used for this request. */
+  {
+    const char *loaded_id = refresh_string(session.snapshot, "loginId");
+    if (!loaded_id || !*loaded_id)
+      goto done;
+    free(login_id);
+    login_id = strdup(loaded_id);
+    if (!login_id)
+      goto done;
+  }
   if (snprintf(pending_path, sizeof(pending_path), "%s.refresh-pending", session_path) >=
       (int)sizeof(pending_path))
     goto done;

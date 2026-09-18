@@ -62,6 +62,7 @@ typedef enum {
   int                  sseEnabled_;   /* desired SSE state; persisted in session.json */
   enil_health_t       *health_;       /* per-account LINE failure gate */
   ENILSyncState        syncState_;
+  BOOL                 syncRunning_; /* main-thread gate; only this account's completion clears it */
   int                  miniSyncDepth_;
   NSMutableDictionary *pendingSends_; /* real_message_id -> temp_id; guarded by @synchronized */
   NSMutableDictionary *pendingSendOrderByChat_; /* chat_id -> NSMutableArray<temp_id> */

@@ -15,7 +15,8 @@
  *
  *   WORKER is process-global. There is one worker URL + secret for the whole
  *   app, so "the worker is down" is genuinely app-wide. Worker failures clear
- *   when the user re-saves credentials in Preferences.
+ *   when the user re-saves credentials in Preferences or explicitly starts
+ *   another login attempt (including Retry saved login).
  *
  *   LINE is PER-ACCOUNT. Each signed-in account has its own session/token, so
  *   one account's auth/transport failure must not stop another account's

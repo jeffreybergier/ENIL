@@ -16,6 +16,10 @@ char  *enil_worker_sign(const char *path, const char *body, const char *access_t
 /* Posts payload JSON to a worker e2ee path. Returns parsed response or NULL.
  * Caller must cJSON_Delete the result. */
 cJSON *enil_worker_decrypt(const char *path, cJSON *payload);
+/* As above, but abort promptly when cancel is set, without closing the Worker
+ * health gate. The flag must remain valid until the call returns. */
+cJSON *enil_worker_decrypt_ex(const char *path, cJSON *payload,
+                               const volatile int *cancel);
 
 /* Returned by enil_worker_encrypt_user / enil_worker_encrypt_group. */
 typedef struct {

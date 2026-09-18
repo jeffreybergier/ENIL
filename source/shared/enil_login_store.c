@@ -296,13 +296,14 @@ int enil_login_store_activate(const char *staging_dir, const char *account_dir) 
   cJSON *staged = read_session(staging_dir);
   const char *mid = string(staged, "mid"), *source = string(staged, "nativeLoginSource");
   const char *name = account_dir ? strrchr(account_dir, '/') : NULL;
-  char *root = parent(account_dir), *pending = NULL, *journal = NULL;
+  char *root = parent(account_dir), *pending = NULL, *path = NULL;
   int ok = 0;
   if (!root || !name || !safe_name(mid) || strcmp(name + 1, mid) || !string(staged, "accessToken"))
     goto done;
   if (mkdir(account_dir, 0700) != 0 && errno != EEXIST)
     goto done;
-  if (!write_session(account_dir, staged))
+  path = join(account_dir, "session.json");
+  if (!path || !enil_session_activate(path, staged))
     goto done;
   ok = 1;
   /* The active loginId/source already prevent replay if retirement fails or
@@ -312,13 +313,10 @@ int enil_login_store_activate(const char *staging_dir, const char *account_dir) 
     if (!pending || !retire(pending))
       ENIL_LOG("LoginStore.activate", "Could not retire consumed login directory");
   }
-  journal = join(account_dir, "session.json.refresh-pending");
-  if (!journal || !enil_session_retire_file(journal))
-    ENIL_LOG("LoginStore.activate", "Could not retire old refresh journal");
 done:
   free(root);
   free(pending);
-  free(journal);
+  free(path);
   cJSON_Delete(staged);
   return ok;
 }

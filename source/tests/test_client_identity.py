@@ -114,6 +114,9 @@ class ClientIdentityTests(unittest.TestCase):
             completion = next(json.loads(b)[0] for path, _, b in requests if path.endswith("/qrCodeLoginV2"))
             self.assertEqual(completion["systemName"], "WINDOWS" if application == WINDOWS_APP else "CHROMEOS")
             self.assertEqual(completion["modelName"], "DESKTOPWIN" if application == WINDOWS_APP else "CHROME")
+            removal = [json.loads(b) for path, _, b in requests if path.endswith('/sendChatRemoved')]
+            self.assertEqual(len(removal), 1)
+            self.assertEqual(removal[0][1:], ['synthetic-chat', '9007199254740993', 1800000000000])
             for part in ["/tokenRefresh", "/r/talk/", "/api/operation/receive"]:
                 matches = [h for path, h, _ in requests if part in path]
                 self.assertTrue(matches, part)

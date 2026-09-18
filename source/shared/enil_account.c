@@ -63,12 +63,12 @@ int enil_account_upsert_response_message(sqlite3 *db, const char *chat_id,
   return msg->chat_id && enil_db_message_upsert(db, msg) == SQLITE_OK;
 }
 
-void enil_account_sync_all(enil_health_t *health, sqlite3 *db,
+int enil_account_sync_all(enil_health_t *health, sqlite3 *db,
                            const char *access_token, const char *my_mid,
                            const char *session_path)
 {
   enil_health_bind(health);
-  enil_sync_all(db, access_token, my_mid, session_path);
+  return enil_sync_all(db, access_token, my_mid, session_path);
 }
 
 enil_account_start_result_t enil_account_start_core(const char *enil_dir,
@@ -82,6 +82,7 @@ enil_account_start_result_t enil_account_start_core(const char *enil_dir,
   char *db_path;
   char *access_token = NULL;
   char *mid = NULL;
+  char *login_id;
   sqlite3 *db;
 
   if (access_token_out) *access_token_out = NULL;
@@ -97,6 +98,19 @@ enil_account_start_result_t enil_account_start_core(const char *enil_dir,
     free(session_path);
     return ENIL_ACCOUNT_START_INVALID_SESSION;
   }
+
+  /* Migrate legacy sessions before any send, sync, or refresh worker can
+   * load a snapshot. Lazy migration during refresh would invalidate a
+   * concurrent save even though it still belongs to this same login. */
+  login_id = enil_session_login_id(session_path);
+  if (!login_id) {
+    ENIL_LOG("ENILAccount.start_core", "could not persist login ID");
+    free(session_path);
+    free(access_token);
+    free(mid);
+    return ENIL_ACCOUNT_START_INVALID_SESSION;
+  }
+  free(login_id);
 
   if (sse_enabled_out)
     *sse_enabled_out = enil_session_get_sse_enabled(session_path);
@@ -937,7 +951,7 @@ int enil_account_process_sse_event(enil_health_t *health,
                                    const char *matched_temp_id,
                                    enil_account_sse_result_t *result)
 {
-  int op_handled = 0;
+  int op_handled = 0, rc;
 
   if (!result) return 0;
   enil_account_sse_result_init(result);
@@ -949,8 +963,13 @@ int enil_account_process_sse_event(enil_health_t *health,
   if (strcmp(event_type, "message") == 0)
     enil_status_post("sse.message", "Received message", 1);
 
-  enil_sync_process_sse_event(db, access_token, my_mid, session_path,
-                              event_type, event_data, &op_handled);
+  rc = enil_sync_process_sse_event(db, access_token, my_mid, session_path,
+                                  event_type, event_data, &op_handled);
+  if (rc != SQLITE_OK) {
+    ENIL_LOG("ENILAccount.sse_event_core", "event processing failed (%d); retaining cursor", rc);
+    enil_account_record_sse_event(db, event_type, event_data, 0);
+    return 0;
+  }
   result->handled = (strcmp(event_type, "message") == 0)
     ? op_handled : enil_account_sse_control_handled(event_type);
 
@@ -979,6 +998,8 @@ int enil_account_process_sse_event(enil_health_t *health,
 
   if (strcmp(event_type, "fullSync") == 0) {
     enil_session_reset_partial_full_syncs(session_path);
+    result->should_stop_sse = 1;
+    result->should_start_sync = 1;
   }
 
   enil_account_record_sse_event(db, event_type, event_data, op_handled);

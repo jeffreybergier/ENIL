@@ -11,7 +11,9 @@ typedef struct {
   const char *data; /* raw JSON string, may be empty */
 } ENILSSEEvent;
 
-typedef void (*ENILSSEEventFn)(const ENILSSEEvent *ev, void *ctx);
+/* Return 1 once the event's changes are saved (including intentional no-ops),
+ * or 0 to retry from the last saved revision. */
+typedef int (*ENILSSEEventFn)(const ENILSSEEvent *ev, void *ctx);
 
 /* access_token/session_path are copied; local_rev seeds the localRev query
  * param. db (not owned — must outlive the client) is where advancing localRev

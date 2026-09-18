@@ -23,10 +23,14 @@ cJSON *enil_session_to_json(const session_t *s);
  * must cJSON_Delete), or NULL on failure. */
 cJSON *enil_session_read(const char *path);
 
-/* Serialises root and atomically replaces path. Returns 1 on success. */
+/* Serialises root and atomically replaces path under the session write lock.
+ * Returns 1 on success. */
 int enil_session_write(const char *path, cJSON *root);
+/* Activate a login and retire the prior refresh journal under that same lock. */
+int enil_session_activate(const char *path, cJSON *root);
 /* Merge changes relative to the loaded snapshot, preserving concurrent token
- * rotation and unknown fields. Atomic, private, fsynced replacement. */
+ * rotation and unknown fields. Rejects superseded logins and missing accounts.
+ * Atomic, private, fsynced replacement; requires a loaded/parsed snapshot. */
 int enil_session_save(const char *path, const session_t *session);
 int enil_session_patch(const char *path, cJSON *patch);
 /* A stable identifier for one login, unchanged by token rotation. Ensures it

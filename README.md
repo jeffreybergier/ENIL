@@ -109,7 +109,7 @@ and [release instructions](RELEASE.md).
 ## Linux-hosted tests
 
 ```sh
-apt-get install libcjson-dev libcurl4-openssl-dev libssl-dev pkg-config build-essential
+apt-get install libcjson-dev libcurl4-openssl-dev libssl-dev libsqlite3-dev zlib1g-dev pkg-config build-essential
 python3 -m pip install -r source/tools/windows-login/requirements.txt
 npm --prefix source/cloudflare ci
 make test-host               # All host protocol, recovery, build-system, and Worker checks

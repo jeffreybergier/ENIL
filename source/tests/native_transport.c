@@ -3,7 +3,9 @@
 #include "enil_http.h"
 #include "enil_identity.h"
 #include "enil_line.h"
+#include "enil_login_store.h"
 #include "enil_session.h"
+#include "enil_talkserv.h"
 #include "enil_sse.h"
 #include "enil_thrift.h"
 #include "enil_worker.h"
@@ -15,6 +17,7 @@
 static const char *origin;
 static int health_failed, fail_event, event_count, requests;
 static long long last_revision;
+static const char *activate_staging, *activate_account;
 CURLcode __real_curl_easy_perform(CURL *);
 CURLcode __wrap_curl_easy_perform(CURL *c) {
   char *url = NULL, buf[1024];
@@ -28,7 +31,16 @@ CURLcode __wrap_curl_easy_perform(CURL *c) {
   curl_easy_setopt(c, CURLOPT_URL, buf);
   curl_easy_setopt(c, CURLOPT_PROXY, "");
   requests++;
-  return __real_curl_easy_perform(c);
+  {
+    CURLcode rc = __real_curl_easy_perform(c);
+    /* Deterministically activate B while A's refresh is still in flight,
+     * before its reply reaches the refresh journal/session commit. */
+    if (activate_staging) {
+      assert(enil_login_store_activate(activate_staging, activate_account));
+      activate_staging = NULL;
+    }
+    return rc;
+  }
 }
 void enil_log(const char *t, const char *f, ...) {
   (void)t;
@@ -57,8 +69,9 @@ char *enil_worker_sign(const char *p, const char *b, const char *t) {
   assert(0);
   return NULL;
 }
-cJSON *enil_worker_decrypt(const char *p, cJSON *v) {
+cJSON *enil_worker_decrypt_ex(const char *p, cJSON *v, const volatile int *cancel) {
   cJSON *r = cJSON_CreateObject();
+  (void)cancel;
   cJSON_AddItemToObject(r, "body", cJSON_Duplicate(cJSON_GetObjectItem(v, "body"), 1));
   if (strstr(p, "encode")) {
     cJSON_AddStringToObject(r, "key", "synthetic");
@@ -100,13 +113,14 @@ static void persistence(const char *path) {
   enil_session_free(&stale);
   enil_session_free(&fresh);
 }
-static void event_cb(const ENILSSEEvent *ev, void *ctx) {
+static int event_cb(const ENILSSEEvent *ev, void *ctx) {
   (void)ctx;
   if (!strcmp(ev->type, "message")) {
     event_count++;
     if (fail_event)
       health_failed = 1;
   }
+  return 1;
 }
 static void polling(const char *path, int fail) {
   enil_identity_t id;
@@ -153,6 +167,82 @@ int main(int argc, char **argv) {
   origin = argv[1];
   assert(enil_identity_default("desktopwin", &id));
   assert(enil_identity_bind(&id));
+  if (!strcmp(argv[2], "poll-kick")) {
+    ENILSSEClient *client;
+    cJSON *root = cJSON_CreateObject();
+    int i;
+    cJSON_AddItemToObject(root, "clientIdentity", enil_identity_to_json(&id));
+    cJSON_AddStringToObject(root, "accessToken", "synthetic-token");
+    assert(enil_session_write(argv[3], root));
+    cJSON_Delete(root);
+    client = enil_sse_create("synthetic-token", 10, argv[3], (sqlite3 *)1, NULL);
+    assert(client && enil_sse_start(client, event_cb, NULL));
+    /* The Python server signals only after each request is blocked waiting
+     * for a reply. More kicks than the retry budget must remain healthy. */
+    for (i = 0; i < 6; i++) {
+      assert(getchar() == 'k');
+      enil_sse_kick(client);
+    }
+    assert(getchar() == 'q');
+    enil_sse_free(client);
+    assert(!health_failed && !event_count && !last_revision);
+    assert(requests == 7);
+    return 0;
+  }
+  if (!strcmp(argv[2], "remove-chat")) {
+    assert(talk_send_chat_removed("synthetic-token", 37,
+                                  "c00000000000000000000000000000000",
+                                  "9007199254740993", 1800000000000LL) == 0);
+    assert(requests == 1);
+    return 0;
+  }
+  if (!strcmp(argv[2], "refresh-reauth")) {
+    char account[1024], path[1100], stage[1024], journal[1150];
+    cJSON *root, *saved;
+    char *token;
+    int code;
+    assert(snprintf(account, sizeof(account), "%s/synthetic-mid", argv[3]) < (int)sizeof(account));
+    assert(snprintf(stage, sizeof(stage), "%s/staged", argv[3]) < (int)sizeof(stage));
+    assert(snprintf(path, sizeof(path), "%s/session.json", account) < (int)sizeof(path));
+    assert(snprintf(journal, sizeof(journal), "%s.refresh-pending", path) < (int)sizeof(journal));
+    /* The Python fixture creates these directories. */
+    root = cJSON_Parse("{\"loginId\":\"login-A\",\"accessToken\":\"access-A\","
+                       "\"refreshToken\":\"refresh-A\",\"mid\":\"synthetic-mid\"}");
+    cJSON_AddItemToObject(root, "clientIdentity", enil_identity_to_json(&id));
+    assert(enil_session_write(path, root));
+    cJSON_ReplaceItemInObject(root, "loginId", cJSON_CreateString("login-B"));
+    cJSON_ReplaceItemInObject(root, "accessToken", cJSON_CreateString("access-B"));
+    cJSON_ReplaceItemInObject(root, "refreshToken", cJSON_CreateString("refresh-B"));
+    {
+      char staged_path[1100];
+      assert(snprintf(staged_path, sizeof(staged_path), "%s/session.json", stage) <
+             (int)sizeof(staged_path));
+      assert(enil_session_write(staged_path, root));
+    }
+    activate_staging = stage;
+    activate_account = account;
+    token = enil_line_token_refresh(path, &code);
+    assert(!token && code == 0 && requests == 1);
+    saved = enil_session_read(path);
+    assert(cJSON_Compare(root, saved, 1));
+    cJSON_Delete(saved);
+    saved = enil_session_read(journal);
+    assert(!strcmp(cJSON_GetObjectItem(saved, "loginId")->valuestring, "login-A"));
+    cJSON_Delete(saved);
+    /* B's engine has independent health. Its refresh must retire A's late
+     * journal, then refresh B rather than replaying A's credentials. */
+    health_failed = 0;
+    token = enil_line_token_refresh(path, &code);
+    assert(token && !strcmp(token, "refreshed-B") && requests == 2);
+    free(token);
+    saved = enil_session_read(path);
+    assert(!strcmp(cJSON_GetObjectItem(saved, "loginId")->valuestring, "login-B"));
+    assert(!strcmp(cJSON_GetObjectItem(saved, "refreshToken")->valuestring, "refresh-B-next"));
+    assert(access(journal, F_OK) != 0);
+    cJSON_Delete(saved);
+    cJSON_Delete(root);
+    return 0;
+  }
   if (!strcmp(argv[2], "poll") || !strcmp(argv[2], "poll-fail")) {
     polling(argv[3], !strcmp(argv[2], "poll-fail"));
     return 0;

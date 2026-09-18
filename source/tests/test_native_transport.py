@@ -21,7 +21,7 @@ class NativeTransportTests(unittest.TestCase):
         cls.bin=str(Path(cls.tmp.name)/'native')
         flags=shlex.split(subprocess.check_output(['pkg-config','--cflags','--libs','libcjson','libcurl','openssl'],text=True))
         shared=REPO/'source/shared'
-        subprocess.run(['cc','-std=gnu99','-Wall','-Wextra','-Werror','-Wno-deprecated-declarations','-ffunction-sections','-fdata-sections','-I'+str(shared),str(REPO/'source/tests/native_transport.c'),*[str(shared/x) for x in ['enil_native.c','enil_thrift.c','enil_identity.c','enil_line.c','enil_http.c','enil_b64.c','enil_session.c','enil_api_json.c','enil_sse.c','enil_talkserv.c','enil_api_call.c']],'-Wl,--gc-sections','-Wl,--wrap=curl_easy_perform','-pthread',*flags,'-o',cls.bin],check=True)
+        subprocess.run(['cc','-std=gnu99','-Wall','-Wextra','-Werror','-Wno-deprecated-declarations','-ffunction-sections','-fdata-sections','-I'+str(shared),str(REPO/'source/tests/native_transport.c'),*[str(shared/x) for x in ['enil_native.c','enil_thrift.c','enil_identity.c','enil_line.c','enil_http.c','enil_b64.c','enil_session.c','enil_login_store.c','enil_api_json.c','enil_sse.c','enil_talkserv.c','enil_api_call.c']],'-Wl,--gc-sections','-Wl,--wrap=curl_easy_perform','-pthread',*flags,'-o',cls.bin],check=True)
     def run_native(self,*args,**kw):
         return subprocess.run([self.bin,'http://127.0.0.1:1',*args],capture_output=True,check=True,**kw).stdout
     def decode(self,method,wire):return json.loads(self.run_native('decode',method,input=wire))
@@ -92,8 +92,127 @@ class NativeTransportTests(unittest.TestCase):
                 subprocess.run([self.bin,f'http://127.0.0.1:{server.server_port}',mode,str(Path(self.tmp.name)/(mode+'.json'))],check=True,timeout=10)
         finally:server.shutdown();server.server_close();thread.join()
 
+    def test_kick_interrupts_blocked_native_polls_without_failure_or_cursor_advance(self):
+        requests = []
+        condition = threading.Condition()
+        release = threading.Event()
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+
+            def do_POST(self):
+                wire = self.rfile.read(int(self.headers['Content-Length']))
+                with condition:
+                    requests.append(wire)
+                    condition.notify_all()
+                release.wait(15)
+                self.close_connection = True
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        process = subprocess.Popen([
+            self.bin, f'http://127.0.0.1:{server.server_port}', 'poll-kick',
+            str(Path(self.tmp.name) / 'kick-session.json')], stdin=subprocess.PIPE)
+        try:
+            for expected in range(1, 8):
+                with condition:
+                    self.assertTrue(condition.wait_for(lambda: len(requests) >= expected, timeout=4),
+                                    f'poll {expected} did not start after reconnect')
+                process.stdin.write(b'k' if expected < 7 else b'q')
+                process.stdin.flush()
+            self.assertEqual(process.wait(timeout=4), 0)
+            for wire in requests:
+                p = TCompactProtocol(TMemoryBuffer(wire))
+                self.assertEqual(p.readMessageBegin(), ('sync', TMessageType.CALL, 0))
+                p.readStructBegin()
+                self.assertEqual(p.readFieldBegin()[1:], (TType.STRUCT, 1))
+                p.readStructBegin()
+                self.assertEqual(p.readFieldBegin()[1:], (TType.I64, 1))
+                self.assertEqual(p.readI64(), 10)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            process.stdin.close()
+            release.set()
+            server.shutdown(); server.server_close(); thread.join()
+
     def test_interrupted_refresh_recovers_without_network(self):
         self.run_native('refresh-recovery',str(Path(self.tmp.name)/'refresh-session.json'))
+
+    def test_reauthentication_during_refresh_rejects_old_credentials(self):
+        requests = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+
+            def do_POST(self):
+                raw = self.rfile.read(int(self.headers['Content-Length']))
+                protocol = TCompactProtocol(TMemoryBuffer(raw))
+                method, _, _ = protocol.readMessageBegin()
+                requests.append((method, self.headers.get('X-Line-Access')))
+                generation = 'A' if len(requests) == 1 else 'B'
+                body = reply('refresh', [(0, TType.STRUCT, [
+                    (1, TType.STRING, 'refreshed-' + generation),
+                    (5, TType.STRING, 'refresh-' + generation + '-next')])])
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as root:
+                (Path(root) / 'synthetic-mid').mkdir()
+                (Path(root) / 'staged').mkdir()
+                subprocess.run([self.bin, f'http://127.0.0.1:{server.server_port}',
+                                'refresh-reauth', root], check=True, timeout=10)
+            self.assertEqual(requests, [('refresh', 'access-A'), ('refresh', 'access-B')])
+        finally:
+            server.shutdown(); server.server_close(); thread.join()
+
+    def test_remove_chat_adapts_gateway_timestamp_to_native_arguments(self):
+        requests = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+
+            def do_POST(self):
+                requests.append(self.rfile.read(int(self.headers['Content-Length'])))
+                body = reply('sendChatRemoved', [])
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            subprocess.run([self.bin, f'http://127.0.0.1:{server.server_port}',
+                            'remove-chat', 'unused'], check=True, timeout=10)
+            self.assertEqual(len(requests), 1)
+            protocol = TCompactProtocol(TMemoryBuffer(requests[0]))
+            self.assertEqual(protocol.readMessageBegin(), ('sendChatRemoved', TMessageType.CALL, 0))
+            protocol.readStructBegin()
+            fields = []
+            while True:
+                _, kind, fid = protocol.readFieldBegin()
+                if kind == TType.STOP:
+                    break
+                value = protocol.readI32() if kind == TType.I32 else protocol.readString()
+                fields.append((fid, kind, value))
+                protocol.readFieldEnd()
+            self.assertEqual(fields, [
+                (1, TType.I32, 37),
+                (2, TType.STRING, 'c00000000000000000000000000000000'),
+                (3, TType.STRING, '9007199254740993'),
+            ])
+        finally:
+            server.shutdown(); server.server_close(); thread.join()
 
     def test_binary_message_reply(self):
         buf=TMemoryBuffer();p=TCompactProtocol(buf);p.writeMessageBegin('sendMessage',TMessageType.REPLY,0);p.writeStructBegin('result')

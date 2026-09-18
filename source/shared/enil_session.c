@@ -19,6 +19,7 @@
 #define LOG(fn, msg) enil_log("Session." fn, "%s", msg)
 
 static pthread_mutex_t session_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int session_write_locked(const char *path, cJSON *root);
 
 char *enil_session_new_id(void) {
   unsigned char bytes[16];
@@ -57,7 +58,7 @@ char *enil_session_login_id(const char *path) {
   root = enil_session_read(path);
   existed = cJSON_HasObjectItem(root, "loginId");
   id = add_login_id(root);
-  if (id && !existed && !enil_session_write(path, root)) {
+  if (id && !existed && !session_write_locked(path, root)) {
     free(id);
     id = NULL;
   }
@@ -216,7 +217,7 @@ int enil_session_validate(const char *path, char **access_token_out, char **mid_
 /* ============================================================================
  * Serialise root to pretty-printed JSON and overwrite session.json.
  * ==========================================================================*/
-int enil_session_write(const char *path, cJSON *root) {
+static int session_write_locked(const char *path, cJSON *root) {
   char *text, *tmp;
   size_t plen, tlen;
   FILE *f;
@@ -248,6 +249,31 @@ int enil_session_write(const char *path, cJSON *root) {
   free(tmp);
   free(text);
   return 1;
+}
+
+int enil_session_write(const char *path, cJSON *root) {
+  int ok;
+  pthread_mutex_lock(&session_mutex);
+  ok = session_write_locked(path, root);
+  pthread_mutex_unlock(&session_mutex);
+  return ok;
+}
+
+int enil_session_activate(const char *path, cJSON *root) {
+  char *journal;
+  int ok;
+  if (!path || !cJSON_IsObject(root)) return 0;
+  journal = malloc(strlen(path) + sizeof(".refresh-pending"));
+  if (!journal) return 0;
+  sprintf(journal, "%s.refresh-pending", path);
+  pthread_mutex_lock(&session_mutex);
+  ok = session_write_locked(path, root);
+  /* Retire the prior journal before any new-login refresh can write one. */
+  if (ok && !enil_session_retire_file(journal))
+    LOG("activate", "Could not retire old refresh journal");
+  pthread_mutex_unlock(&session_mutex);
+  free(journal);
+  return ok;
 }
 
 /* ============================================================================
@@ -611,8 +637,22 @@ int enil_session_save(const char *path, const session_t *session) {
   }
   pthread_mutex_lock(&session_mutex);
   current = enil_session_read(path);
-  if (!current)
-    current = cJSON_CreateObject();
+  /* A changed login must never inherit a previous login's refresh reply,
+   * keys, or sync state. Compare under the same lock used by activation.
+   * Legacy snapshots without IDs may only update another ID-less session.
+   * Also refuse to recreate an account removed while work was in flight. */
+  if (!cJSON_IsObject(current) || !baseline)
+    goto done;
+  {
+    cJSON *before = cJSON_GetObjectItemCaseSensitive(baseline, "loginId");
+    cJSON *now = cJSON_GetObjectItemCaseSensitive(current, "loginId");
+    if ((before || now) &&
+        (!cJSON_IsString(before) || !before->valuestring[0] ||
+         !cJSON_IsString(now) || !cJSON_Compare(before, now, 1))) {
+      LOG("save", "discarding update from a superseded login");
+      goto done;
+    }
+  }
   for (item = next->child; item; item = item->next) {
     cJSON *old = cJSON_GetObjectItemCaseSensitive(baseline, item->string);
     if (old && cJSON_Compare(old, item, 1))
@@ -624,7 +664,8 @@ int enil_session_save(const char *path, const session_t *session) {
     if (!cJSON_HasObjectItem(next, item->string))
       cJSON_DeleteItemFromObjectCaseSensitive(current, item->string);
   if (current)
-    ok = enil_session_write(path, current);
+    ok = session_write_locked(path, current);
+done:
   cJSON_Delete(current);
   pthread_mutex_unlock(&session_mutex);
   cJSON_Delete(next);
@@ -641,7 +682,7 @@ int enil_session_patch(const char *path, cJSON *patch) {
       cJSON_DeleteItemFromObjectCaseSensitive(root, item->string);
       cJSON_AddItemToObject(root, item->string, cJSON_Duplicate(item, 1));
     }
-    ok = enil_session_write(path, root);
+    ok = session_write_locked(path, root);
   }
   cJSON_Delete(root);
   pthread_mutex_unlock(&session_mutex);
@@ -677,7 +718,7 @@ int enil_session_accept_next_access(const char *previous, const char *next) {
   token = cJSON_GetObjectItemCaseSensitive(root, "accessToken");
   if (cJSON_IsString(token) && !strcmp(token->valuestring, previous)) {
     cJSON_ReplaceItemInObjectCaseSensitive(root, "accessToken", cJSON_CreateString(next));
-    ok = enil_session_write(path, root);
+    ok = session_write_locked(path, root);
   } else if (cJSON_IsString(token))
     ok = 1; /* another request already rotated it */
   cJSON_Delete(root);

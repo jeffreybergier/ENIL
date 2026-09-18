@@ -141,6 +141,68 @@ static void import_saved_and_retire(const char *root) {
   assert(selected && strcmp(selected, legacy));
   free(selected);
 }
+
+static void reject_superseded_save(const char *root, int legacy) {
+  char stage[4096], account[4096], file[4096];
+  char *pending;
+  session_t stale;
+  cJSON *expected, *saved;
+  path(account, sizeof(account), root, "synthetic-mid");
+  path(file, sizeof(file), account, "session.json");
+  staging(stage, sizeof(stage), root, 30, NULL);
+  pending = enil_login_store_select(stage);
+  assert(pending);
+  complete(pending);
+  assert(enil_login_store_stage(stage, pending));
+  assert(enil_login_store_activate(stage, account));
+  free(pending);
+  if (legacy) {
+    saved = read_saved(account);
+    cJSON_DeleteItemFromObject(saved, "loginId");
+    assert(enil_session_write(file, saved));
+    cJSON_Delete(saved);
+  }
+  assert(enil_session_load(file, &stale));
+  free(stale.accessToken);
+  stale.accessToken = strdup("refreshed-A");
+  free(stale.refreshToken);
+  stale.refreshToken = strdup("refreshed-A-refresh");
+  /* An ordinary refresh within the same login (including legacy) works. */
+  assert(enil_session_save(file, &stale));
+  enil_session_free(&stale);
+  assert(enil_session_load(file, &stale));
+
+  staging(stage, sizeof(stage), root, 31, "synthetic-mid");
+  pending = enil_login_store_select(stage);
+  assert(pending);
+  complete(pending);
+  patch(pending, "{\"accessToken\":\"access-B\",\"refreshToken\":\"refresh-B\","
+                 "\"workerRestoreState\":{\"key\":\"B\"}}");
+  assert(enil_login_store_stage(stage, pending));
+  assert(enil_login_store_activate(stage, account));
+  free(pending);
+  expected = read_saved(account);
+
+  /* Both credential and unrelated sync/key changes from A are rejected. */
+  free(stale.accessToken);
+  stale.accessToken = strdup("late-refreshed-A");
+  stale.reqSeq = 123;
+  assert(!enil_session_save(file, &stale));
+  saved = read_saved(account);
+  assert(cJSON_Compare(expected, saved, 1));
+  cJSON_Delete(saved);
+  cJSON_Delete(expected);
+  enil_session_free(&stale);
+
+  /* In-flight work must not recreate an account after removal either. */
+  assert(enil_session_load(file, &stale));
+  assert(unlink(file) == 0);
+  stale.reqSeq++;
+  assert(!enil_session_save(file, &stale));
+  assert(access(file, F_OK) != 0);
+  enil_session_free(&stale);
+}
+
 int main(int argc, char **argv) {
   assert(argc == 3);
   if (!strcmp(argv[2], "cycles"))
@@ -149,6 +211,8 @@ int main(int argc, char **argv) {
     restart_uncertain(argv[1]);
   else if (!strcmp(argv[2], "import"))
     import_saved_and_retire(argv[1]);
+  else if (!strcmp(argv[2], "stale") || !strcmp(argv[2], "stale-legacy"))
+    reject_superseded_save(argv[1], !strcmp(argv[2], "stale-legacy"));
   else
     assert(0);
   return 0;

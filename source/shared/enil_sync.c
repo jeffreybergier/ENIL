@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 #include <pthread.h>
 #include "enil_sync.h"
+#include "enil_health.h"
 #include "enil_cocoa_progress.h"
 #include "enil_line.h"
 #include "enil_session.h"
@@ -1513,7 +1514,8 @@ static int apply_op_reaction(sqlite3 *db, const talk_operation_t *op,
 
 /* ============================================================================
  * Dispatch a single SSE event — decrypts, applies the op to sqlite, and
- * advances localRev. Returns 1 if the event was handled.
+ * leaves cursor persistence to the caller. Returns SQLITE_OK on success;
+ * out_handled distinguishes supported operations from intentional no-ops.
  * ==========================================================================*/
 int enil_sync_process_sse_event(sqlite3    *db,
                                 const char *access_token,
@@ -1635,8 +1637,6 @@ int enil_sync_process_sse_event(sqlite3    *db,
   }
   msg     = cJSON_GetObjectItem(root, "message");
   chat_id = op.message->chat_id;
-  upsert_chat_for_message(db, msg, chat_id, my_mid);
-  backfill_chat_metadata(db, access_token, session_path, chat_id);
   arr = cJSON_CreateArray();
   if (!arr) {
     talk_operation_free(&op);
@@ -1644,9 +1644,22 @@ int enil_sync_process_sse_event(sqlite3    *db,
     return SQLITE_NOMEM;
   }
   cJSON_AddItemToArray(arr, cJSON_Duplicate(msg, 1));
-  rc = enil_db_message_upsert(db, op.message);
+  /* Keep the unread increment and message insert together. Otherwise a failed
+   * insert followed by redelivery counts the same incoming message twice.
+   * No network work runs while this savepoint is held. */
+  rc = sqlite3_exec(db, "SAVEPOINT sse_message", NULL, NULL, NULL);
+  if (rc == SQLITE_OK) {
+    rc = upsert_chat_for_message(db, msg, chat_id, my_mid);
+    if (rc == SQLITE_OK) rc = enil_db_message_upsert(db, op.message);
+    if (rc == SQLITE_OK) rc = sqlite3_exec(db, "RELEASE sse_message", NULL, NULL, NULL);
+    if (rc != SQLITE_OK) {
+      sqlite3_exec(db, "ROLLBACK TO sse_message", NULL, NULL, NULL);
+      sqlite3_exec(db, "RELEASE sse_message", NULL, NULL, NULL);
+    }
+  }
   if (rc == SQLITE_OK) {
     cJSON *updated_arr;
+    backfill_chat_metadata(db, access_token, session_path, chat_id);
     scan_messages_for_stickers(db, arr);
     if (!message_has_plaintext(db, op.message->id))
       decrypt_one_message(db, msg, my_mid, access_token, session_path);
@@ -2114,52 +2127,56 @@ static int sync_phase_account(sqlite3    *db,
 }
 
 /* PHASE 3 — MESSAGES: fetch recent messages per chat + inline sticker scan. */
-static void sync_phase_messages(sqlite3 *db, const char *current_token)
+static int sync_phase_messages(sqlite3 *db, const char *current_token)
 {
   talk_message_box_t *boxes = NULL;
-  int boxes_n = 0, done = 0, i;
+  int boxes_n = 0, done = 0, i, failed = 0;
 
-  enil_db_message_box_get_all(db, &boxes, &boxes_n);
+  if (enil_db_message_box_get_all(db, &boxes, &boxes_n) != SQLITE_OK) {
+    report(ENIL_SYNC_PHASE_MESSAGES, 0, 0, "Message boxes read failed", 1);
+    return 1;
+  }
   report(ENIL_SYNC_PHASE_MESSAGES, 0, boxes_n, "Syncing messages...", 0);
 
-  for (i = 0; i < boxes_n; i++) {
+  for (i = 0; i < boxes_n && !failed; i++) {
     const char     *chat_id = boxes[i].id;
     talk_message_t *tmsgs   = NULL;
-    int             tn      = 0;
+    int             tn = 0, ti, rc = SQLITE_OK;
+    cJSON          *scan_arr = NULL;
 
-    if (!chat_id) {
-      done++;
-      report(ENIL_SYNC_PHASE_MESSAGES, done, boxes_n,
-             "Syncing messages...", 0);
-      talk_message_box_free(&boxes[i]);
-      continue;
-    }
-
+    if (!chat_id) continue;
     if (talk_get_recent_messages(current_token, chat_id, MESSAGES_PER_CHAT,
-                                 &tmsgs, &tn) == 0 && tn > 0) {
-      cJSON *scan_arr = cJSON_CreateArray();
-      int ti;
-      sqlite3_exec(db, "BEGIN", NULL, NULL, NULL);
-      for (ti = 0; ti < tn; ti++) {
-        enil_db_message_upsert(db, &tmsgs[ti]);
+                                 &tmsgs, &tn) != 0) {
+      report(ENIL_SYNC_PHASE_MESSAGES, done, boxes_n, "Messages fetch failed", 1);
+      failed = 1;
+    } else if (tn > 0) {
+      scan_arr = cJSON_CreateArray();
+      rc = sqlite3_exec(db, "BEGIN", NULL, NULL, NULL);
+      for (ti = 0; ti < tn && rc == SQLITE_OK; ti++) {
+        rc = enil_db_message_upsert(db, &tmsgs[ti]);
         if (scan_arr && tmsgs[ti].raw)
           cJSON_AddItemReferenceToArray(scan_arr, tmsgs[ti].raw);
       }
-      sqlite3_exec(db, "COMMIT", NULL, NULL, NULL);
-      if (scan_arr) {
+      if (rc == SQLITE_OK) rc = sqlite3_exec(db, "COMMIT", NULL, NULL, NULL);
+      if (rc != SQLITE_OK) {
+        sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+        report(ENIL_SYNC_PHASE_MESSAGES, done, boxes_n, "Messages write failed", rc);
+        failed = 1;
+      } else if (scan_arr) {
         scan_messages_for_stickers(db, scan_arr);
-        cJSON_Delete(scan_arr);
       }
-      for (ti = 0; ti < tn; ti++) talk_message_free(&tmsgs[ti]);
     }
+    cJSON_Delete(scan_arr);
+    for (ti = 0; ti < tn; ti++) talk_message_free(&tmsgs[ti]);
     free(tmsgs);
-
-    done++;
-    report(ENIL_SYNC_PHASE_MESSAGES, done, boxes_n,
-           "Syncing messages...", 0);
-    talk_message_box_free(&boxes[i]);
+    if (!failed) {
+      done++;
+      report(ENIL_SYNC_PHASE_MESSAGES, done, boxes_n, "Syncing messages...", 0);
+    }
   }
+  for (i = 0; i < boxes_n; i++) talk_message_box_free(&boxes[i]);
   free(boxes);
+  return failed;
 }
 
 /* PHASE 3b — READ RANGE: eager peer-read-state for every chat.
@@ -2681,16 +2698,17 @@ static void sync_phase_downloading(sqlite3    *db,
   report(ENIL_SYNC_PHASE_DOWNLOADING, total, total, "Downloading...", 0);
 }
 
-/* DONE — seed localRev from getLastOpRevision so the SSE stream can start. */
-static void sync_phase_finish(sqlite3 *db, const char *current_token)
+/* Commit only the revision captured before fetching data. Events created
+ * during the sync must still be delivered when the stream restarts. */
+static int sync_phase_finish(sqlite3 *db, long long local_rev)
 {
-  long long local_rev = TalkService_getLastOpRevision(current_token);
-  if (local_rev < 0 ||
+  if (enil_health_any_failed() || local_rev < 0 ||
       enil_db_set_local_rev(db, local_rev) != SQLITE_OK) {
     report(ENIL_SYNC_PHASE_DONE, 0, 0, "Could not enable SSE", 1);
-    return;
+    return 0;
   }
   report(ENIL_SYNC_PHASE_DONE, 0, 0, "Done", 0);
+  return 1;
 }
 
 /* ============================================================================
@@ -2699,24 +2717,33 @@ static void sync_phase_finish(sqlite3 *db, const char *current_token)
  * communicate through sqlite (the DB is the shared state), so this entry
  * point is just the orchestrator. Posts progress notifications between phases.
  * ==========================================================================*/
-void enil_sync_all(sqlite3    *db,
+int enil_sync_all(sqlite3    *db,
                    const char *access_token,
                    const char *my_mid,
                    const char *session_path)
 {
+  long long local_rev;
+  int ok = 0;
   char *current_token = sync_phase_connecting(access_token, session_path);
-  if (!current_token) return;
+  if (!current_token) return 0;
+  local_rev = TalkService_getLastOpRevision(current_token);
+  if (local_rev < 0) {
+    report(ENIL_SYNC_PHASE_CONNECTING, 0, 0, "Could not enable SSE", 1);
+    free(current_token);
+    return 0;
+  }
 
-  if (sync_phase_account(db, current_token, session_path) == 0) {
-    sync_phase_messages(db, current_token);
+  if (sync_phase_account(db, current_token, session_path) == 0 &&
+      sync_phase_messages(db, current_token) == 0) {
     sync_phase_read_range(db, current_token);
     sync_phase_decrypting(db, current_token, my_mid, session_path);
     sync_phase_preparing(db, current_token, session_path);
     sync_phase_downloading(db, current_token, session_path);
-    sync_phase_finish(db, current_token);
+    ok = sync_phase_finish(db, local_rev);
   }
 
   free(current_token);
+  return ok;
 }
 
 /* ============================================================================

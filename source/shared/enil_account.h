@@ -63,7 +63,8 @@ void enil_account_free(void *p);
 int enil_account_upsert_response_message(sqlite3 *db, const char *chat_id,
                                          talk_message_t *msg);
 
-void enil_account_sync_all(enil_health_t *health, sqlite3 *db,
+/* Returns 1 only after this account's sync and revision commit succeed. */
+int enil_account_sync_all(enil_health_t *health, sqlite3 *db,
                            const char *access_token, const char *my_mid,
                            const char *session_path);
 
@@ -153,6 +154,8 @@ void enil_account_sse_result_free(enil_account_sse_result_t *result);
 int enil_account_sse_message_info(const char *event_data,
                                   enil_account_sse_message_info_t *info);
 
+/* Returns 0 if applying the event failed; do not acknowledge its revision.
+ * result is initialized even on failure and must be freed by the caller. */
 int enil_account_process_sse_event(enil_health_t *health,
                                    sqlite3 *db,
                                    const char *access_token,

@@ -18,7 +18,6 @@
 #include "enil_talkserv.h"
 #include "enil_sse.h"
 #include "enil_qrlogin.h"
-#include "enil_native_login.h"
 #include "enil_login_store.h"
 #include "enil_worker.h"
 #include "enil_health.h"
@@ -38,7 +37,7 @@ static NSError *makeError(ENILErrorCode code, NSString *desc);
 
 static void queue_pending_temp(NSMutableDictionary *map, NSString *chatId, NSString *tempId);
 static void remove_pending_temp(NSMutableDictionary *map, NSString *tempId);
-static NSString *pop_pending_temp_for_chat(NSMutableDictionary *map, NSString *chatId);
+static NSString *first_pending_temp_for_chat(NSMutableDictionary *map, NSString *chatId);
 
 static NSError *makeError(ENILErrorCode code, NSString *desc)
 {
@@ -76,7 +75,7 @@ static void remove_pending_temp(NSMutableDictionary *map, NSString *tempId)
   }
 }
 
-static NSString *pop_pending_temp_for_chat(NSMutableDictionary *map, NSString *chatId)
+static NSString *first_pending_temp_for_chat(NSMutableDictionary *map, NSString *chatId)
 {
   NSMutableArray *queue;
   NSString *tempId;
@@ -84,8 +83,6 @@ static NSString *pop_pending_temp_for_chat(NSMutableDictionary *map, NSString *c
   queue = [map objectForKey:chatId];
   if (!queue || [queue count] == 0) return nil;
   tempId = [[[queue objectAtIndex:0] retain] autorelease];
-  [queue removeObjectAtIndex:0];
-  if ([queue count] == 0) [map removeObjectForKey:chatId];
   return tempId;
 }
 
@@ -106,7 +103,7 @@ static NSString *pop_pending_temp_for_chat(NSMutableDictionary *map, NSString *c
 - (void)flushCoalescedUI:(NSTimer *)timer;
 - (void)flushCoalescedJS;
 - (void)flushCoalescedSSE;
-- (void)syncDidFinish:(NSNotification *)note;
+- (void)syncDidFinish:(NSNumber *)result;
 - (void)syncInBackground;
 - (void)sendTextInBackground:(NSDictionary *)params;
 - (void)sendInlineSticons_BG:(NSDictionary *)params;
@@ -389,12 +386,13 @@ static void qr_status_trampoline(const char *msg, void *ctx)
   [self scheduleNextTokenRefresh];
 }
 
-- (void)syncDidFinish:(NSNotification *)note;
+- (void)syncDidFinish:(NSNumber *)result;
 {
   NSString *sessionPath;
   char *token = NULL;
   char *mid = NULL;
-  BOOL ok = [[[note userInfo] objectForKey:@"ok"] boolValue];
+  BOOL ok = [result boolValue];
+  syncRunning_ = NO;
   if (ok) {
     sessionPath = [enilDir_ stringByAppendingPathComponent:@"session.json"];
     if (enil_session_validate([sessionPath fileSystemRepresentation], &token, &mid)) {
@@ -416,15 +414,22 @@ static void qr_status_trampoline(const char *msg, void *ctx)
 {
   NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
   NSString *sessionPath = [enilDir_ stringByAppendingPathComponent:@"session.json"];
-  enil_account_sync_all(health_, db_,
+  int ok = enil_account_sync_all(health_, db_,
                         [accessToken_ UTF8String],
                         myMid_ ? [myMid_ UTF8String] : NULL,
                         [sessionPath fileSystemRepresentation]);
+  /* Complete this account only, after its worker has returned. Global
+   * progress notifications can belong to another open account. */
+  [self performSelectorOnMainThread:@selector(syncDidFinish:)
+                         withObject:[NSNumber numberWithBool:ok != 0]
+                      waitUntilDone:NO];
   [pool release];
 }
 
 - (void)startSync;
 {
+  if (syncRunning_) return;
+  syncRunning_ = YES;
   [self stopSSE];
   [self setSyncState:ENILSyncStateSyncing];
   [NSThread detachNewThreadSelector:@selector(syncInBackground)
@@ -1543,10 +1548,6 @@ static NSString *pending_temp_id_for_sse_message(ENILAccount *account,
     NSString *realId = [NSString stringWithUTF8String:msgInfo->message_id];
     @synchronized(account->pendingSends_) {
       tempId = [[[account->pendingSends_ objectForKey:realId] retain] autorelease];
-      if (tempId) {
-        [account->pendingSends_ removeObjectForKey:realId];
-        remove_pending_temp(account->pendingSendOrderByChat_, tempId);
-      }
     }
   }
 
@@ -1559,7 +1560,7 @@ static NSString *pending_temp_id_for_sse_message(ENILAccount *account,
       chatKey = [NSString stringWithUTF8String:msgInfo->to_mid];
     if (chatKey) {
       @synchronized(account->pendingSends_) {
-        tempId = pop_pending_temp_for_chat(account->pendingSendOrderByChat_, chatKey);
+        tempId = first_pending_temp_for_chat(account->pendingSendOrderByChat_, chatKey);
       }
     }
   }
@@ -1567,7 +1568,7 @@ static NSString *pending_temp_id_for_sse_message(ENILAccount *account,
   return tempId;
 }
 
-static void sse_event_cb(const ENILSSEEvent *ev, void *ctx)
+static int sse_event_cb(const ENILSSEEvent *ev, void *ctx)
 {
   ENILAccount *account = (ENILAccount *)ctx;
   NSAutoreleasePool *pool;
@@ -1578,6 +1579,7 @@ static void sse_event_cb(const ENILSSEEvent *ev, void *ctx)
   NSString *tempId = nil;
   const char *my_mid;
   enil_account_sse_result_t result;
+  enil_account_sse_message_info_t msgInfo;
   int i;
 
   pool = [[NSAutoreleasePool alloc] init];
@@ -1587,13 +1589,12 @@ static void sse_event_cb(const ENILSSEEvent *ev, void *ctx)
   my_mid = account->myMid_ ? [account->myMid_ UTF8String] : NULL;
 
   if (strcmp(ev->type, "message") == 0) {
-    enil_account_sse_message_info_t msgInfo;
     memset(&msgInfo, 0, sizeof(msgInfo));
     enil_account_sse_message_info(ev->data, &msgInfo);
     tempId = pending_temp_id_for_sse_message(account, &msgInfo);
   }
 
-  enil_account_process_sse_event(account->health_,
+  if (!enil_account_process_sse_event(account->health_,
                                  account->db_,
                                  account->accessToken_ ?
                                    [account->accessToken_ UTF8String] : NULL,
@@ -1602,7 +1603,24 @@ static void sse_event_cb(const ENILSSEEvent *ev, void *ctx)
                                  ev->type,
                                  ev->data,
                                  tempId ? [tempId UTF8String] : NULL,
-                                 &result);
+                                 &result)) {
+    enil_account_sse_result_free(&result);
+    [pool release];
+    return 0;
+  }
+
+  /* Consume the optimistic-send match only after persistence succeeds, so a
+   * retried event can still replace its pending bubble after a write failure. */
+  if (tempId) {
+    @synchronized(account->pendingSends_) {
+      if (msgInfo.message_id[0]) {
+        NSString *realId = [NSString stringWithUTF8String:msgInfo.message_id];
+        if ([[account->pendingSends_ objectForKey:realId] isEqualToString:tempId])
+          [account->pendingSends_ removeObjectForKey:realId];
+      }
+      remove_pending_temp(account->pendingSendOrderByChat_, tempId);
+    }
+  }
 
   if (result.should_stop_sse) {
     [account performSelectorOnMainThread:@selector(stopSSE)
@@ -1659,12 +1677,16 @@ static void sse_event_cb(const ENILSSEEvent *ev, void *ctx)
 
   enil_account_sse_result_free(&result);
   [pool release];
+  return 1;
 }
 
 - (void)startSSE;
 {
   NSString *sessionPath;
   long long localRev;
+  /* Token refresh, wake, and link toggles must not resume polling while a
+   * full sync is still rebuilding the data behind the saved cursor. */
+  if (syncRunning_) return;
   if (sseClient_) {
     enil_sse_free(sseClient_);
     sseClient_ = NULL;
@@ -1808,11 +1830,6 @@ static void sse_event_cb(const ENILSSEEvent *ev, void *ctx)
           @"recoverable — encrypted messages will not decrypt until re-login");
   }
 
-  [[NSNotificationCenter defaultCenter] addObserver:self
-    selector:@selector(syncDidFinish:)
-        name:ENILSyncDidFinishNotification
-      object:nil];
-
   /* Arm the proactive refresh timer based on whatever's already in session.json.
    * If the session is stale and the eta is in the past, startSync's own refresh
    * will overwrite it before this fires; if not, the timer takes care of it. */
@@ -1880,21 +1897,7 @@ static void sse_event_cb(const ENILSSEEvent *ev, void *ctx)
   cb.ctx       = observer;
   cb.cancel    = cancelFlag;
 
-  NSString *path = [accountDir stringByAppendingPathComponent:@"session.json"];
-  if (enil_session_bind_identity([path fileSystemRepresentation])) {
-    const enil_identity_t *identity = enil_identity_current();
-    if (identity && !strcmp(identity->transport, "native-thrift")) {
-      char *durable = enil_login_store_select([accountDir fileSystemRepresentation]);
-      if (!durable) return NO;
-      BOOL ok = enil_native_login_run(durable, &cb) &&
-        enil_qrlogin_recover_e2ee(durable) &&
-        enil_login_store_stage([accountDir fileSystemRepresentation], durable);
-      free(durable);
-      enil_identity_bind(NULL);
-      return ok;
-    }
-  }
-  return enil_qrlogin_run([accountDir fileSystemRepresentation], &cb) ? YES : NO;
+  return enil_qrlogin_run_user_attempt([accountDir fileSystemRepresentation], &cb) ? YES : NO;
 }
 
 + (BOOL)workerFailed     { return enil_account_worker_failed() ? YES : NO; }

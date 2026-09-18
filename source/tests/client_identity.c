@@ -69,12 +69,13 @@ void enil_worker_unwrap_keychain_free(ENILWorkerUnwrapResult *out) {
   cJSON_Delete(out->keys); free(out->worker_restore_state);
 }
 
-static void on_event(const ENILSSEEvent *event, void *ctx) {
+static int on_event(const ENILSSEEvent *event, void *ctx) {
   (void)event; (void)ctx;
   pthread_mutex_lock(&event_lock);
   received = 1;
   pthread_cond_signal(&event_ready);
   pthread_mutex_unlock(&event_lock);
+  return 1;
 }
 
 static void *parallel_request(void *arg) {
@@ -135,6 +136,8 @@ static void check_profile(const char *root, const char *profile) {
   token = enil_line_token_refresh(path, &code);
   assert(token && code == 0);
   free(token);
+  assert(enil_line_send_chat_removed(path, "synthetic-chat", "9007199254740993",
+                                      1800000000000LL));
   assert(enil_session_load(path, &session));
   assert(strcmp(session.clientIdentity.user_agent, "saved-session-agent") == 0);
   assert(strcmp(session.clientIdentity.profile_id, profile) == 0);
@@ -208,3 +211,6 @@ int main(int argc, char **argv) {
 }
 
 cJSON *enil_worker_decrypt(const char *p, cJSON *v) { (void)p; (void)v; assert(0); return NULL; }
+cJSON *enil_worker_decrypt_ex(const char *p, cJSON *v, const volatile int *cancel) {
+  (void)cancel; return enil_worker_decrypt(p, v);
+}

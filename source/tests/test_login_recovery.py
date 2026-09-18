@@ -36,3 +36,8 @@ class LoginRecoveryTests(unittest.TestCase):
 
     def test_saved_import_is_retired_and_activation_retires_refresh_journal(self):
         self.run_case("import")
+
+    def test_superseded_saves_cannot_change_new_or_removed_accounts(self):
+        for mode in ["stale", "stale-legacy"]:
+            with self.subTest(mode=mode):
+                self.run_case(mode)
