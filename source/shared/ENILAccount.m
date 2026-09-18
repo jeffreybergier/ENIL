@@ -18,7 +18,8 @@
 #include "enil_talkserv.h"
 #include "enil_sse.h"
 #include "enil_qrlogin.h"
-#include "enil_windows_probe.h"
+#include "enil_native_login.h"
+#include "enil_login_store.h"
 #include "enil_worker.h"
 #include "enil_health.h"
 #include <stdlib.h>
@@ -1846,23 +1847,24 @@ static void sse_event_cb(const ENILSSEEvent *ev, void *ctx)
                clientProfile:(NSString *)profile
          reauthenticatingMid:(NSString *)mid;
 {
-  if (![accountDir length]) return NO;
-  NSString *path = [accountDir stringByAppendingPathComponent:@"session.json"];
-  NSString *source = nil;
-  if ([mid length]) {
-    source = [[[accountDir stringByDeletingLastPathComponent]
-      stringByAppendingPathComponent:mid] stringByAppendingPathComponent:@"session.json"];
-  }
-  if (!enil_session_prepare_login([path fileSystemRepresentation],
-                                  [profile UTF8String], [source fileSystemRepresentation])) return NO;
-  if ([mid length]) {
-    cJSON *patch = cJSON_CreateObject();
-    cJSON_AddStringToObject(patch, "reauthMid", [mid UTF8String]);
-    BOOL ok = enil_session_patch([path fileSystemRepresentation], patch) ? YES : NO;
-    cJSON_Delete(patch);
-    return ok;
-  }
-  return YES;
+  return enil_login_store_prepare([accountDir fileSystemRepresentation],
+    [profile UTF8String], [mid length] ? [mid UTF8String] : NULL) ? YES : NO;
+}
+
++ (BOOL)canRestartQRLoginAtPath:(NSString *)accountDir;
+{
+  return enil_login_store_can_restart([accountDir fileSystemRepresentation]) ? YES : NO;
+}
+
++ (BOOL)restartQRLoginAtPath:(NSString *)accountDir;
+{
+  return enil_login_store_restart([accountDir fileSystemRepresentation]) ? YES : NO;
+}
+
++ (BOOL)activateQRLoginAtPath:(NSString *)stagingDir accountPath:(NSString *)accountDir;
+{
+  return enil_login_store_activate([stagingDir fileSystemRepresentation],
+                                    [accountDir fileSystemRepresentation]) ? YES : NO;
 }
 
 + (BOOL)runQRLoginAtPath:(NSString *)accountDir
@@ -1882,85 +1884,17 @@ static void sse_event_cb(const ENILSSEEvent *ev, void *ctx)
   if (enil_session_bind_identity([path fileSystemRepresentation])) {
     const enil_identity_t *identity = enil_identity_current();
     if (identity && !strcmp(identity->transport, "native-thrift")) {
-      NSFileManager *fm = [NSFileManager defaultManager];
-      NSString *rootDir = [accountDir stringByDeletingLastPathComponent];
-      NSString *durable = nil;
-      cJSON *staged = enil_session_read([path fileSystemRepresentation]);
-      cJSON *expected = cJSON_GetObjectItemCaseSensitive(staged, "reauthMid");
-      NSArray *entries = [fm XP_contentsOfDirectoryAtPath:rootDir error:NULL];
-      NSEnumerator *enumerator = [entries objectEnumerator];
-      NSString *entry;
-      while ((entry = [enumerator nextObject])) {
-        if (![entry isEqualToString:@".windows-login-probe"] &&
-            ![entry hasPrefix:@".native-login-"]) continue;
-        NSString *candidate = [rootDir stringByAppendingPathComponent:entry];
-        NSString *saved = [candidate stringByAppendingPathComponent:@"session.json"];
-        cJSON *prior = enil_session_read([saved fileSystemRepresentation]);
-        cJSON *mid = cJSON_GetObjectItemCaseSensitive(prior, "mid");
-        cJSON *priorExpected = cJSON_GetObjectItemCaseSensitive(prior, "reauthMid");
-        BOOL matches = (!expected && !priorExpected) ||
-          (expected && priorExpected && cJSON_Compare(expected, priorExpected, 1));
-        if (matches && cJSON_IsString(mid)) {
-          NSString *existing = [[rootDir stringByAppendingPathComponent:
-            [NSString stringWithUTF8String:mid->valuestring]] stringByAppendingPathComponent:@"session.json"];
-          cJSON *active = enil_session_read([existing fileSystemRepresentation]);
-          /* Consumed pending sessions are never restored over rotating tokens. */
-          cJSON *consumed = cJSON_GetObjectItemCaseSensitive(active, "nativeLoginSource");
-          if ((!expected && active) || (cJSON_IsString(consumed) &&
-              !strcmp(consumed->valuestring, [entry UTF8String]))) matches = NO;
-          cJSON_Delete(active);
-        }
-        if (matches && (cJSON_HasObjectItem(prior, "accessToken") ||
-            cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(prior, "nativeTokenRequestStarted"))))
-          durable = candidate;
-        cJSON_Delete(prior);
-        if (durable) break;
-      }
-      if (!durable) {
-        durable = [rootDir stringByAppendingPathComponent:[@".native-login-"
-          stringByAppendingString:[accountDir lastPathComponent]]];
-        if (![fm XP_createDirectoryAtPath:durable withIntermediateDirectories:YES
-              attributes:[NSDictionary dictionaryWithObject:[NSNumber numberWithInt:0700]
-                                                     forKey:NSFilePosixPermissions] error:NULL]) {
-          cJSON_Delete(staged); return NO;
-        }
-        NSString *saved = [durable stringByAppendingPathComponent:@"session.json"];
-        if (![fm fileExistsAtPath:saved] &&
-            !enil_session_write([saved fileSystemRepresentation], staged)) {
-          cJSON_Delete(staged); return NO;
-        }
-      }
-      cJSON_Delete(staged);
-      /* The UI may delete staging on cancellation. Tokens and uncertain login
-       * replies remain here, and the next attempt resumes without another QR. */
-      if (!enil_windows_probe_run([durable fileSystemRepresentation], &cb)) return NO;
-      if (!enil_qrlogin_recover_e2ee([durable fileSystemRepresentation])) return NO;
-      NSString *saved = [durable stringByAppendingPathComponent:@"session.json"];
-      cJSON *ready = enil_session_read([saved fileSystemRepresentation]);
-      if (!ready) return NO;
-      cJSON_DeleteItemFromObjectCaseSensitive(ready, "nativeLoginSource");
-      cJSON_AddStringToObject(ready, "nativeLoginSource", [[durable lastPathComponent] UTF8String]);
-      BOOL copied = enil_session_write([path fileSystemRepresentation], ready) ? YES : NO;
-      cJSON_Delete(ready);
-      return copied;
+      char *durable = enil_login_store_select([accountDir fileSystemRepresentation]);
+      if (!durable) return NO;
+      BOOL ok = enil_native_login_run(durable, &cb) &&
+        enil_qrlogin_recover_e2ee(durable) &&
+        enil_login_store_stage([accountDir fileSystemRepresentation], durable);
+      free(durable);
+      enil_identity_bind(NULL);
+      return ok;
     }
   }
   return enil_qrlogin_run([accountDir fileSystemRepresentation], &cb) ? YES : NO;
-}
-
-+ (BOOL)runWindowsLoginProbeAtPath:(NSString *)directory
-                         observer:(id <ENILQRLoginObserver>)observer
-                       cancelFlag:(const volatile int *)cancelFlag;
-{
-  if (![directory length]) return NO;
-  enil_qrlogin_callbacks_t cb;
-  cb.on_qr_url = qr_url_trampoline;
-  cb.on_pin = qr_pin_trampoline;
-  cb.on_status = qr_status_trampoline;
-  cb.ctx = observer;
-  cb.cancel = cancelFlag;
-  ENILLog(@"ENILAccount.windowsProbe", @"durable session: %@/session.json", directory);
-  return enil_windows_probe_run([directory fileSystemRepresentation], &cb) ? YES : NO;
 }
 
 + (BOOL)workerFailed     { return enil_account_worker_failed() ? YES : NO; }

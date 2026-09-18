@@ -26,6 +26,23 @@ are split and cross-referenced. Checked items are landed in the current tree
 
 ## Core — shared engine (`source/shared/`)
 
+- [x] **Windows login recovery lifecycle.** Stable login generations, consumed
+      pending attempts, explicit Retry saved login / Start new QR actions,
+      atomic activation, and refresh journal replay/retirement. Regression
+      coverage is included in `make test-host`.
+      Validation (2026-09-18): 41 host tests and 57 Worker tests passed;
+      clean macOS/iOS debug and release builds had no compiler diagnostics.
+      Static analysis passed on both platforms with zero diagnostics.
+      Isolated offline builds on `x4-vm` and `koolphone5` passed the lifecycle
+      fixtures and exercised recovery controls and Start new QR. Those builds
+      used synthetic data and disabled HTTP/HTTPS before DNS or connection.
+
+- [ ] **Windows live protocol/device validation.** Verify authenticated sending,
+      media, reconnect, and repeated QR reauthentication using a designated
+      test account. The current validation is restricted to synthetic host
+      fixtures and device launches with networking disabled; no LINE requests
+      are permitted for this task.
+
 - [ ] **Granular `talkException.code` handling (SSE dispatch).** Act on
       `talkException.code` more granularly: 89 → mark account LSOFF; 117 →
       force re-login; non-119/10051 → drop SSE + surface to UI. Defer until the

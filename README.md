@@ -83,13 +83,20 @@ The Worker handles framing crypto and E2EE, while the app makes every LINE reque
 A successful `.windows-login-probe/session.json` is reused when choosing Windows
 in Add Account, including offline E2EE recovery. No new QR is needed. Windows
 login also retains durable `.native-login-*` pending folders outside disposable
-staging, so cancellation cannot discard issued credentials. Once an account is
-active, its rotating tokens take precedence over old pending copies.
+staging, so cancellation cannot discard issued credentials. Each login has a
+stable `loginId`, and reauthentication attempts record the login they replace.
+Activation retires the pending folder permanently, so older
+attempts cannot replace newer credentials. Failed Windows sign-ins offer
+**Retry saved login** and **Start new QR**; starting fresh retains the previous
+attempt for recovery but excludes it from automatic reuse.
 
 Normal session updates preserve unknown login fields and merge changes against
 the loaded snapshot. Saves are atomic, fsynced, and private (0600). Refresh replies
 are journaled in `session.json.refresh-pending` before applying rotating tokens;
 an interrupted update replays that saved reply without another refresh request.
+Journals belong to a specific login and record a refresh commit ID, so recovery
+also survives inline access-token rotation. Superseded journals are retained as
+`session.json.refresh-pending.retired.*`.
 Native polling persists separate global/individual cursors as decimal strings.
 
 The protocol definitions are based on pinned LINEJS research (see
@@ -103,10 +110,12 @@ and [release instructions](RELEASE.md).
 
 ```sh
 apt-get install libcjson-dev libcurl4-openssl-dev libssl-dev pkg-config build-essential
+python3 -m pip install -r source/tools/windows-login/requirements.txt
 npm --prefix source/cloudflare ci
-make test-host               # Build-system, client identity, and Worker checks
+make test-host               # All host protocol, recovery, build-system, and Worker checks
 make test-build-system       # Fast wrapper/cleanup checks without Apple SDKs
 make test-client-identity    # Synthetic session and loopback HTTP integration
+make test-native             # Windows transport, QR, and recovery regression tests
 make cloudflare-test         # Worker suite only
 ```
 

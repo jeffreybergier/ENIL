@@ -13,6 +13,7 @@ beforeAll(async () => {
   worker = await unstable_dev("src/index.js", {
     experimental: { disableExperimentalWarning: true },
     local: true,
+    persist: false, // Each parallel suite owns its runtime state.
     logLevel: "error",
     vars: { WORKER_SECRETS: TEST_SECRET },
   });
@@ -151,4 +152,3 @@ describe("POST /debug/ltsm-state/set", () => {
     expect(body.state.keyCount).toBe(1);
   });
 });
-

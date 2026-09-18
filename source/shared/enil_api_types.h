@@ -700,6 +700,7 @@ typedef struct {
   cJSON *snapshot; /* complete original session, including native recovery data */
   char      *accessToken;
   char      *refreshToken;
+  char      *refreshJournalId; /* last refresh committed with its tokens */
   char      *mid;
   char      *displayName;
   char      *regionCode;

@@ -34,6 +34,7 @@ static const NSInteger kENILTextAlignCenter = 1;
 @property (nonatomic, strong) UIButton *windowsButton;
 @property (nonatomic, assign) BOOL running;
 @property (nonatomic, assign) BOOL done;     /* terminal handling reached */
+@property (nonatomic, assign) BOOL prepared;
 @end
 
 @implementation QRLoginViewController
@@ -122,7 +123,7 @@ static const NSInteger kENILTextAlignCenter = 1;
 - (void)viewDidAppear:(BOOL)animated
 {
   [super viewDidAppear:animated];
-  if (self.expectedMid) [self startLoginWithProfile:nil];
+  if (self.expectedMid && !self.prepared) [self startLoginWithProfile:nil];
 }
 
 - (void)chooseClient:(id)sender
@@ -139,7 +140,28 @@ static const NSInteger kENILTextAlignCenter = 1;
     self.statusLabel.text = NSLocalizedString(@"Could not save client identity", nil);
     return;
   }
+  self.prepared = YES;
+  [self retrySavedLogin:nil];
+}
+
+- (void)startNewQR:(id)sender
+{
+  (void)sender;
+  if (self.running || self.done) return;
+  if (![ENILAccount restartQRLoginAtPath:self.accountDir]) {
+    self.statusLabel.text = NSLocalizedString(@"Could not save login recovery", nil);
+    return;
+  }
+  [self retrySavedLogin:nil];
+}
+
+- (void)retrySavedLogin:(id)sender
+{
+  (void)sender;
+  if (self.running || self.done) return;
   self.running = YES;
+  self.qrImageView.image = nil;
+  self.pinLabel.hidden = YES;
   self.chromeButton.hidden = YES;
   self.windowsButton.hidden = YES;
   self.qrImageView.hidden = NO;
@@ -205,6 +227,20 @@ static const NSInteger kENILTextAlignCenter = 1;
   /* The background thread retains us, so this can fire after the user already
    * cancelled — done_ (set first in -cancelAction) makes that a no-op. */
   if (self.done) return;
+  if (![result boolValue] && [ENILAccount canRestartQRLoginAtPath:self.accountDir]) {
+    self.qrImageView.hidden = YES;
+    self.pinLabel.hidden = YES;
+    self.statusLabel.text = NSLocalizedString(@"Sign-in needs recovery", nil);
+    [self.chromeButton setTitle:NSLocalizedString(@"Retry saved login", nil) forState:UIControlStateNormal];
+    [self.chromeButton removeTarget:self action:NULL forControlEvents:UIControlEventTouchUpInside];
+    [self.chromeButton addTarget:self action:@selector(retrySavedLogin:) forControlEvents:UIControlEventTouchUpInside];
+    [self.windowsButton setTitle:NSLocalizedString(@"Start new QR", nil) forState:UIControlStateNormal];
+    [self.windowsButton removeTarget:self action:NULL forControlEvents:UIControlEventTouchUpInside];
+    [self.windowsButton addTarget:self action:@selector(startNewQR:) forControlEvents:UIControlEventTouchUpInside];
+    self.chromeButton.hidden = NO;
+    self.windowsButton.hidden = NO;
+    return;
+  }
   self.done = YES;
 
   if ([result boolValue]) {

@@ -13,7 +13,7 @@
 #include <string.h>
 #include <unistd.h>
 static const char *origin;
-static int health_failed, fail_event, event_count;
+static int health_failed, fail_event, event_count, requests;
 static long long last_revision;
 CURLcode __real_curl_easy_perform(CURL *);
 CURLcode __wrap_curl_easy_perform(CURL *c) {
@@ -27,6 +27,7 @@ CURLcode __wrap_curl_easy_perform(CURL *c) {
   snprintf(buf, sizeof(buf), "%s%s", origin, path);
   curl_easy_setopt(c, CURLOPT_URL, buf);
   curl_easy_setopt(c, CURLOPT_PROXY, "");
+  requests++;
   return __real_curl_easy_perform(c);
 }
 void enil_log(const char *t, const char *f, ...) {
@@ -154,6 +155,54 @@ int main(int argc, char **argv) {
   assert(enil_identity_bind(&id));
   if (!strcmp(argv[2], "poll") || !strcmp(argv[2], "poll-fail")) {
     polling(argv[3], !strcmp(argv[2], "poll-fail"));
+    return 0;
+  }
+  if (!strncmp(argv[2], "journal-", 8)) {
+    char pending[1024];
+    cJSON *record, *patch;
+    char *token, *id;
+    int code, already_committed = strstr(argv[2], "committed") != NULL;
+    persistence(argv[3]);
+    id = enil_session_login_id(argv[3]);
+    assert(id);
+    snprintf(pending, sizeof(pending), "%s.refresh-pending", argv[3]);
+    record = cJSON_CreateObject();
+    cJSON_AddStringToObject(record, "previousRefreshToken", "earlier-refresh");
+    cJSON_AddStringToObject(record, "responseBody",
+                            "{\"message\":\"OK\",\"data\":{\"accessToken\":\"older-access\","
+                            "\"refreshToken\":\"rotated-refresh\"}}");
+    if (!strcmp(argv[2], "journal-stale")) {
+      cJSON_ReplaceItemInObject(record, "responseBody",
+                                cJSON_CreateString("{\"message\":\"OK\",\"data\":{\"accessToken\":"
+                                                   "\"obsolete\",\"refreshToken\":\"obsolete\"}}"));
+    } else if (!strcmp(argv[2], "journal-superseded")) {
+      cJSON_AddStringToObject(record, "loginId", "previous-login");
+      cJSON_ReplaceItemInObject(record, "previousRefreshToken",
+                                cJSON_CreateString("rotated-refresh"));
+    } else if (!strcmp(argv[2], "journal-committed")) {
+      cJSON_AddStringToObject(record, "loginId", id);
+      cJSON_AddStringToObject(record, "refreshId", "committed-refresh");
+      /* Even an unchanged refresh token must not replay a committed reply. */
+      cJSON_ReplaceItemInObject(record, "previousRefreshToken",
+                                cJSON_CreateString("rotated-refresh"));
+      patch = cJSON_Parse(
+          "{\"refreshJournalId\":\"committed-refresh\",\"accessToken\":\"inline-next-access\"}");
+      assert(enil_session_patch(argv[3], patch));
+      cJSON_Delete(patch);
+    }
+    assert(enil_session_write(pending, record));
+    cJSON_Delete(record);
+    token = enil_line_token_refresh(argv[3], &code);
+    assert(token && code == 0 && access(pending, F_OK) != 0);
+    if (already_committed) {
+      assert(requests == 0);
+      assert(
+          !strcmp(token, !strcmp(argv[2], "journal-committed") ? "inline-next-access" : "rotated"));
+    } else {
+      assert(requests == 1 && !strcmp(token, "fresh-from-fixture"));
+    }
+    free(token);
+    free(id);
     return 0;
   }
   if (!strcmp(argv[2], "refresh-recovery")) {

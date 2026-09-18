@@ -210,3 +210,9 @@
 "Windows login stopped. Session state saved; see log for details." = "Windows login stopped. Session state saved; see log for details.";
 
 "Windows desktop" = "Windows desktop";
+
+/* Windows login recovery */
+"Sign-in needs recovery" = "Sign-in needs recovery";
+"Retry saved login" = "Retry saved login";
+"Start new QR" = "Start new QR";
+"Could not save login recovery" = "Could not save login recovery";

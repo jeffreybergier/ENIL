@@ -359,7 +359,7 @@ immediately.
 ## Cloudflare Worker Role
 
 The worker handles all crypto. The Cocoa sync engine calls it via libcurl.
-Every LINE API request follows this flow:
+Chrome gateway API requests follow this flow:
 
 1. **Cocoa → Worker** `POST /sign` — worker returns `X-Hmac` for the request
 2. **Cocoa → LINE API** — send the request with the `X-Hmac` header
@@ -369,8 +369,8 @@ Every LINE API request follows this flow:
 4. **sqlite** — write both raw (encrypted) and decrypted columns; write updated
    `workerRestoreState` back to `session.json`
 
-HMAC signing (step 1) is required for every LINE API call, not just crypto
-ones.
+HMAC signing (step 1) is required for Chrome gateway API calls. Windows
+uses the native Thrift/LEGY transport described below.
 
 The worker is stateful via `workerRestoreState`. This blob encodes the worker's
 E2EE key handles and must be stored in `session.json` and passed back to the
@@ -725,7 +725,8 @@ The iOS wrapper packages the already signed app using an absolute IPA path.
 
 Use `make clean && make -j2 debug release` for all four clean builds.
 `make macOS-clean` and `make iOS-clean` clean just one platform.
-`make test-host` runs the Linux-hosted build-system tests and Worker suite;
+`make test-host` runs the Linux-hosted build-system, identity, native protocol,
+login recovery, diagnostic probe, and Worker suites;
 these tests do not produce a native debug/release test binary.
 
 It also runs `make test-client-identity`, which compiles the native session and
@@ -755,20 +756,31 @@ message/full-sync/partial-sync/error callbacks. Global and individual cursors ar
 saved only after successful handling. Idle poll timeouts reconnect without
 invalidating the session; permanent errors use the existing account error flow.
 
-`enil_windows_probe.c` also supplies the production native QR flow. Both UIs use
-`ENILAccount` to keep pending Windows logins outside `.staging-*` cleanup.
+`enil_native_login.c` supplies the production native QR flow and uses the shared
+Compact Thrift encoder/decoder in `enil_thrift.c`. `enil_login_store.c` owns the
+local preparation, pending selection, explicit restart, staging, and activation
+lifecycle; `ENILAccount` exposes it to both UIs. Pending Windows logins live
+outside `.staging-*` cleanup.
 The successful historical `.windows-login-probe` is importable without another
 QR. Metadata field 10 supplies offline E2EE keychain recovery. Raw login replies
 and private QR state are saved before optional unwrap. An uncertain token request
-is never automatically repeated. Active sessions never restore older pending
-credentials over rotated tokens.
+is never automatically repeated. Every login has a stable `loginId`; pending
+reauth attempts also record the `reauthLoginId` they replace. Successful activation atomically installs the
+session and leaves `retired.json` beside the consumed pending session. The
+active login ID also prevents replay if activation was interrupted before
+retirement. Older reauth attempts without a baseline ID cannot replace an active
+account. Failed sign-ins offer Retry saved login / Start new QR; the explicit
+start-new action retires the previous attempt without deleting its evidence.
 
 `enil_session_save` merges only fields changed from a normalized loaded snapshot,
 so a stale sync save cannot undo token rotation. Unknown native fields survive.
 `enil_session_write` uses a unique 0600 temporary file, fsync, and atomic rename.
-Refresh responses have a private recovery journal until the session commit
-succeeds. `x-line-next-access` inside LEGY responses is also persisted, and native
-calls reload the bound account's access token.
+Refresh responses have a private recovery journal with the owning `loginId`
+and a unique `refreshId`. The session commits `refreshJournalId` with its new
+tokens, making replay idempotent even if the access token subsequently rotates.
+Superseded journals are renamed to unique `.retired.*` files, and activation
+retires the previous login's journal. `x-line-next-access` inside LEGY responses
+is also persisted, and native calls reload the bound account's access token.
 
 Host protocol tests require the dependencies in
 `source/tools/windows-login/requirements.txt`, plus the normal C host libraries:

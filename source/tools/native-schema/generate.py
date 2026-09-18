@@ -20,6 +20,23 @@ for name, body in re.findall(r'(?:struct|exception)\s+(\w+)\s*\{([^}]*)\}', text
     for fid, ts, fname in re.findall(r'(\d+)\s*:\s*(?:optional\s+|required\s+)?([\w<> ,]+?)\s+(\w+)\s*[;,\n]', body):
         fields.append([int(fid), fname, typ(ts)])
     schemas[name] = sorted(fields)
+# Secondary QR requests share the production Compact Thrift encoder. Replies
+# retain numeric field IDs for durable raw-login recovery.
+qr_schemas = {'ENILQRSessionRequest': [[1, 'authSessionId', 'string']],
+ 'ENILQRCertificateRequest': [[1, 'authSessionId', 'string'], [2, 'certificate', 'string']],
+ 'ENILQRSecureRequest': [[1, 'authSessionId', 'string'],
+                         [2, 'systemName', 'string'],
+                         [3, 'modelName', 'string'],
+                         [4, 'autoLoginIsRequired', 'bool'],
+                         [5, 'qrNonce', 'string']],
+ 'createSession_args': [],
+ 'verifyCertificate_args': [[1, 'request', 'ENILQRCertificateRequest']],
+ 'qrCodeLoginV2ForSecure_args': [[1, 'request', 'ENILQRSecureRequest']],
+ 'createQrCodeForSecure_args': [[1, 'request', 'ENILQRSessionRequest']],
+ 'checkQrCodeVerified_args': [[1, 'request', 'ENILQRSessionRequest']],
+ 'createPinCode_args': [[1, 'request', 'ENILQRSessionRequest']],
+ 'checkPinCodeVerified_args': [[1, 'request', 'ENILQRSessionRequest']]}
+schemas.update(qr_schemas)
 schemas['getContacts_args'] = [[2,'mids',['list','string']]]
 schemas['getContacts_result'] = [[0,'success',['list','Contact']],[1,'e','TalkException']]
 schemas['getRecentMessagesV2_args'] = [[2,'messageBoxId','string'],[3,'messagesCount','i32']]
@@ -47,6 +64,8 @@ def visit(t):
         if t not in schemas: raise ValueError('Unknown type: '+t)
         result[t] = schemas[t]
         for f in result[t]: visit(f[2])
+for name in qr_schemas:
+    visit(name)
 for m in methods:
     visit(m+'_args'); visit(m+'_result')
 out = Path(__file__).resolve().parents[2]/'shared/enil_thrift_schema.inc'

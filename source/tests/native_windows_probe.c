@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include "enil_windows_probe.h"
+#include "enil_native_login.h"
 #include "enil_session.h"
 #include "enil_http.h"
 #include "enil_worker.h"
@@ -97,21 +97,21 @@ int main(int argc, char **argv) {
   directory = argv[1]; origin = argv[2]; fail_unwrap = strcmp(argv[3], "unwrap-fails") == 0;
   memset(&cb, 0, sizeof(cb));
   cb.on_qr_url = qr; cb.on_pin = pin; cb.on_status = status; cb.cancel = &cancel;
-  assert(!enil_windows_probe_run(directory, &cb));
+  assert(!enil_native_login_run(directory, &cb));
   assert(calls == 0 && keys == 0);
   cancel = 0;
   if (strcmp(argv[3], "token-error") == 0) {
-    assert(!enil_windows_probe_run(directory, &cb));
+    assert(!enil_native_login_run(directory, &cb));
     s = read_saved();
     assert(cJSON_IsTrue(cJSON_GetObjectItem(s, "nativeTokenRequestStarted")));
     assert(cJSON_GetObjectItem(s, "lastNativeResponseBase64"));
     cJSON_Delete(s);
     before = calls;
-    assert(!enil_windows_probe_run(directory, &cb));
+    assert(!enil_native_login_run(directory, &cb));
     assert(calls == before && keys == 1);
     return 0;
   }
-  assert(enil_windows_probe_run(directory, &cb));
+  assert(enil_native_login_run(directory, &cb));
   assert(qr_count == 1 && pins == 1 && keys == 1 && unwraps == 1);
   s = read_saved();
   assert(strcmp(cJSON_GetObjectItem(s, "refreshToken")->valuestring, "private-refresh-token") == 0);
@@ -123,7 +123,7 @@ int main(int argc, char **argv) {
   if (!fail_unwrap) assert(cJSON_GetObjectItem(s, "e2eeKeys"));
   cJSON_Delete(s);
   before = calls;
-  assert(enil_windows_probe_run(directory, &cb));
+  assert(enil_native_login_run(directory, &cb));
   assert(calls == before && keys == 1 && unwraps == 1);
   /* Simulate interruption between saving raw reply and mapping tokens. */
   s = read_saved();
@@ -136,7 +136,7 @@ int main(int argc, char **argv) {
     assert(enil_session_write(path, s));
   }
   cJSON_Delete(s);
-  assert(enil_windows_probe_run(directory, &cb));
+  assert(enil_native_login_run(directory, &cb));
   assert(calls == before && keys == 1 && unwraps == 1);
   s = read_saved();
   assert(strcmp(cJSON_GetObjectItem(s, "accessToken")->valuestring, "private-access-token") == 0);

@@ -10,6 +10,8 @@ static const int kQRPixels = 256;
 @interface QRLoginWindowController () <ENILQRLoginObserver>
 - (void)beginLoginWithProfile:(NSString *)profile;
 - (void)chooseClient:(id)sender;
+- (void)retrySavedLogin:(id)sender;
+- (void)startNewQR:(id)sender;
 @end
 
 @implementation QRLoginWindowController
@@ -117,7 +119,27 @@ static const int kQRPixels = 256;
     [statusField_ setStringValue:NSLocalizedString(@"Could not save client identity", nil)];
     return;
   }
+  [self retrySavedLogin:nil];
+}
+
+- (void)startNewQR:(id)sender;
+{
+  (void)sender;
+  if (running_ || done_) return;
+  if (![ENILAccount restartQRLoginAtPath:accountDir_]) {
+    [statusField_ setStringValue:NSLocalizedString(@"Could not save login recovery", nil)];
+    return;
+  }
+  [self retrySavedLogin:nil];
+}
+
+- (void)retrySavedLogin:(id)sender;
+{
+  (void)sender;
+  if (running_ || done_) return;
   running_ = YES;
+  [qrImageView_ setImage:nil];
+  [pinField_ setHidden:YES];
   [chromeButton_ setHidden:YES];
   [windowsButton_ setHidden:YES];
   [qrImageView_ setHidden:NO];
@@ -147,14 +169,14 @@ static const int kQRPixels = 256;
 
 - (void)qrLoginDidEmitURL:(NSString *)s;
 {
-  if (![s length]) return;
+  if (done_ || ![s length]) return;
   [qrImageView_ setImage:[ENILQRImage imageForString:s pixelSize:kQRPixels]];
   [statusField_ setStringValue:NSLocalizedString(@"Scan with LINE on your phone", nil)];
 }
 
 - (void)qrLoginDidEmitPIN:(NSString *)s;
 {
-  if (![s length]) return;
+  if (done_ || ![s length]) return;
   [pinField_ setStringValue:s];
   [pinField_ setHidden:NO];
 }
@@ -168,7 +190,7 @@ static const int kQRPixels = 256;
    * Special case: the poll loop pre-formats "waiting for scan (N/M)" in C.
    * That would produce a new key per tick, so detect it here and pivot to
    * a stable format key with %d/%d placeholders that the strings file owns. */
-  if (![s length]) return;
+  if (done_ || ![s length]) return;
   int cur = 0, total = 0;
   if (sscanf([s UTF8String], "waiting for scan (%d/%d)", &cur, &total) == 2) {
     [statusField_ setStringValue:
@@ -190,6 +212,18 @@ static const int kQRPixels = 256;
      sheet. Otherwise claim terminal handling now so the programmatic
      [window close] below doesn't re-enter the windowWillClose: cancel path. */
   if (done_) return;
+  if (![result boolValue] && [ENILAccount canRestartQRLoginAtPath:accountDir_]) {
+    [qrImageView_ setHidden:YES];
+    [pinField_ setHidden:YES];
+    [statusField_ setStringValue:NSLocalizedString(@"Sign-in needs recovery", nil)];
+    [chromeButton_ setTitle:NSLocalizedString(@"Retry saved login", nil)];
+    [chromeButton_ setAction:@selector(retrySavedLogin:)];
+    [windowsButton_ setTitle:NSLocalizedString(@"Start new QR", nil)];
+    [windowsButton_ setAction:@selector(startNewQR:)];
+    [chromeButton_ setHidden:NO];
+    [windowsButton_ setHidden:NO];
+    return;
+  }
   done_ = YES;
   if ([result intValue] != 0) {
     /* Sign-in succeeded on the phone. Hand off: the delegate relocates the

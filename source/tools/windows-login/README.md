@@ -127,7 +127,9 @@ HTTP 200 and valid Compact Thrift success replies for `createSession` and
 `createQrCodeForSecure`, including a callback URL and nonce. No account login,
 phone device classification, messaging, or coexistence was verified by that check.
 
-A native-app port also needs authenticated Talk RPC schemas, token refresh,
-operation polling in place of Chrome SSE, and potentially the encrypted LEGY
-transport used by LINEJS with V3/JWT tokens. Successful QR creation alone is not
-evidence that ENIL's existing authenticated gateway calls will work with the token.
+The native apps now implement authenticated Talk schemas, native token refresh,
+operation polling, and LEGY transport. Production QR handling lives in
+`source/shared/enil_native_login.c`; pending recovery/activation lives in
+`enil_login_store.c`. This Python probe remains a standalone diagnostic tool.
+See [native development](../../../docs/native-development.md) for the production
+lifecycle and `make test-native` for the combined regression suite.

@@ -428,8 +428,6 @@ static NSString * const kENILLastActiveAccountKey = @"ENILLastActiveAccountMid";
 
   NSString *target =
     [[self enilRootPath] stringByAppendingPathComponent:mid];
-  NSString *targetSession =
-    [target stringByAppendingPathComponent:@"session.json"];
 
   /* If that mid is the live account, drop its engine before the file changes
    * underneath it (its token is now dead). */
@@ -437,12 +435,7 @@ static NSString * const kENILLastActiveAccountKey = @"ENILLastActiveAccountMid";
     [self teardownActiveEngine];
   }
 
-  [fm XP_createDirectoryAtPath:target
-   withIntermediateDirectories:YES
-                    attributes:nil
-                         error:NULL];
-  [fm XP_removeItemAtPath:targetSession error:NULL];  /* ok if absent */
-  if (![fm XP_copyItemAtPath:stagingSession toPath:targetSession error:NULL]) {
+  if (![ENILAccount activateQRLoginAtPath:stagingDir accountPath:target]) {
     ENILLog(@"ENILRootCoordinator.qrLoginDidFinish",
             @"FAILED to place session.json at %@ — staging kept: %@",
             target, stagingDir);

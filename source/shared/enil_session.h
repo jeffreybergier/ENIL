@@ -29,6 +29,12 @@ int enil_session_write(const char *path, cJSON *root);
  * rotation and unknown fields. Atomic, private, fsynced replacement. */
 int enil_session_save(const char *path, const session_t *session);
 int enil_session_patch(const char *path, cJSON *patch);
+/* A stable identifier for one login, unchanged by token rotation. Ensures it
+ * exists on legacy sessions too. Caller frees the returned string. */
+char *enil_session_login_id(const char *path);
+char *enil_session_new_id(void);
+/* Preserve an obsolete recovery file under a unique .retired.* name. */
+int enil_session_retire_file(const char *path);
 
 /* Bind the saved identity for the calling account operation. Clears any old
  * binding on failure. Also works for a staged session without an access token. */

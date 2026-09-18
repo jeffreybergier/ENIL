@@ -102,3 +102,31 @@ class NativeTransportTests(unittest.TestCase):
         p.writeFieldStop();p.writeStructEnd();p.writeFieldEnd();p.writeFieldStop();p.writeStructEnd();p.writeMessageEnd()
         decoded=self.decode('sendMessage',buf.getvalue())['success']
         self.assertEqual(decoded['chunks'],[base64.b64encode(b'\0\xff\x80ciphertext').decode()])
+
+    def test_superseded_and_committed_refresh_journals(self):
+        calls = []
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_POST(self):
+                wire = self.rfile.read(int(self.headers['Content-Length']))
+                protocol = TCompactProtocol(TMemoryBuffer(wire))
+                method, _, _ = protocol.readMessageBegin()
+                calls.append(method)
+                body = reply('refresh', [(0, TType.STRUCT, [
+                    (1, TType.STRING, 'fresh-from-fixture'),
+                    (5, TType.STRING, 'fresh-refresh-token')])])
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            for mode in ['journal-stale', 'journal-superseded', 'journal-committed', 'journal-legacy-committed']:
+                with self.subTest(mode=mode):
+                    subprocess.run([self.bin, f'http://127.0.0.1:{server.server_port}', mode,
+                                    str(Path(self.tmp.name) / (mode + '.json'))], check=True, timeout=10)
+            self.assertEqual(calls, ['refresh', 'refresh'])
+        finally:
+            server.shutdown(); server.server_close(); thread.join()

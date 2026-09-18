@@ -209,3 +209,9 @@
 "Windows login stopped. Session state saved; see log for details." = "Windowsログインを停止しました。状態は保存済みです。詳細はログをご確認ください。";
 
 "Windows desktop" = "Windows デスクトップ";
+
+/* Windows login recovery */
+"Sign-in needs recovery" = "ログインを再開してください";
+"Retry saved login" = "保存したログインを再試行";
+"Start new QR" = "新しいQRでログイン";
+"Could not save login recovery" = "ログインの再開を保存できませんでした";

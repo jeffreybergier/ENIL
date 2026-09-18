@@ -13,7 +13,7 @@
 #include "enil_session.h"
 #include "enil_worker.h"
 #include "enil_qrlogin.h"
-#include "enil_windows_probe.h"
+#include "enil_native_login.h"
 #include "enil_cocoa_log.h"
 
 #define SVC    "/api/talk/thrift/LoginQrCode"
@@ -604,7 +604,7 @@ int enil_qrlogin_run(const char *account_dir,
   }
   if (!strcmp(identity.transport, "native-thrift")) {
     cJSON_Delete(s);
-    rc = enil_windows_probe_run(account_dir, cb);
+    rc = enil_native_login_run(account_dir, cb);
     if (rc) rc = enil_qrlogin_recover_e2ee(account_dir);
     enil_identity_bind(NULL);
     return rc;
@@ -725,9 +725,8 @@ int enil_qrlogin_recover_e2ee(const char *account_dir) {
   if (unwrap_and_store(s, meta, "recover_e2ee")) {
     /* Same teardown the success login path does once E2EE is captured. */
     clear_qr_state(s, 0);
-    enil_session_write(path, s);
-    LOG("recover_e2ee", "offline recovery succeeded - session.json updated");
-    rc = 1;
+    rc = enil_session_write(path, s);
+    LOG("recover_e2ee", rc ? "offline recovery saved" : "could not save recovered keys");
   } else {
     LOG("recover_e2ee", "offline recovery failed - full re-login required");
   }

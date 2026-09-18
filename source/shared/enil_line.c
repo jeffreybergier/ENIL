@@ -9,6 +9,7 @@
 #include <ctype.h>
 #include <time.h>
 #include <unistd.h>
+#include <errno.h>
 #include <pthread.h>
 #include "cJSON.h"
 #include "enil_b64.h"
@@ -294,124 +295,157 @@ static int session_persist(const char *path, const session_t *session) {
  * Refresh the LINE access token via /api/auth/tokenRefresh and persist the
  * new credentials back to session.json. Returns malloc'd new access token.
  * ==========================================================================*/
+static const char *refresh_string(cJSON *root, const char *name) {
+  cJSON *item = cJSON_GetObjectItemCaseSensitive(root, name);
+  return cJSON_IsString(item) ? item->valuestring : NULL;
+}
+
+/* -1: keep the journal and stop, 0: make a fresh request, 1: replay the reply,
+ * 2: the reply was already committed. Login IDs reject superseded journals;
+ * refresh IDs also detect a committed reply after inline access-token rotation. */
+static int recover_refresh(const char *path, const session_t *session, char **body,
+                           char **refresh_id) {
+  cJSON *pending = NULL, *reply = NULL, *tokens;
+  const char *owner, *current, *previous, *raw, *id, *issued_access, *issued_refresh;
+  int result = -1;
+  if (access(path, F_OK) != 0)
+    return errno == ENOENT ? 0 : -1;
+  pending = enil_session_read(path);
+  owner = refresh_string(pending, "loginId");
+  current = refresh_string(session->snapshot, "loginId");
+  if (owner && current && strcmp(owner, current)) {
+    result = enil_session_retire_file(path) ? 0 : -1;
+    goto done;
+  }
+  id = refresh_string(pending, "refreshId");
+  if (id && session->refreshJournalId && !strcmp(id, session->refreshJournalId)) {
+    result = enil_session_retire_file(path) ? 2 : -1;
+    goto done;
+  }
+  previous = refresh_string(pending, "previousRefreshToken");
+  raw = refresh_string(pending, "responseBody");
+  if (!previous || !raw)
+    goto done;
+  if (!strcmp(previous, session->refreshToken)) {
+    *body = strdup(raw);
+    *refresh_id = id ? strdup(id) : enil_session_new_id();
+    if (*body && *refresh_id)
+      result = 1;
+    goto done;
+  }
+  /* Legacy journals have no generation/commit ID. A changed refresh token
+   * proves the old request must not be replayed. Preserve the evidence and
+   * distinguish an already committed response from a superseded login. */
+  reply = cJSON_Parse(raw);
+  tokens = cJSON_GetObjectItemCaseSensitive(reply, "data");
+  if (cJSON_HasObjectItem(tokens, "tokenV3IssueResult"))
+    tokens = cJSON_GetObjectItemCaseSensitive(tokens, "tokenV3IssueResult");
+  issued_access = refresh_string(tokens, "accessToken");
+  issued_refresh = refresh_string(tokens, "refreshToken");
+  if (enil_session_retire_file(path))
+    result = ((issued_access && !strcmp(issued_access, session->accessToken)) ||
+              (issued_refresh && !strcmp(issued_refresh, session->refreshToken)))
+                 ? 2
+                 : 0;
+done:
+  cJSON_Delete(reply);
+  cJSON_Delete(pending);
+  return result;
+}
+
 static char *token_refresh_locked(const char *session_path, int *out_line_code) {
   session_t session;
-  cJSON *req, *resp_root, *data, *issued;
-  char *body, *new_access = NULL;
-  ENILLineResponse resp;
+  cJSON *req = NULL, *root = NULL, *issued, *pending = NULL;
+  char *body = NULL, *new_access = NULL, *login_id = NULL, *refresh_id = NULL;
+  ENILLineResponse resp = {0, NULL};
   talk_token_v3_issue_result_t parsed;
   char pending_path[4096];
-
-  if (out_line_code) *out_line_code = 0;
-  if (!session_path || !enil_session_bind_identity(session_path)) return NULL;
-
+  int recovery, parsed_ok = 0;
   memset(&session, 0, sizeof(session));
-  if (!enil_session_load(session_path, &session)) {
-    LOG("token_refresh", "cannot read session.json");
+  memset(&parsed, 0, sizeof(parsed));
+  if (out_line_code)
+    *out_line_code = 0;
+  if (!session_path || !enil_session_bind_identity(session_path))
     return NULL;
-  }
-  if (!session.accessToken || !session.refreshToken) {
-    LOG("token_refresh", "missing accessToken or refreshToken");
-    enil_session_free(&session);
-    return NULL;
-  }
+  login_id = enil_session_login_id(session_path);
+  if (!login_id || !enil_session_load(session_path, &session) || !session.accessToken ||
+      !session.refreshToken)
+    goto done;
+  if (snprintf(pending_path, sizeof(pending_path), "%s.refresh-pending", session_path) >=
+      (int)sizeof(pending_path))
+    goto done;
 
-  if (snprintf(pending_path, sizeof(pending_path), "%s.refresh-pending", session_path) >= (int)sizeof(pending_path)) {
-    enil_session_free(&session); return NULL;
+  recovery = recover_refresh(pending_path, &session, &resp.body, &refresh_id);
+  if (recovery < 0)
+    goto done;
+  if (recovery == 2) {
+    new_access = strdup(session.accessToken);
+    goto done;
   }
-  /* A server may rotate both tokens. Recover a previously flushed response
-   * before ever reusing the old refresh token after an interrupted save. */
-  if (access(pending_path, F_OK) == 0) {
-    cJSON *pending = enil_session_read(pending_path);
-    cJSON *old = cJSON_GetObjectItemCaseSensitive(pending, "previousRefreshToken");
-    cJSON *raw = cJSON_GetObjectItemCaseSensitive(pending, "responseBody");
-    if (!cJSON_IsString(old) || !cJSON_IsString(raw)) {
-      cJSON_Delete(pending); enil_session_free(&session); return NULL;
-    }
-    if (strcmp(old->valuestring, session.refreshToken)) {
-      cJSON *recovered = cJSON_Parse(raw->valuestring);
-      cJSON *tokens = cJSON_GetObjectItemCaseSensitive(recovered, "data");
-      cJSON *nested = cJSON_GetObjectItemCaseSensitive(tokens, "tokenV3IssueResult");
-      cJSON *issued_access = cJSON_GetObjectItemCaseSensitive(nested ? nested : tokens, "accessToken");
-      if (cJSON_IsString(issued_access) && !strcmp(issued_access->valuestring, session.accessToken)) {
-        new_access = strdup(session.accessToken); unlink(pending_path);
+  if (!recovery) {
+    refresh_id = enil_session_new_id();
+    req = cJSON_CreateObject();
+    if (!refresh_id || !req || !cJSON_AddStringToObject(req, "refreshToken", session.refreshToken))
+      goto done;
+    body = cJSON_PrintUnformatted(req);
+    if (!body)
+      goto done;
+    resp = enil_line_post("/api/auth/tokenRefresh", body, session.accessToken);
+    if (!resp.body || resp.status != 200) {
+      ENIL_LOG("Line.token_refresh", "LINE API request failed: HTTP %ld", resp.status);
+      root = resp.body ? cJSON_Parse(resp.body) : NULL;
+      if (out_line_code) {
+        cJSON *code = cJSON_GetObjectItemCaseSensitive(root, "code");
+        if (cJSON_IsNumber(code))
+          *out_line_code = code->valueint;
       }
-      cJSON_Delete(recovered); cJSON_Delete(pending); enil_session_free(&session);
-      return new_access;
+      goto done;
     }
-    resp.status = 200; resp.body = strdup(raw->valuestring);
-    cJSON_Delete(pending);
-    if (!resp.body) { enil_session_free(&session); return NULL; }
-    goto parse_refresh;
   }
-
-  req = cJSON_CreateObject();
-  cJSON_AddStringToObject(req, "refreshToken", session.refreshToken);
-  body = cJSON_PrintUnformatted(req);
-  cJSON_Delete(req);
-  if (!body) { enil_session_free(&session); return NULL; }
-
-  resp = enil_line_post("/api/auth/tokenRefresh", body, session.accessToken);
-  free(body);
-
-  if (!resp.body || resp.status != 200) {
-    ENIL_LOG("Line.token_refresh", "LINE API request failed: HTTP %ld", resp.status);
-    if (out_line_code && resp.body) {
-      cJSON *err = cJSON_Parse(resp.body);
-      if (err) {
-        cJSON *code = cJSON_GetObjectItemCaseSensitive(err, "code");
-        if (cJSON_IsNumber(code)) *out_line_code = code->valueint;
-        cJSON_Delete(err);
-      }
-    }
-    enil_line_response_free(&resp);
-    enil_session_free(&session);
-    return NULL;
+  /* Upgrade legacy recovery journals too: the refresh ID is durable before
+   * committing it with the tokens, so a subsequent replay is idempotent. */
+  pending = cJSON_CreateObject();
+  if (!pending || !cJSON_AddStringToObject(pending, "loginId", login_id) ||
+      !cJSON_AddStringToObject(pending, "refreshId", refresh_id) ||
+      !cJSON_AddStringToObject(pending, "previousRefreshToken", session.refreshToken) ||
+      !cJSON_AddStringToObject(pending, "responseBody", resp.body) ||
+      !enil_session_write(pending_path, pending)) {
+    enil_health_set_failure(ENIL_ERR_LINE,
+                            "Cannot save rotated credentials; stop before another refresh.");
+    goto done;
   }
-
-  {
-    cJSON *pending = cJSON_CreateObject();
-    cJSON_AddStringToObject(pending, "previousRefreshToken", session.refreshToken);
-    cJSON_AddStringToObject(pending, "responseBody", resp.body);
-    if (!enil_session_write(pending_path, pending)) {
-      cJSON_Delete(pending); enil_line_response_free(&resp); enil_session_free(&session);
-      enil_health_set_failure(ENIL_ERR_LINE, "Cannot save rotated credentials; stop before another refresh.");
-      return NULL;
-    }
-    cJSON_Delete(pending);
-  }
-parse_refresh:
-  resp_root = cJSON_Parse(resp.body);
-  enil_line_response_free(&resp);
-  if (!resp_root) {
-    LOG("token_refresh", "invalid JSON response");
-    enil_session_free(&session);
-    return NULL;
-  }
-
-  data   = cJSON_GetObjectItem(resp_root, "data");
-  issued = cJSON_GetObjectItem(data, "tokenV3IssueResult");
-  if (!issued) issued = data;
-
+  root = cJSON_Parse(resp.body);
+  issued = cJSON_GetObjectItemCaseSensitive(root, "data");
+  if (cJSON_HasObjectItem(issued, "tokenV3IssueResult"))
+    issued = cJSON_GetObjectItemCaseSensitive(issued, "tokenV3IssueResult");
   if (talk_token_v3_issue_result_parse(issued, &parsed) < 0) {
     LOG("token_refresh", "response missing accessToken; saved reply retained");
-    cJSON_Delete(resp_root);
-    enil_session_free(&session);
-    return NULL;
+    goto done;
   }
-
-  new_access = strdup(parsed.accessToken);
+  parsed_ok = 1;
   session_apply_token_v3(&session, &parsed);
-  if (!session_persist(session_path, &session)) {
-    free(new_access); new_access = NULL;
-    enil_health_set_failure(ENIL_ERR_LINE, "Could not persist rotated credentials; stop and recover the saved session.");
+  free(session.refreshJournalId);
+  session.refreshJournalId = strdup(refresh_id);
+  if (!session.refreshJournalId || !session_persist(session_path, &session)) {
+    enil_health_set_failure(ENIL_ERR_LINE,
+                            "Could not persist rotated credentials; recover the saved session.");
+    goto done;
   }
-
-  if (new_access) unlink(pending_path);
-  talk_token_v3_issue_result_free(&parsed);
-  cJSON_Delete(resp_root);
-  enil_session_free(&session);
+  new_access = strdup(parsed.accessToken);
+  if (new_access)
+    unlink(pending_path);
   LOG("token_refresh", "access token refreshed");
+done:
+  if (parsed_ok)
+    talk_token_v3_issue_result_free(&parsed);
+  enil_session_free(&session);
+  enil_line_response_free(&resp);
+  cJSON_Delete(req);
+  cJSON_Delete(root);
+  cJSON_Delete(pending);
+  free(body);
+  free(login_id);
+  free(refresh_id);
   return new_access;
 }
 

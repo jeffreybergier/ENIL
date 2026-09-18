@@ -53,7 +53,7 @@ function incoming() {
 
 beforeAll(async () => {
   worker = await unstable_dev('src/index.js', { experimental: { disableExperimentalWarning: true },
-    local: true, logLevel: 'error', vars: { WORKER_SECRETS: secret } });
+    local: true, persist: false, logLevel: 'error', vars: { WORKER_SECRETS: secret } });
   const qr = await (await post('/keygen', {})).json();
   // Compact Thrift: field 1 list<struct>, one E2EE key with fields
   // version=1, keyId=7, publicKey, privateKey, timestamp=0.

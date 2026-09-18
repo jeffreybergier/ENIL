@@ -14,7 +14,7 @@ static cJSON *schema;
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 static void init_schema(void) { schema = cJSON_Parse(schema_text); }
 static cJSON *at(cJSON *a, int i) { return cJSON_GetArrayItem(a, i); }
-static const char *str(cJSON *v) { return cJSON_IsString(v) ? v->valuestring : ""; }
+static const char *str(cJSON *v) { return v && cJSON_IsString(v) ? v->valuestring : ""; }
 static const char *kind(cJSON *t) { return str(cJSON_IsArray(t) ? at(t, 0) : t); }
 static cJSON *fields(cJSON *t) { return cJSON_GetObjectItemCaseSensitive(schema, str(t)); }
 static int type(cJSON *t) {
@@ -180,6 +180,7 @@ typedef struct {
   const unsigned char *p;
   size_t n, pos;
   int bad;
+  int strict_strings;
 } Reader;
 static unsigned int get(Reader *r) {
   if (r->pos >= r->n) {
@@ -239,7 +240,11 @@ static cJSON *read_struct(Reader *r, cJSON *fs, int depth) {
       snprintf(number, sizeof(number), "%d", id);
       name = number;
     }
-    cJSON_AddItemToObject(o, name, v);
+    if (cJSON_HasObjectItem(o, name) || !cJSON_AddItemToObject(o, name, v)) {
+      cJSON_Delete(v);
+      r->bad = 1;
+      break;
+    }
   }
   return o;
 }
@@ -288,6 +293,10 @@ static cJSON *read_value(Reader *r, cJSON *t, int code, int depth, int field) {
     if (!strcmp(kind(t), "binary"))
       s = enil_b64_encode(r->p + r->pos, (size_t)n);
     else {
+      if ((t || r->strict_strings) && memchr(r->p + r->pos, 0, (size_t)n)) {
+        r->bad = 1;
+        return NULL;
+      }
       s = malloc((size_t)n + 1);
       if (s) {
         memcpy(s, r->p + r->pos, (size_t)n);
@@ -369,7 +378,8 @@ int enil_thrift_encode(const char *method, cJSON *args, ENILBuf *out) {
     enil_buf_free(out);
   return ok;
 }
-cJSON *enil_thrift_decode(const char *method, const void *data, size_t size) {
+static cJSON *decode(const char *method, const void *data, size_t size,
+                      int *exception) {
   Reader r;
   uint64_t n;
   char name[160];
@@ -382,11 +392,13 @@ cJSON *enil_thrift_decode(const char *method, const void *data, size_t size) {
   r.n = size;
   r.pos = 0;
   r.bad = 0;
+  r.strict_strings = exception != NULL;
   if (get(&r) != 0x82)
     return NULL;
   mt = (int)get(&r);
-  if ((mt & 31) != 1 || (mt >> 5) != 2)
+  if ((mt & 31) != 1 || ((mt >> 5) != 2 && !(exception && (mt >> 5) == 3)))
     return NULL;
+  if (exception) *exception = (mt >> 5) == 3;
   if (uv(&r) != 0)
     return NULL;
   n = uv(&r);
@@ -394,7 +406,7 @@ cJSON *enil_thrift_decode(const char *method, const void *data, size_t size) {
     return NULL;
   r.pos += (size_t)n;
   snprintf(name, sizeof(name), "%s_result", method);
-  o = read_struct(&r, cJSON_GetObjectItemCaseSensitive(schema, name), 0);
+  o = read_struct(&r, exception ? NULL : cJSON_GetObjectItemCaseSensitive(schema, name), 0);
   /* Some servers append one redundant STOP. */
   if (r.pos < r.n && r.n - r.pos == 1 && r.p[r.pos] == 0)
     r.pos++;
@@ -403,4 +415,15 @@ cJSON *enil_thrift_decode(const char *method, const void *data, size_t size) {
     return NULL;
   }
   return o;
+}
+
+cJSON *enil_thrift_decode(const char *method, const void *data, size_t size) {
+  return decode(method, data, size, NULL);
+}
+
+cJSON *enil_thrift_decode_raw(const char *method, const void *data, size_t size,
+                              int *exception) {
+  if (!exception) return NULL;
+  *exception = 0;
+  return decode(method, data, size, exception);
 }
