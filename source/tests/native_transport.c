@@ -9,7 +9,9 @@
 #include "enil_sse.h"
 #include "enil_thrift.h"
 #include "enil_worker.h"
+#include "enil_b64.h"
 #include <assert.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,6 +20,29 @@ static const char *origin;
 static int health_failed, fail_event, event_count, requests;
 static long long last_revision;
 static const char *activate_staging, *activate_account;
+static const char *timeout_phase;
+static curl_off_t timeout_request_size;
+static const char *expected_worker_token, *replace_during_encode_path;
+static cJSON *replace_during_encode_session;
+static int worker_calls;
+CURLcode __real_curl_easy_getinfo(CURL *, CURLINFO, ...);
+CURLcode __wrap_curl_easy_getinfo(CURL *curl, CURLINFO info, ...) {
+  void *value;
+  va_list args;
+  va_start(args, info);
+  value = va_arg(args, void *);
+  va_end(args);
+  if (timeout_phase && info == CURLINFO_PRETRANSFER_TIME) {
+    *(double *)value = !strcmp(timeout_phase, "connect") || !strcmp(timeout_phase, "tls")
+      ? 0 : 0.1;
+    return CURLE_OK;
+  }
+  if (timeout_phase && info == CURLINFO_SIZE_UPLOAD_T) {
+    *(curl_off_t *)value = !strcmp(timeout_phase, "idle") ? timeout_request_size : 0;
+    return CURLE_OK;
+  }
+  return __real_curl_easy_getinfo(curl, info, value);
+}
 CURLcode __real_curl_easy_perform(CURL *);
 CURLcode __wrap_curl_easy_perform(CURL *c) {
   char *url = NULL, buf[1024];
@@ -31,6 +56,8 @@ CURLcode __wrap_curl_easy_perform(CURL *c) {
   curl_easy_setopt(c, CURLOPT_URL, buf);
   curl_easy_setopt(c, CURLOPT_PROXY, "");
   requests++;
+  if (timeout_phase)
+    return CURLE_OPERATION_TIMEDOUT;
   {
     CURLcode rc = __real_curl_easy_perform(c);
     /* Deterministically activate B while A's refresh is still in flight,
@@ -72,8 +99,22 @@ char *enil_worker_sign(const char *p, const char *b, const char *t) {
 cJSON *enil_worker_decrypt_ex(const char *p, cJSON *v, const volatile int *cancel) {
   cJSON *r = cJSON_CreateObject();
   (void)cancel;
+  worker_calls++;
   cJSON_AddItemToObject(r, "body", cJSON_Duplicate(cJSON_GetObjectItem(v, "body"), 1));
   if (strstr(p, "encode")) {
+    if (expected_worker_token)
+      assert(!strcmp(cJSON_GetObjectItem(v, "accessToken")->valuestring, expected_worker_token));
+    if (replace_during_encode_path) {
+      assert(enil_session_activate(replace_during_encode_path, replace_during_encode_session));
+      replace_during_encode_path = NULL;
+    }
+    if (timeout_phase) {
+      unsigned char *bytes = NULL;
+      int size = enil_b64_decode_alloc(cJSON_GetObjectItem(v, "body")->valuestring, &bytes);
+      assert(size > 0);
+      timeout_request_size = size;
+      free(bytes);
+    }
     cJSON_AddStringToObject(r, "key", "synthetic");
     cJSON_AddStringToObject(r, "xLcs", "0008synthetic");
   } else
@@ -160,6 +201,61 @@ static void polling(const char *path, int fail) {
   }
   cJSON_Delete(saved);
 }
+static void request_generation(const char *path, const enil_identity_t *identity) {
+  const char *rpc = "/api/talk/thrift/Talk/TalkService/getLastOpRevision";
+  cJSON *root = cJSON_Parse("{\"loginId\":\"A\",\"accessToken\":\"token-A\"}"), *saved;
+  ENILLineResponse r;
+  char *token;
+  int before;
+  cJSON_AddItemToObject(root, "clientIdentity", enil_identity_to_json(identity));
+  assert(enil_session_write(path, root));
+  assert(enil_session_bind_identity(path));
+  /* Ordinary rotation within A must still be picked up by in-flight work. */
+  assert(enil_session_accept_next_access("token-A", "rotated-A"));
+  expected_worker_token = "rotated-A";
+  r = enil_line_post(rpc, "[]", "token-A");
+  assert(r.status == 200 && r.body && requests == 1);
+  enil_line_response_free(&r);
+  before = worker_calls;
+  cJSON_ReplaceItemInObject(root, "loginId", cJSON_CreateString("B"));
+  cJSON_ReplaceItemInObject(root, "accessToken", cJSON_CreateString("token-B"));
+  assert(enil_session_activate(path, root));
+  assert(enil_session_bound_access_token(&token) == -1 && !token);
+  assert(!enil_session_continue_identity(path));
+  /* Nested media preparation must not rebind this operation to B. */
+  assert(!enil_line_acquire_obs_token(path, "token-A"));
+  r = enil_line_post(rpc, "[]", "token-A");
+  assert(!r.body && requests == 1 && worker_calls == before);
+  enil_line_response_free(&r);
+  assert(!enil_session_accept_next_access("token-B", "late-A-response"));
+  saved = enil_session_read(path);
+  assert(cJSON_Compare(root, saved, 1));
+  cJSON_Delete(saved);
+  /* A new operation can explicitly start under B. */
+  assert(enil_session_bind_identity(path));
+  expected_worker_token = "token-B";
+  r = enil_line_post(rpc, "[]", "token-B");
+  assert(r.status == 200 && r.body && requests == 2);
+  enil_line_response_free(&r);
+  /* Replacement while the Worker is encoding also stops before LINE. */
+  cJSON_ReplaceItemInObject(root, "loginId", cJSON_CreateString("C"));
+  cJSON_ReplaceItemInObject(root, "accessToken", cJSON_CreateString("token-C"));
+  replace_during_encode_path = path;
+  replace_during_encode_session = root;
+  r = enil_line_post(rpc, "[]", "token-B");
+  assert(!r.body && requests == 2);
+  enil_line_response_free(&r);
+  assert(!enil_session_continue_identity(path));
+  assert(enil_session_bind_identity(path));
+  assert(unlink(path) == 0);
+  before = worker_calls;
+  r = enil_line_post(rpc, "[]", "token-C");
+  assert(!r.body && requests == 2 && worker_calls == before);
+  enil_line_response_free(&r);
+  assert(!health_failed);
+  cJSON_Delete(root);
+}
+
 int main(int argc, char **argv) {
   enil_identity_t id;
   ENILLineResponse r;
@@ -167,6 +263,10 @@ int main(int argc, char **argv) {
   origin = argv[1];
   assert(enil_identity_default("desktopwin", &id));
   assert(enil_identity_bind(&id));
+  if (!strcmp(argv[2], "request-generation")) {
+    request_generation(argv[3], &id);
+    return 0;
+  }
   if (!strcmp(argv[2], "poll-kick")) {
     ENILSSEClient *client;
     cJSON *root = cJSON_CreateObject();
@@ -346,7 +446,17 @@ int main(int argc, char **argv) {
     cJSON_Delete(v);
     return 0;
   }
-  r = enil_line_post(argv[2], argv[3], "synthetic-token");
+  if (!strncmp(argv[2], "timeout-", 8)) {
+    timeout_phase = argv[2] + 8;
+    r = enil_line_post("/native/sync", "[{\"lastRevision\":\"10\",\"count\":100}]",
+                       "synthetic-token");
+    assert(requests == 1 && !health_failed);
+  } else if (!strcmp(argv[2], "short-poll")) {
+    r = enil_line_post_ex("/native/sync", "[{\"lastRevision\":\"10\",\"count\":100}]",
+                          "synthetic-token", NULL, 0, 150, NULL);
+  } else {
+    r = enil_line_post(argv[2], argv[3], "synthetic-token");
+  }
   printf("%ld\n%s\n", r.status, r.body ? r.body : "");
   enil_line_response_free(&r);
   return 0;

@@ -31,6 +31,11 @@
  * down a connection that is merely between pings. */
 #define SSE_IDLE_TIMEOUT 45
 
+/* Match the native Thrift reply bound. Grow on demand so ordinary pings do
+ * not reserve megabytes, and never silently truncate a message for parsing. */
+#define SSE_MAX_EVENT_SIZE (8U * 1024U * 1024U)
+#define SSE_MAX_LINE_SIZE (SSE_MAX_EVENT_SIZE + 7U) /* data: space, plus CR in CRLF */
+
 #define LOG(fn, msg) enil_log("Sse." fn, "%s", msg)
 
 struct ENILSSEClient {
@@ -53,13 +58,52 @@ struct ENILSSEClient {
 /* SSE parse state — lives on the stack of sse_thread */
 typedef struct {
   ENILSSEClient *client;
-  char           line_buf[2048];
-  size_t         line_len;
+  char          *line_buf;
+  size_t         line_len, line_cap;
   char           event_type[64];
-  char           data_buf[65536];
+  char          *data_buf;
+  size_t         data_len, data_cap;
+  int            has_data;
 } ENILSSEState;
 
 /* ------------------------------------------------------------------ */
+
+static int append_sse(ENILSSEState *s, char **buf, size_t *len, size_t *cap,
+                       const char *text, size_t count, size_t limit)
+{
+  size_t needed, grown;
+  char *next;
+  const char *error = "SSE event exceeds the supported size.";
+  if (count > limit - *len) goto failed;
+  needed = *len + count + 1;
+  if (needed > *cap) {
+    grown = *cap ? *cap : 256;
+    while (grown < needed) grown *= 2;
+    if (grown > limit + 1) grown = limit + 1;
+    next = (char *)realloc(*buf, grown);
+    if (!next) {
+      error = "Cannot allocate SSE event buffer.";
+      goto failed;
+    }
+    *buf = next;
+    *cap = grown;
+  }
+  memcpy(*buf + *len, text, count);
+  *len += count;
+  (*buf)[*len] = '\0';
+  return 1;
+failed:
+  s->client->delivery_failed = 1;
+  /* Keep the cursor, but stop reconnecting to the same oversized event. */
+  enil_health_set_failure(ENIL_ERR_LINE, error);
+  return 0;
+}
+
+static void free_sse_state(ENILSSEState *s)
+{
+  free(s->line_buf);
+  free(s->data_buf);
+}
 
 static long long parse_event_revision(const char *type, const char *data)
 {
@@ -96,12 +140,12 @@ static void dispatch_event(ENILSSEState *s)
   ENILSSEClient *c = s->client;
   long long      rev;
 
-  if (!s->event_type[0] && !s->data_buf[0]) return;
+  if (!s->event_type[0] && !s->has_data) return;
 
   ev.type = s->event_type[0] ? s->event_type : "message";
-  ev.data = s->data_buf;
+  ev.data = s->data_buf ? s->data_buf : "";
 
-  ENIL_LOG("Sse.dispatchEvent", "%s (%d bytes)", ev.type, (int)strlen(s->data_buf));
+  ENIL_LOG("Sse.dispatchEvent", "%s (%lu bytes)", ev.type, (unsigned long)s->data_len);
 
   if ((c->fn && !c->fn(&ev, c->ctx)) || enil_health_any_failed() || c->stop) {
     c->delivery_failed = 1;
@@ -113,7 +157,7 @@ static void dispatch_event(ENILSSEState *s)
      * succeeds, including when the app exits or the sync fails. */
     c->stop = 1;
   } else {
-    rev = parse_event_revision(ev.type, s->data_buf);
+    rev = parse_event_revision(ev.type, ev.data);
     if (!save_local_rev(c, rev)) c->delivery_failed = 1;
   }
 
@@ -122,7 +166,9 @@ static void dispatch_event(ENILSSEState *s)
   }
 
   s->event_type[0] = '\0';
-  s->data_buf[0]   = '\0';
+  if (s->data_buf) s->data_buf[0] = '\0';
+  s->data_len = 0;
+  s->has_data = 0;
 }
 
 static void process_line(ENILSSEState *s)
@@ -136,14 +182,23 @@ static void process_line(ENILSSEState *s)
 
   if (strncmp(s->line_buf, "event:", 6) == 0) {
     val = s->line_buf + 6;
-    while (*val == ' ') val++;
-    strncpy(s->event_type, val, sizeof(s->event_type) - 1);
-    s->event_type[sizeof(s->event_type) - 1] = '\0';
+    if (*val == ' ') val++;
+    if (strlen(val) >= sizeof(s->event_type)) {
+      s->client->delivery_failed = 1;
+      enil_health_set_failure(ENIL_ERR_LINE, "SSE event type exceeds the supported size.");
+      return;
+    }
+    strcpy(s->event_type, val);
   } else if (strncmp(s->line_buf, "data:", 5) == 0) {
     val = s->line_buf + 5;
-    while (*val == ' ') val++;
-    strncat(s->data_buf, val,
-            sizeof(s->data_buf) - strlen(s->data_buf) - 1);
+    if (*val == ' ') val++;
+    /* SSE joins consecutive data fields with a newline, including empty
+     * fields. Preserve whitespace within JSON instead of concatenating it. */
+    if (s->has_data && !append_sse(s, &s->data_buf, &s->data_len, &s->data_cap,
+                                   "\n", 1, SSE_MAX_EVENT_SIZE)) return;
+    if (!append_sse(s, &s->data_buf, &s->data_len, &s->data_cap,
+                    val, strlen(val), SSE_MAX_EVENT_SIZE)) return;
+    s->has_data = 1;
   }
   /* ignore id: and comment lines */
 }
@@ -164,12 +219,13 @@ static size_t write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
     if (c == '\n') {
       if (s->line_len > 0 && s->line_buf[s->line_len - 1] == '\r')
         s->line_len--;
-      s->line_buf[s->line_len] = '\0';
+      if (s->line_buf) s->line_buf[s->line_len] = '\0';
       process_line(s);
       s->line_len = 0;
       if (s->client->stop || s->client->reconnect || s->client->delivery_failed) return 0;
-    } else if (s->line_len < sizeof(s->line_buf) - 1) {
-      s->line_buf[s->line_len++] = c;
+    } else if (!append_sse(s, &s->line_buf, &s->line_len, &s->line_cap,
+                            &c, 1, SSE_MAX_LINE_SIZE)) {
+      return 0;
     }
   }
 
@@ -244,6 +300,7 @@ static void native_poll(ENILSSEClient *c) {
     c->reconnect = 0;
     c->interrupt = 0;
     if (c->stop) break;
+    if (!enil_session_continue_identity(c->session_path)) break;
     saved = enil_session_read(c->session_path);
     args = cJSON_CreateArray();
     req = cJSON_CreateObject();
@@ -272,6 +329,10 @@ static void native_poll(ENILSSEClient *c) {
     if (body)
       response = enil_line_post_ex("/native/sync", body, token, NULL, 0, 35000, &c->interrupt);
     if (response.status == 204 || c->reconnect || c->stop) {
+      /* A completed idle poll breaks the failure streak just like a reply.
+       * A user cancellation alone is not evidence of a healthy connection. */
+      if (response.status == 204 && !c->reconnect && !c->stop)
+        failures = 0;
       cJSON_Delete(saved);
       cJSON_Delete(args);
       free(body);
@@ -463,6 +524,7 @@ static void *sse_thread(void *arg)
 
     c->delivery_failed = 0;
     rc = curl_easy_perform(curl);
+    free_sse_state(&state);
 
     {
       long http_code = 0;

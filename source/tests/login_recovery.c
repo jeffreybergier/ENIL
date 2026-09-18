@@ -2,11 +2,29 @@
 #include "enil_login_store.h"
 #include "enil_session.h"
 #include <assert.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+static int file_syncs, directory_syncs, fail_directory_sync;
+int __real_fsync(int fd);
+int __wrap_fsync(int fd) {
+  struct stat info;
+  assert(fstat(fd, &info) == 0);
+  if (S_ISDIR(info.st_mode)) {
+    directory_syncs++;
+    if (fail_directory_sync) {
+      errno = EIO;
+      return -1;
+    }
+  } else {
+    file_syncs++;
+  }
+  return __real_fsync(fd);
+}
 
 void enil_log(const char *tag, const char *format, ...) {
   (void)tag;
@@ -203,9 +221,41 @@ static void reject_superseded_save(const char *root, int legacy) {
   enil_session_free(&stale);
 }
 
+static void directory_durability(const char *root) {
+  char file[4096];
+  cJSON *value = cJSON_Parse("{\"accessToken\":\"synthetic\"}"), *saved;
+  path(file, sizeof(file), root, "session.json");
+  assert(value && enil_session_write(file, value));
+  assert(file_syncs == 1 && directory_syncs == 1);
+
+  /* A directory flush failure must not be reported as a durable commit.
+   * The renamed credentials remain available for recovery, not rolled back. */
+  fail_directory_sync = 1;
+  cJSON_ReplaceItemInObject(value, "accessToken", cJSON_CreateString("rotated"));
+  assert(!enil_session_write(file, value));
+  assert(file_syncs == 2 && directory_syncs == 2);
+  saved = enil_session_read(file);
+  assert(cJSON_Compare(saved, value, 1));
+  cJSON_Delete(saved);
+  fail_directory_sync = 0;
+  assert(enil_session_write(file, value));
+  assert(enil_session_retire_file(file));
+  assert(access(file, F_OK) != 0 && directory_syncs == 4);
+
+  /* Relative paths must flush '.', including recovery journal retirement. */
+  assert(chdir(root) == 0);
+  assert(enil_session_write("session.json", value));
+  fail_directory_sync = 1;
+  assert(!enil_session_retire_file("session.json"));
+  assert(access("session.json", F_OK) != 0 && directory_syncs == 6);
+  cJSON_Delete(value);
+}
+
 int main(int argc, char **argv) {
   assert(argc == 3);
-  if (!strcmp(argv[2], "cycles"))
+  if (!strcmp(argv[2], "durability"))
+    directory_durability(argv[1]);
+  else if (!strcmp(argv[2], "cycles"))
     activation_cycles(argv[1]);
   else if (!strcmp(argv[2], "restart"))
     restart_uncertain(argv[1]);

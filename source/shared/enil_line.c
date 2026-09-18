@@ -365,10 +365,11 @@ static char *token_refresh_locked(const char *session_path, int *out_line_code) 
   memset(&parsed, 0, sizeof(parsed));
   if (out_line_code)
     *out_line_code = 0;
-  if (!session_path || !enil_session_bind_identity(session_path))
+  if (!session_path)
     return NULL;
   login_id = enil_session_login_id(session_path);
-  if (!login_id || !enil_session_load(session_path, &session) || !session.accessToken ||
+  if (!login_id || !enil_session_bind_identity(session_path) ||
+      !enil_session_load(session_path, &session) || !session.accessToken ||
       !session.refreshToken)
     goto done;
   /* Activation can run between the ID migration and the load. Associate the
@@ -487,7 +488,7 @@ char *enil_line_acquire_obs_token(const char *session_path,
     return NULL;
   }
 
-  if (!enil_session_bind_identity(session_path)) return NULL;
+  if (!enil_session_continue_identity(session_path)) return NULL;
 
   /* Body is a JSON array [scope]; scope 2 = OBS general */
   resp = enil_line_post(

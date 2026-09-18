@@ -9,6 +9,7 @@
 #include "enil_http.h"
 #include "enil_cocoa_image.h"
 #include <assert.h>
+#include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,6 +26,23 @@ static int fail_messages, failed, succeeded, fetching;
 static long long baseline = 20;
 static int event_test, allowed_polls = 1, stop_test;
 static long long requested_revision;
+static int box_mode, box_calls, history_calls, read_range_calls;
+static int poll_failure_mode, fail_session_write, queue_during_sync;
+enum {
+  CHAT_EMPTY, CHAT_HTTP_ERROR, CHAT_TRANSPORT_ERROR, CHAT_MISSING_ARRAY,
+  CHAT_BAD_ENTRY, CHAT_DB_ERROR, CHAT_BAD_ARRAY, CHAT_BAD_BODY
+};
+static int chat_update_mode, chat_calls;
+
+int __real_fsync(int fd);
+int __wrap_fsync(int fd) {
+  if (fail_session_write) { errno = EIO; return -1; }
+  return __real_fsync(fd);
+}
+unsigned int __real_sleep(unsigned int seconds);
+unsigned int __wrap_sleep(unsigned int seconds) {
+  return poll_failure_mode ? 0 : __real_sleep(seconds);
+}
 
 void enil_log(const char *tag, const char *format, ...) { (void)tag; (void)format; }
 void enil_status_post(const char *key, const char *message, int indeterminate) {
@@ -65,6 +83,22 @@ static ENILLineResponse response(const char *data) {
 ENILLineResponse __wrap_enil_line_post(const char *path, const char *body, const char *token) {
   const char *method = strrchr(path, '/') + 1;
   (void)body; (void)token;
+  if (!strcmp(method, "getChats")) {
+    chat_calls++;
+    if (chat_update_mode == CHAT_HTTP_ERROR || chat_update_mode == CHAT_TRANSPORT_ERROR) {
+      ENILLineResponse r = {chat_update_mode == CHAT_HTTP_ERROR ? 503 : 0, NULL};
+      return r;
+    }
+    if (chat_update_mode == CHAT_MISSING_ARRAY) return response("{}");
+    if (chat_update_mode == CHAT_BAD_ARRAY) return response("{\"chats\":{}}");
+    if (chat_update_mode == CHAT_BAD_BODY) return response("[]");
+    /* A valid entry before a malformed one must not become partial success. */
+    if (chat_update_mode == CHAT_BAD_ENTRY)
+      return response("{\"chats\":[{\"chatMid\":\"cformer\"},{}]}");
+    if (chat_update_mode == CHAT_DB_ERROR)
+      return response("{\"chats\":[{\"chatMid\":\"cformer\",\"chatName\":\"Updated\"}]}");
+    return response("{\"chats\":[]}");
+  }
   if (!strcmp(method, "getLastOpRevision")) {
     char value[40];
     revision_calls++;
@@ -79,14 +113,36 @@ ENILLineResponse __wrap_enil_line_post(const char *path, const char *body, const
   if (!strcmp(method, "getAllContactIds")) return response("[]");
   if (!strcmp(method, "getAllChatMids"))
     return response("{\"memberChatMids\":[],\"invitedChatMids\":[]}");
-  if (!strcmp(method, "getMessageBoxes"))
+  if (!strcmp(method, "getMessageBoxes")) {
+    box_calls++;
+    if (box_mode == 1) return response("{\"messageBoxes\":[],\"hasNext\":false}");
+    if (box_mode == 2 || box_mode == 3) {
+      if (box_calls == 1)
+        return response("{\"messageBoxes\":[{\"id\":\"peer\",\"midType\":0}],\"hasNext\":true}");
+      if (box_mode == 2) { ENILLineResponse r = {503, NULL}; return r; }
+      return response("{\"messageBoxes\":[],\"hasNext\":true}");
+    }
     return response("{\"messageBoxes\":[{\"id\":\"peer\",\"midType\":0}],\"hasNext\":false}");
+  }
   if (!strcmp(method, "getRecentMessagesV2")) {
+    /* This chat is retained locally, but is no longer accessible remotely. */
+    assert(!strstr(body, "obsolete-chat"));
+    history_calls++;
+    if (queue_during_sync) {
+      cJSON *request = cJSON_Parse("{\"1\":\"200\",\"2\":\"300\"}");
+      assert(enil_session_update_partial_full_syncs(session_path, request) == 1);
+      cJSON_Delete(request);
+      queue_during_sync = 0;
+    }
     if (fail_messages) { ENILLineResponse r = {503, NULL}; return r; }
     return response("[{\"id\":\"saved-message\",\"from\":\"peer\",\"to\":\"self\","
                     "\"toType\":0,\"createdTime\":\"1\",\"contentType\":0,\"text\":\"recovered\"}]");
   }
-  if (!strcmp(method, "getMessageReadRange")) return response("[]");
+  if (!strcmp(method, "getMessageReadRange")) {
+    assert(!strstr(body, "obsolete-chat"));
+    read_range_calls++;
+    return response("[]");
+  }
   if (!strcmp(method, "getOwnedProductSummaries")) return response("{\"productList\":[]}");
   fprintf(stderr, "Unexpected RPC: %s\n", method);
   assert(0);
@@ -97,6 +153,18 @@ ENILLineResponse __wrap_enil_line_post_ex(const char *path, const char *body, co
                                          const volatile int *cancel) {
   (void)body; (void)token; (void)headers; (void)count; (void)timeout; (void)cancel;
   assert(!strcmp(path, "/native/sync"));
+  if (poll_failure_mode) {
+    ENILLineResponse r = {503, NULL};
+    int n;
+    pthread_mutex_lock(&mutex);
+    n = ++poll_count;
+    pthread_mutex_unlock(&mutex);
+    if (poll_failure_mode == 1 && n == 13) {
+      r.status = 400;
+      r.body = strdup("{\"code\":8}"); /* end the test through the normal callback */
+    } else if (poll_failure_mode == 1 && n % 2 == 0) r.status = 204;
+    return r;
+  }
   if (event_test) {
     ENILLineResponse r;
     cJSON *args = cJSON_Parse(body);
@@ -133,6 +201,19 @@ ENILLineResponse __wrap_enil_line_post_ex(const char *path, const char *body, co
         "{\"revision\":\"18\",\"type\":140,\"param1\":\"uncached\","
         "\"param2\":\"{\\\"chatMid\\\":\\\"upeer\\\","
         "\\\"curr\\\":{\\\"predefinedReactionType\\\":2}}\",\"param3\":\"upeer\"}"));
+      free(r.body);
+      r.body = cJSON_PrintUnformatted(root);
+      cJSON_Delete(root);
+    }
+    if (event_test == 3) {
+      cJSON *root = cJSON_Parse(r.body);
+      cJSON *operations = cJSON_GetObjectItem(cJSON_GetObjectItem(
+        cJSON_GetObjectItem(root, "data"), "operationResponse"), "operations");
+      /* Both chat-update op types precede messages from an unrelated peer. */
+      cJSON_InsertItemInArray(operations, 0, cJSON_Parse(
+        "{\"revision\":\"19\",\"type\":122,\"param1\":\"cformer\"}"));
+      cJSON_InsertItemInArray(operations, 0, cJSON_Parse(
+        "{\"revision\":\"18\",\"type\":121,\"param1\":\"cformer\"}"));
       free(r.body);
       r.body = cJSON_PrintUnformatted(root);
       cJSON_Delete(root);
@@ -197,6 +278,66 @@ static void uncached_reactions(void) {
   assert(sqlite3_exec(db, "DROP TABLE messages_v2", NULL, NULL, NULL) == SQLITE_OK);
   assert(enil_db_message_reactions_update(db, "uncached", "upeer", 0, 2, NULL, NULL, 1)
          != SQLITE_OK);
+}
+
+static void chat_update_recovery(int mode) {
+  ENILSSEClient *client;
+  cJSON *saved;
+  sqlite3_stmt *statement;
+  event_test = 3;
+  chat_update_mode = mode;
+  enil_health_bind(health);
+  assert(sqlite3_exec(db,
+    "INSERT INTO contacts_v2(mid,displayName) VALUES('upeer','Peer');"
+    "INSERT INTO chats_v2(chatMid,chatName) VALUES('cformer','Cached name')",
+    NULL, NULL, NULL) == SQLITE_OK);
+  if (mode == CHAT_DB_ERROR)
+    assert(sqlite3_exec(db,
+      "CREATE TRIGGER reject_chat BEFORE INSERT ON chats_v2 "
+      "BEGIN SELECT RAISE(FAIL,'chat write failure'); END",
+      NULL, NULL, NULL) == SQLITE_OK);
+  client = enil_sse_create("synthetic", 10, session_path, db, health);
+  assert(client && enil_sse_start(client, event, NULL));
+  pthread_mutex_lock(&mutex);
+  while (poll_count < 2) pthread_cond_wait(&poll_ready, &mutex);
+  if (mode != CHAT_EMPTY) {
+    /* A failed lookup/write must retain every cursor and block later events
+     * until retry succeeds, rather than treating the chat as inaccessible. */
+    assert(chat_calls == 1);
+    assert(requested_revision == 10 && enil_db_get_local_rev(db) == 10);
+    check_messages(0);
+    saved = enil_session_read(session_path);
+    assert(!cJSON_HasObjectItem(saved, "nativeGlobalRevision"));
+    assert(!cJSON_HasObjectItem(saved, "nativeIndividualRevision"));
+    cJSON_Delete(saved);
+    if (mode == CHAT_DB_ERROR)
+      assert(sqlite3_exec(db, "DROP TRIGGER reject_chat", NULL, NULL, NULL) == SQLITE_OK);
+    else
+      chat_update_mode = CHAT_EMPTY;
+    allowed_polls = 2;
+    pthread_cond_broadcast(&poll_ready);
+    while (poll_count < 3) pthread_cond_wait(&poll_ready, &mutex);
+  }
+  assert(chat_calls == (mode == CHAT_EMPTY ? 2 : 3));
+  assert(requested_revision == 21 && enil_db_get_local_rev(db) == 21);
+  check_messages(2);
+  assert(enil_db_message_box_unread_count(db, "upeer") == 2);
+  assert(!enil_health_any_failed());
+  saved = enil_session_read(session_path);
+  assert(!strcmp(cJSON_GetObjectItem(saved, "nativeGlobalRevision")->valuestring, "99"));
+  assert(!strcmp(cJSON_GetObjectItem(saved, "nativeIndividualRevision")->valuestring, "100"));
+  cJSON_Delete(saved);
+  /* Skipping the obsolete update preserves locally cached metadata. */
+  assert(sqlite3_prepare_v2(db, "SELECT chatName FROM chats_v2 WHERE chatMid='cformer'",
+                            -1, &statement, NULL) == SQLITE_OK);
+  assert(sqlite3_step(statement) == SQLITE_ROW);
+  assert(!strcmp((const char *)sqlite3_column_text(statement, 0),
+                  mode == CHAT_DB_ERROR ? "Updated" : "Cached name"));
+  sqlite3_finalize(statement);
+  stop_test = 1;
+  pthread_cond_broadcast(&poll_ready);
+  pthread_mutex_unlock(&mutex);
+  enil_sse_free(client);
 }
 
 static void legacy_account_start(void) {
@@ -286,6 +427,132 @@ static void event_write_recovery(int cursor_failure) {
   pthread_mutex_unlock(&mutex);
   enil_sse_free(client);
 }
+static void current_chats(int mode) {
+  sqlite3_stmt *statement;
+  int ok;
+  box_mode = mode;
+  assert(sqlite3_exec(db, "INSERT INTO message_boxes_v2(id) VALUES('obsolete-chat');"
+                         "INSERT INTO messages_v2(id,chat_id,text) VALUES('old','obsolete-chat','cached history')",
+                      NULL, NULL, NULL) == SQLITE_OK);
+  ok = enil_account_sync_all(health, db, "synthetic", "self", session_path);
+  assert(ok == (mode < 2));
+  assert(enil_db_get_local_rev(db) == (mode < 2 ? baseline : 10));
+  assert(history_calls == (mode == 0 ? 1 : 0));
+  assert(read_range_calls == (mode == 0 ? 1 : 0));
+  assert(box_calls == (mode >= 2 ? 2 : 1));
+  /* Keeping local history must not require successfully fetching it again. */
+  assert(sqlite3_prepare_v2(db, "SELECT text FROM messages_v2 WHERE id='old'", -1,
+                            &statement, NULL) == SQLITE_OK);
+  assert(sqlite3_step(statement) == SQLITE_ROW);
+  assert(!strcmp((const char *)sqlite3_column_text(statement, 0), "cached history"));
+  sqlite3_finalize(statement);
+}
+
+static void polling_failure_streak(int consecutive) {
+  ENILSSEClient *client;
+  int i, count = 0;
+  poll_failure_mode = consecutive ? 2 : 1;
+  enil_health_bind(health);
+  client = enil_sse_create("synthetic", 10, session_path, db, health);
+  assert(client && enil_sse_start(client, event, NULL));
+  for (i = 0; i < 200; i++) {
+    pthread_mutex_lock(&mutex);
+    count = poll_count;
+    pthread_mutex_unlock(&mutex);
+    if (count >= 13 || enil_health_any_failed()) break;
+    usleep(10000);
+  }
+  enil_sse_free(client);
+  assert(count == (consecutive ? 5 : 13));
+  assert(enil_health_any_failed() == consecutive);
+  assert(enil_db_get_local_rev(db) == 10);
+}
+
+static void check_partial_state(const char *completed, const char *pending) {
+  cJSON *root = enil_session_read(session_path);
+  cJSON *expected = cJSON_Parse(completed);
+  cJSON *queued = cJSON_GetObjectItem(root, "pendingPartialFullSyncs");
+  char *wire = enil_session_get_partial_full_syncs_json(session_path);
+  cJSON *advertised = cJSON_Parse(wire);
+  assert(cJSON_Compare(cJSON_GetObjectItem(root, "lastPartialFullSyncs"), expected, 1));
+  assert(cJSON_Compare(advertised, expected, 1)); /* pending work never goes to LINE */
+  cJSON_Delete(expected);
+  expected = pending ? cJSON_Parse(pending) : NULL;
+  assert(pending ? cJSON_Compare(queued, expected, 1) : !queued);
+  cJSON_Delete(expected);
+  cJSON_Delete(advertised);
+  free(wire);
+  cJSON_Delete(root);
+}
+
+static int partial_event(void) {
+  enil_account_sse_result_t result;
+  int scheduled;
+  assert(enil_account_process_sse_event(health, db, "synthetic", "self", session_path,
+    "partialFullSync", "{\"targetCategories\":{\"1\":\"100\"}}", NULL, &result));
+  scheduled = result.should_start_sync;
+  enil_account_sse_result_free(&result);
+  return scheduled;
+}
+
+static void partial_sync_recovery(int newer) {
+  enil_account_sse_result_t result;
+  cJSON *snapshot, *replacement;
+  char *login_id = enil_session_login_id(session_path);
+  assert(login_id);
+  free(login_id);
+  /* A failed queue write must fail delivery, rather than silently losing work. */
+  fail_session_write = 1;
+  assert(!enil_account_process_sse_event(health, db, "synthetic", "self", session_path,
+    "partialFullSync", "{\"targetCategories\":{\"1\":\"100\"}}", NULL, &result));
+  enil_account_sse_result_free(&result);
+  fail_session_write = 0;
+  check_partial_state("{\"1\":\"9\"}", NULL);
+  assert(partial_event());
+  check_partial_state("{\"1\":\"9\"}", "{\"1\":\"100\"}");
+  fail_messages = 1;
+  assert(!enil_account_sync_all(health, db, "synthetic", "self", session_path));
+  check_partial_state("{\"1\":\"9\"}", "{\"1\":\"100\"}");
+  /* Reopening the saved session/redelivering the event still schedules work. */
+  assert(enil_session_bind_identity(session_path));
+  assert(partial_event());
+  fail_messages = 0; fetching = 0;
+  assert(sqlite3_exec(db, "CREATE TRIGGER reject_cursor BEFORE INSERT ON db_meta "
+    "WHEN NEW.key='localRev' BEGIN SELECT RAISE(FAIL,'cursor write failure'); END",
+    NULL, NULL, NULL) == SQLITE_OK);
+  assert(!enil_account_sync_all(health, db, "synthetic", "self", session_path));
+  check_partial_state("{\"1\":\"9\"}", "{\"1\":\"100\"}");
+  assert(sqlite3_exec(db, "DROP TRIGGER reject_cursor", NULL, NULL, NULL) == SQLITE_OK);
+  /* Completion is also atomic: a failed session write leaves work pending. */
+  snapshot = enil_session_read(session_path);
+  fail_session_write = 1;
+  assert(!enil_session_complete_partial_full_syncs(session_path, snapshot));
+  fail_session_write = 0;
+  cJSON_Delete(snapshot);
+  check_partial_state("{\"1\":\"9\"}", "{\"1\":\"100\"}");
+  fetching = 0;
+  queue_during_sync = newer;
+  snapshot = enil_session_read(session_path);
+  assert(enil_account_sync_all(health, db, "synthetic", "self", session_path));
+  check_partial_state("{\"1\":\"100\"}", newer ? "{\"1\":\"200\",\"2\":\"300\"}" : NULL);
+  assert(!partial_event()); /* the completed request is now a no-op */
+  if (newer) {
+    cJSON *request = cJSON_Parse("{\"1\":\"200\",\"2\":\"300\"}");
+    assert(enil_session_update_partial_full_syncs(session_path, request) == 1);
+    cJSON_Delete(request);
+  }
+  /* A sync finishing after reauthentication cannot acknowledge the new login. */
+  replacement = enil_session_read(session_path);
+  cJSON_ReplaceItemInObject(replacement, "loginId", cJSON_CreateString("replacement"));
+  assert(enil_session_activate(session_path, replacement));
+  assert(!enil_session_complete_partial_full_syncs(session_path, snapshot));
+  cJSON_Delete(snapshot);
+  snapshot = enil_session_read(session_path);
+  assert(cJSON_Compare(snapshot, replacement, 1));
+  cJSON_Delete(snapshot);
+  cJSON_Delete(replacement);
+}
+
 int main(int argc, char **argv) {
   enil_identity_t identity;
   cJSON *root;
@@ -298,14 +565,24 @@ int main(int argc, char **argv) {
   assert(db && enil_db_create_tables(db) == SQLITE_OK);
   assert(enil_db_set_local_rev(db, 10) == SQLITE_OK);
   health = enil_health_create("synthetic");
-  assert(enil_identity_default("desktopwin", &identity));
+  assert(enil_identity_default(argc == 4 && !strcmp(argv[3], "partial-chrome")
+    ? "chrome" : "desktopwin", &identity));
   root = cJSON_Parse("{\"accessToken\":\"synthetic\",\"mid\":\"self\",\"lastPartialFullSyncs\":{\"1\":\"9\"}}");
   cJSON_AddItemToObject(root, "clientIdentity", enil_identity_to_json(&identity));
   assert(enil_session_write(session_path, root));
   cJSON_Delete(root);
   if (argc == 4) {
-    if (!strcmp(argv[3], "reactions")) uncached_reactions();
+    if (!strcmp(argv[3], "idle-reset")) polling_failure_streak(0);
+    else if (!strncmp(argv[3], "chat-update-", 12)) chat_update_recovery(atoi(argv[3] + 12));
+    else if (!strcmp(argv[3], "consecutive-failures")) polling_failure_streak(1);
+    else if (!strncmp(argv[3], "partial-", 8) && strcmp(argv[3], "partial-boxes"))
+      partial_sync_recovery(!strcmp(argv[3], "partial-newer"));
+    else if (!strcmp(argv[3], "reactions")) uncached_reactions();
     else if (!strcmp(argv[3], "legacy")) legacy_account_start();
+    else if (!strcmp(argv[3], "obsolete")) current_chats(0);
+    else if (!strcmp(argv[3], "empty")) current_chats(1);
+    else if (!strcmp(argv[3], "partial-boxes")) current_chats(2);
+    else if (!strcmp(argv[3], "invalid-boxes")) current_chats(3);
     else event_write_recovery(!strcmp(argv[3], "cursor"));
     enil_health_destroy(health);
     enil_db_close(db);

@@ -13,6 +13,7 @@ static const char *origin;
 static const char *directory;
 static int calls, keys, unwraps, qr_count, pins;
 static int fail_unwrap;
+static char last_status[256];
 
 void enil_log(const char *tag, const char *fmt, ...) { (void)tag; (void)fmt; }
 CURLcode __real_curl_easy_perform(CURL *curl);
@@ -87,6 +88,7 @@ static void status(const char *message, void *ctx) {
   (void)ctx;
   assert(!strstr(message, "private-access-token"));
   assert(!strstr(message, "private-refresh-token"));
+  snprintf(last_status, sizeof(last_status), "%s", message);
 }
 int main(int argc, char **argv) {
   enil_qrlogin_callbacks_t cb;
@@ -102,6 +104,7 @@ int main(int argc, char **argv) {
   cancel = 0;
   if (strcmp(argv[3], "token-error") == 0) {
     assert(!enil_native_login_run(directory, &cb));
+    assert(!strcmp(last_status, "Windows login: qrCodeLoginV2ForSecure error 5"));
     s = read_saved();
     assert(cJSON_IsTrue(cJSON_GetObjectItem(s, "nativeTokenRequestStarted")));
     assert(cJSON_GetObjectItem(s, "lastNativeResponseBase64"));

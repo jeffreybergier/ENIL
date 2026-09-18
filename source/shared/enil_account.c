@@ -921,24 +921,26 @@ static void enil_account_sse_handle_talk_exception(sqlite3 *db,
   if (root) cJSON_Delete(root);
 }
 
-static void enil_account_sse_handle_partial_full_sync(const char *session_path,
+static int enil_account_sse_handle_partial_full_sync(const char *session_path,
                                                       const char *event_data,
                                                       enil_account_sse_result_t *result)
 {
   cJSON *root;
   cJSON *targets;
+  int pending = -1;
 
   root = cJSON_Parse(event_data);
   targets = root ? cJSON_GetObjectItem(root, "targetCategories") : NULL;
   if (cJSON_IsObject(targets)) {
-    int changed = enil_session_update_partial_full_syncs(session_path, targets);
-    if (changed) {
+    pending = enil_session_update_partial_full_syncs(session_path, targets);
+    if (pending > 0) {
       ENIL_LOG("ENILAccount.sse_event_core",
-               "partialFullSync advanced; triggering resync");
+               "partialFullSync pending; triggering resync");
       result->should_start_sync = 1;
     }
   }
   if (root) cJSON_Delete(root);
+  return pending >= 0;
 }
 
 int enil_account_process_sse_event(enil_health_t *health,
@@ -958,7 +960,7 @@ int enil_account_process_sse_event(enil_health_t *health,
   if (!db || !event_type || !event_data) return 0;
 
   if (health) enil_health_bind(health);
-  if (!enil_session_bind_identity(session_path)) return 0;
+  if (!enil_session_continue_identity(session_path)) return 0;
 
   if (strcmp(event_type, "message") == 0)
     enil_status_post("sse.message", "Received message", 1);
@@ -992,8 +994,9 @@ int enil_account_process_sse_event(enil_health_t *health,
   }
 
   if (strcmp(event_type, "partialFullSync") == 0) {
-    enil_account_sse_handle_partial_full_sync(session_path, event_data,
-                                              result);
+    if (!enil_account_sse_handle_partial_full_sync(session_path, event_data,
+                                                   result))
+      return 0;
   }
 
   if (strcmp(event_type, "fullSync") == 0) {

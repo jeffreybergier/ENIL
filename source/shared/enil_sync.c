@@ -1432,6 +1432,13 @@ static int apply_op_chat_update(sqlite3    *db,
     ENIL_LOG("Sync.op_121", "getChats failed for %s", chat_mid);
     return SQLITE_ERROR;
   }
+  /* A replayed update can refer to a chat we have since left. A successful
+   * empty lookup has nothing to apply; acknowledge it so later operations
+   * can arrive. Failed lookups above and database writes below stay retryable. */
+  if (chats_n == 0) {
+    ENIL_LOG("Sync.op_121", "chat %s no longer available; skipping update", chat_mid);
+    rc = SQLITE_OK;
+  }
   if (chats_n > 0) {
     chats_arr[0].isInvited = 0;
     rc = enil_db_chat_upsert(db, &chats_arr[0]);
@@ -1966,7 +1973,9 @@ static void backfill_member_contacts(sqlite3 *db, const char *current_token,
  * Returns 0 on success, non-zero to abort the whole sync. */
 static int sync_phase_account(sqlite3    *db,
                               const char *current_token,
-                              const char *session_path)
+                              const char *session_path,
+                              talk_message_box_t **current_boxes,
+                              int *current_boxes_n)
 {
   int rc;
 
@@ -2106,19 +2115,20 @@ static int sync_phase_account(sqlite3    *db,
       report(ENIL_SYNC_PHASE_ACCOUNT, 2, 3, "Message boxes fetch failed", 1);
       return 1;
     }
-    sqlite3_exec(db, "BEGIN", NULL, NULL, NULL);
-    rc = SQLITE_OK;
+    rc = sqlite3_exec(db, "BEGIN", NULL, NULL, NULL);
     for (bi = 0; bi < boxes_n && rc == SQLITE_OK; bi++) {
       rc = enil_db_message_box_upsert(db, &boxes[bi]);
-      talk_message_box_free(&boxes[bi]);
     }
-    for (; bi < boxes_n; bi++) talk_message_box_free(&boxes[bi]);
-    free(boxes);
-    sqlite3_exec(db, rc == SQLITE_OK ? "COMMIT" : "ROLLBACK", NULL, NULL, NULL);
+    if (rc == SQLITE_OK) rc = sqlite3_exec(db, "COMMIT", NULL, NULL, NULL);
     if (rc != SQLITE_OK) {
+      sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+      for (bi = 0; bi < boxes_n; bi++) talk_message_box_free(&boxes[bi]);
+      free(boxes);
       report(ENIL_SYNC_PHASE_ACCOUNT, 2, 3, "Message boxes write failed", rc);
       return 1;
     }
+    *current_boxes = boxes;
+    *current_boxes_n = boxes_n;
   }
 
   report(ENIL_SYNC_PHASE_ACCOUNT, 3, 3, "Syncing account...", 0);
@@ -2126,16 +2136,12 @@ static int sync_phase_account(sqlite3    *db,
   return 0;
 }
 
-/* PHASE 3 — MESSAGES: fetch recent messages per chat + inline sticker scan. */
-static int sync_phase_messages(sqlite3 *db, const char *current_token)
+/* Fetch only the boxes returned by this sync. Retain old local history, but
+ * do not query chats that have since been removed or become inaccessible. */
+static int sync_phase_messages(sqlite3 *db, const char *current_token,
+                                const talk_message_box_t *boxes, int boxes_n)
 {
-  talk_message_box_t *boxes = NULL;
-  int boxes_n = 0, done = 0, i, failed = 0;
-
-  if (enil_db_message_box_get_all(db, &boxes, &boxes_n) != SQLITE_OK) {
-    report(ENIL_SYNC_PHASE_MESSAGES, 0, 0, "Message boxes read failed", 1);
-    return 1;
-  }
+  int done = 0, i, failed = 0;
   report(ENIL_SYNC_PHASE_MESSAGES, 0, boxes_n, "Syncing messages...", 0);
 
   for (i = 0; i < boxes_n && !failed; i++) {
@@ -2174,8 +2180,6 @@ static int sync_phase_messages(sqlite3 *db, const char *current_token)
       report(ENIL_SYNC_PHASE_MESSAGES, done, boxes_n, "Syncing messages...", 0);
     }
   }
-  for (i = 0; i < boxes_n; i++) talk_message_box_free(&boxes[i]);
-  free(boxes);
   return failed;
 }
 
@@ -2186,13 +2190,11 @@ static int sync_phase_messages(sqlite3 *db, const char *current_token)
  * after PHASE_MESSAGES because the marker renderer resolves the bubble
  * id by joining peerLastReadTime against the user's outgoing messages
  * in messages_v2, which only just landed. */
-static void sync_phase_read_range(sqlite3 *db, const char *current_token)
+static void sync_phase_read_range(sqlite3 *db, const char *current_token,
+                                  const talk_message_box_t *boxes, int boxes_n)
 {
   enum { READ_RANGE_BATCH_SIZE = 100 };
-  talk_message_box_t *boxes   = NULL;
-  int                 boxes_n = 0, i;
 
-  enil_db_message_box_get_all(db, &boxes, &boxes_n);
   if (boxes_n > 0) {
     const char **batch = (const char **)calloc((size_t)boxes_n, sizeof(*batch));
     int          j;
@@ -2212,8 +2214,6 @@ static void sync_phase_read_range(sqlite3 *db, const char *current_token)
       free(batch);
     }
   }
-  for (i = 0; i < boxes_n; i++) talk_message_box_free(&boxes[i]);
-  free(boxes);
 }
 
 /* PHASE 4 — DECRYPTING: decrypt pending E2EE messages, then re-extract the
@@ -2700,11 +2700,18 @@ static void sync_phase_downloading(sqlite3    *db,
 
 /* Commit only the revision captured before fetching data. Events created
  * during the sync must still be delivered when the stream restarts. */
-static int sync_phase_finish(sqlite3 *db, long long local_rev)
+static int sync_phase_finish(sqlite3 *db, long long local_rev,
+                              const char *session_path, const cJSON *snapshot)
 {
   if (enil_health_any_failed() || local_rev < 0 ||
       enil_db_set_local_rev(db, local_rev) != SQLITE_OK) {
     report(ENIL_SYNC_PHASE_DONE, 0, 0, "Could not enable SSE", 1);
+    return 0;
+  }
+  /* The data and operation cursor are durable before acknowledging partial
+   * requests. A failed acknowledgement leaves them available for retry. */
+  if (!enil_session_complete_partial_full_syncs(session_path, snapshot)) {
+    report(ENIL_SYNC_PHASE_DONE, 0, 0, "Could not save partial sync completion", 1);
     return 0;
   }
   report(ENIL_SYNC_PHASE_DONE, 0, 0, "Done", 0);
@@ -2723,26 +2730,39 @@ int enil_sync_all(sqlite3    *db,
                    const char *session_path)
 {
   long long local_rev;
-  int ok = 0;
+  talk_message_box_t *boxes = NULL;
+  cJSON *snapshot;
+  int boxes_n = 0, i, ok = 0;
   char *current_token = sync_phase_connecting(access_token, session_path);
   if (!current_token) return 0;
+  snapshot = enil_session_read(session_path);
+  if (!cJSON_IsObject(snapshot)) {
+    report(ENIL_SYNC_PHASE_CONNECTING, 0, 0, "Could not load pending sync requests", 1);
+    cJSON_Delete(snapshot);
+    free(current_token);
+    return 0;
+  }
   local_rev = TalkService_getLastOpRevision(current_token);
   if (local_rev < 0) {
     report(ENIL_SYNC_PHASE_CONNECTING, 0, 0, "Could not enable SSE", 1);
     free(current_token);
+    cJSON_Delete(snapshot);
     return 0;
   }
 
-  if (sync_phase_account(db, current_token, session_path) == 0 &&
-      sync_phase_messages(db, current_token) == 0) {
-    sync_phase_read_range(db, current_token);
+  if (sync_phase_account(db, current_token, session_path, &boxes, &boxes_n) == 0 &&
+      sync_phase_messages(db, current_token, boxes, boxes_n) == 0) {
+    sync_phase_read_range(db, current_token, boxes, boxes_n);
     sync_phase_decrypting(db, current_token, my_mid, session_path);
     sync_phase_preparing(db, current_token, session_path);
     sync_phase_downloading(db, current_token, session_path);
-    ok = sync_phase_finish(db, local_rev);
+    ok = sync_phase_finish(db, local_rev, session_path, snapshot);
   }
 
+  for (i = 0; i < boxes_n; i++) talk_message_box_free(&boxes[i]);
+  free(boxes);
   free(current_token);
+  cJSON_Delete(snapshot);
   return ok;
 }
 

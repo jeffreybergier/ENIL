@@ -32,6 +32,7 @@ typedef struct {
   long http_status;
   CURLcode curl_code;
   int failed;
+  char request_error[128]; /* preserve the final request's diagnostic for the UI */
 } NativeLogin;
 
 static const char *str(cJSON *o, const char *key) {
@@ -145,6 +146,7 @@ static cJSON *call(NativeLogin *p, const char *method, int polling, int interval
   p->error_code = -1;
   p->http_status = 0;
   p->curl_code = CURLE_OK;
+  p->request_error[0] = 0;
   if (cancelled(p))
     goto done;
   if (!encode(method, p->state, &request) ||
@@ -210,6 +212,7 @@ static cJSON *call(NativeLogin *p, const char *method, int polling, int interval
     code = cJSON_GetObjectItemCaseSensitive(error, exception ? "2" : "1");
     p->error_code = !exception && cJSON_IsNumber(code) ? code->valueint : -1;
     snprintf(message, sizeof(message), "Windows login: %s error %d", method, p->error_code);
+    snprintf(p->request_error, sizeof(p->request_error), "%s", message);
     status(p, message);
     goto done;
   }
@@ -227,6 +230,7 @@ done:
   if (!result && !p->failed && !cancelled(p) && p->error_code < 0) {
     snprintf(message, sizeof(message), "Windows login: %s HTTP %ld, transport %d", method,
              p->http_status, (int)p->curl_code);
+    snprintf(p->request_error, sizeof(p->request_error), "%s", message);
     status(p, message);
   }
   return result;
@@ -524,7 +528,8 @@ int enil_native_login_run(const char *directory, const enil_qrlogin_callbacks_t 
   }
 done:
   if (!ok && !p.failed && !cancelled(&p))
-    status(&p, "Windows login stopped. Session state saved; see log for details.");
+    status(&p, p.request_error[0] ? p.request_error :
+      "Windows login stopped. Session state saved; see log for details.");
   free(restore);
   free(qr_url);
   if (encoded)

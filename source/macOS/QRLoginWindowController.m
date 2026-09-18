@@ -316,10 +316,18 @@ static const CGFloat kLoginWindowHeight = 600;
      [window close] below doesn't re-enter the windowWillClose: cancel path. */
   if (done_) return;
   if (![result boolValue] && [ENILAccount canRestartQRLoginAtPath:accountDir_]) {
+    NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+    [alert setMessageText:NSLocalizedString(@"Sign-in needs recovery", nil)];
+    [alert setInformativeText:[statusField_ stringValue]];
+    [alert addButtonWithTitle:NSLocalizedString(@"Dismiss", nil)];
     [qrImageView_ setImage:nil];
     [pinField_ setStringValue:@""];
     [statusField_ setStringValue:NSLocalizedString(@"Sign-in needs recovery", nil)];
     [self showLoginActionsForRecovery:YES];
+    [alert XP_beginSheetModalForWindow:[self window]
+                         modalDelegate:self
+                        didEndSelector:@selector(recoveryAlertDidEnd:returnCode:contextInfo:)
+                           contextInfo:NULL];
     return;
   }
   done_ = YES;
@@ -364,6 +372,16 @@ static const CGFloat kLoginWindowHeight = 600;
       @selector(failAlertDidEnd:returnCode:contextInfo:)
                            contextInfo:NULL];
   }
+}
+
+/* Dismissing a recoverable error leaves the saved login and its actions open. */
+- (void)recoveryAlertDidEnd:(NSAlert *)alert
+                 returnCode:(NSInteger)returnCode
+                contextInfo:(void *)contextInfo;
+{
+  (void)returnCode;
+  (void)contextInfo;
+  [[alert window] orderOut:nil];
 }
 
 /* Dismiss closes the sheet AND the login window, then hands control back to

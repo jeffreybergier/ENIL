@@ -22,7 +22,8 @@ class LoginRecoveryTests(unittest.TestCase):
                         str(REPO / "source/tests/login_recovery.c"),
                         *[str(shared / name) for name in ["enil_login_store.c", "enil_session.c",
                                                          "enil_identity.c", "enil_api_json.c"]],
-                        "-Wl,--gc-sections", "-pthread", *flags, "-o", cls.binary], check=True)
+                        "-Wl,--gc-sections", "-Wl,--wrap=fsync", "-pthread",
+                        *flags, "-o", cls.binary], check=True)
 
     def run_case(self, mode):
         with tempfile.TemporaryDirectory(prefix="enil-recovery-") as root:
@@ -30,6 +31,9 @@ class LoginRecoveryTests(unittest.TestCase):
 
     def test_repeated_reauthentication_never_restores_older_tokens(self):
         self.run_case("cycles")
+
+    def test_directory_flush_failures_preserve_recoverable_credentials(self):
+        self.run_case("durability")
 
     def test_explicit_restart_preserves_uncertain_reply_and_starts_fresh(self):
         self.run_case("restart")

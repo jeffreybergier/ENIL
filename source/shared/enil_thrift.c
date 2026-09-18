@@ -6,19 +6,35 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#define LIMIT (8U * 1024U * 1024U)
+#define MAX_WIRE_SIZE (8U * 1024U * 1024U)
 static const char schema_text[] = "{"
 #include "enil_thrift_schema.inc"
                                   "}";
+/* Schema entries contain [field ID, field name, field type]. */
 static cJSON *schema;
 static pthread_once_t once = PTHREAD_ONCE_INIT;
-static void init_schema(void) { schema = cJSON_Parse(schema_text); }
-static cJSON *at(cJSON *a, int i) { return cJSON_GetArrayItem(a, i); }
-static const char *str(cJSON *v) { return v && cJSON_IsString(v) ? v->valuestring : ""; }
-static const char *kind(cJSON *t) { return str(cJSON_IsArray(t) ? at(t, 0) : t); }
-static cJSON *fields(cJSON *t) { return cJSON_GetObjectItemCaseSensitive(schema, str(t)); }
-static int type(cJSON *t) {
-  const char *s = kind(t);
+static void init_schema(void) {
+  schema = cJSON_Parse(schema_text);
+}
+
+static cJSON *array_item(cJSON *a, int i) {
+  return cJSON_GetArrayItem(a, i);
+}
+
+static const char *json_string(cJSON *v) {
+  return v && cJSON_IsString(v) ? v->valuestring : "";
+}
+
+static const char *schema_kind(cJSON *t) {
+  return json_string(cJSON_IsArray(t) ? array_item(t, 0) : t);
+}
+
+static cJSON *schema_fields(cJSON *t) {
+  return cJSON_GetObjectItemCaseSensitive(schema, json_string(t));
+}
+
+static int compact_type(cJSON *t) {
+  const char *s = schema_kind(t);
   if (!strcmp(s, "bool"))
     return 1;
   if (!strcmp(s, "byte"))
@@ -41,9 +57,10 @@ static int type(cJSON *t) {
     return 11;
   return 12;
 }
-static int put(ENILBuf *b, const void *p, size_t n) {
+
+static int append_bytes(ENILBuf *b, const void *p, size_t n) {
   char *q;
-  if (n > LIMIT || b->size > LIMIT - n)
+  if (n > MAX_WIRE_SIZE || b->size > MAX_WIRE_SIZE - n)
     return 0;
   q = realloc(b->data, b->size + n + 1);
   if (!q)
@@ -55,18 +72,26 @@ static int put(ENILBuf *b, const void *p, size_t n) {
   q[b->size] = 0;
   return 1;
 }
-static int byte(ENILBuf *b, unsigned char c) { return put(b, &c, 1); }
-static int var(ENILBuf *b, uint64_t n) {
+
+static int write_byte(ENILBuf *b, unsigned char c) {
+  return append_bytes(b, &c, 1);
+}
+
+static int write_varint(ENILBuf *b, uint64_t n) {
   do {
     unsigned char c = n & 127;
     n >>= 7;
-    if (!byte(b, c | (n ? 128 : 0)))
+    if (!write_byte(b, c | (n ? 128 : 0)))
       return 0;
   } while (n);
   return 1;
 }
-static uint64_t zig(int64_t n) { return ((uint64_t)n << 1) ^ (uint64_t)-(n < 0); }
-static int integer(cJSON *v, int64_t *n) {
+
+static uint64_t zigzag_encode(int64_t n) {
+  return ((uint64_t)n << 1) ^ (uint64_t)-(n < 0);
+}
+
+static int json_integer(cJSON *v, int64_t *n) {
   if (cJSON_IsString(v)) {
     char *end;
     errno = 0;
@@ -80,6 +105,7 @@ static int integer(cJSON *v, int64_t *n) {
   }
   return 0;
 }
+/* Encode JSON values using the pinned Compact Thrift field schema. */
 static int write_value(ENILBuf *, cJSON *, cJSON *, int);
 static int write_struct(ENILBuf *b, cJSON *fs, cJSON *v, int depth) {
   cJSON *f;
@@ -87,9 +113,10 @@ static int write_struct(ENILBuf *b, cJSON *fs, cJSON *v, int depth) {
   if (depth > 40 || !fs || (!cJSON_IsObject(v) && !cJSON_IsArray(v)))
     return 0;
   for (f = fs->child; f; f = f->next, index++) {
-    int id = at(f, 0)->valueint, code = type(at(f, 2)), delta = id - last;
-    cJSON *val =
-        cJSON_IsArray(v) ? at(v, index) : cJSON_GetObjectItemCaseSensitive(v, str(at(f, 1)));
+    int id = array_item(f, 0)->valueint, code = compact_type(array_item(f, 2)), delta = id - last;
+    cJSON *val = cJSON_IsArray(v)
+                     ? array_item(v, index)
+                     : cJSON_GetObjectItemCaseSensitive(v, json_string(array_item(f, 1)));
     if (!val || cJSON_IsNull(val))
       continue;
     if (code == 1) {
@@ -97,31 +124,32 @@ static int write_struct(ENILBuf *b, cJSON *fs, cJSON *v, int depth) {
         return 0;
       code = cJSON_IsTrue(val) ? 1 : 2;
     }
-    if (!byte(b, (unsigned char)((delta > 0 && delta < 16 ? delta << 4 : 0) | code)))
+    if (!write_byte(b, (unsigned char)((delta > 0 && delta < 16 ? delta << 4 : 0) | code)))
       return 0;
-    if ((delta <= 0 || delta >= 16) && !var(b, zig(id)))
+    if ((delta <= 0 || delta >= 16) && !write_varint(b, zigzag_encode(id)))
       return 0;
-    if (code > 2 && !write_value(b, at(f, 2), val, depth + 1))
+    if (code > 2 && !write_value(b, array_item(f, 2), val, depth + 1))
       return 0;
     last = id;
   }
-  return byte(b, 0);
+  return write_byte(b, 0);
 }
+
 static int write_value(ENILBuf *b, cJSON *t, cJSON *v, int depth) {
-  int code = type(t);
+  int code = compact_type(t);
   int64_t n;
   cJSON *item;
   if (depth > 40)
     return 0;
   if (code == 1)
-    return cJSON_IsBool(v) && byte(b, cJSON_IsTrue(v) ? 1 : 2);
+    return cJSON_IsBool(v) && write_byte(b, cJSON_IsTrue(v) ? 1 : 2);
   if (code >= 3 && code <= 6) {
-    if (!integer(v, &n))
+    if (!json_integer(v, &n))
       return 0;
     if ((code == 3 && (n < -128 || n > 127)) || (code == 4 && (n < -32768 || n > 32767)) ||
         (code == 5 && (n < INT32_MIN || n > INT32_MAX)))
       return 0;
-    return code == 3 ? byte(b, (unsigned char)n) : var(b, zig(n));
+    return code == 3 ? write_byte(b, (unsigned char)n) : write_varint(b, zigzag_encode(n));
   }
   if (code == 7) {
     uint64_t bits;
@@ -130,7 +158,7 @@ static int write_value(ENILBuf *b, cJSON *t, cJSON *v, int depth) {
       return 0;
     memcpy(&bits, &v->valuedouble, 8);
     for (i = 0; i < 8; i++)
-      if (!byte(b, (unsigned char)(bits >> (i * 8))))
+      if (!write_byte(b, (unsigned char)(bits >> (i * 8))))
         return 0;
     return 1;
   }
@@ -139,61 +167,65 @@ static int write_value(ENILBuf *b, cJSON *t, cJSON *v, int depth) {
     int len, ok;
     if (!cJSON_IsString(v))
       return 0;
-    if (strcmp(kind(t), "binary"))
-      return var(b, strlen(str(v))) && put(b, str(v), strlen(str(v)));
-    len = enil_b64_decode_alloc(str(v), &bytes);
+    if (strcmp(schema_kind(t), "binary"))
+      return write_varint(b, strlen(json_string(v))) &&
+             append_bytes(b, json_string(v), strlen(json_string(v)));
+    len = enil_b64_decode_alloc(json_string(v), &bytes);
     if (len < 0)
       return 0;
-    ok = var(b, (uint64_t)len) && put(b, bytes, (size_t)len);
+    ok = write_varint(b, (uint64_t)len) && append_bytes(b, bytes, (size_t)len);
     free(bytes);
     return ok;
   }
   if (code == 9 || code == 10) {
-    int count = cJSON_GetArraySize(v), ct = type(at(t, 1));
-    if (!cJSON_IsArray(v) || !byte(b, (unsigned char)((count < 15 ? count : 15) << 4 | ct)))
+    int count = cJSON_GetArraySize(v), ct = compact_type(array_item(t, 1));
+    if (!cJSON_IsArray(v) || !write_byte(b, (unsigned char)((count < 15 ? count : 15) << 4 | ct)))
       return 0;
-    if (count >= 15 && !var(b, (uint64_t)count))
+    if (count >= 15 && !write_varint(b, (uint64_t)count))
       return 0;
     for (item = v->child; item; item = item->next)
-      if (!write_value(b, at(t, 1), item, depth + 1))
+      if (!write_value(b, array_item(t, 1), item, depth + 1))
         return 0;
     return 1;
   }
   if (code == 11) {
     int count = cJSON_GetArraySize(v);
-    if (!cJSON_IsObject(v) || !var(b, (uint64_t)count))
+    if (!cJSON_IsObject(v) || !write_varint(b, (uint64_t)count))
       return 0;
-    if (count && !byte(b, (unsigned char)(type(at(t, 1)) << 4 | type(at(t, 2)))))
+    if (count && !write_byte(b, (unsigned char)(compact_type(array_item(t, 1)) << 4 |
+                                                compact_type(array_item(t, 2)))))
       return 0;
     for (item = v->child; item; item = item->next) {
       cJSON *key = cJSON_CreateString(item->string);
-      int ok = key && write_value(b, at(t, 1), key, depth + 1);
+      int ok = key && write_value(b, array_item(t, 1), key, depth + 1);
       cJSON_Delete(key);
-      if (!ok || !write_value(b, at(t, 2), item, depth + 1))
+      if (!ok || !write_value(b, array_item(t, 2), item, depth + 1))
         return 0;
     }
     return 1;
   }
-  return write_struct(b, fields(t), v, depth + 1);
+  return write_struct(b, schema_fields(t), v, depth + 1);
 }
+/* Bounded decoding also retains unknown fields under their numeric IDs. */
 typedef struct {
   const unsigned char *p;
   size_t n, pos;
   int bad;
   int strict_strings;
 } Reader;
-static unsigned int get(Reader *r) {
+static unsigned int read_byte(Reader *r) {
   if (r->pos >= r->n) {
     r->bad = 1;
     return 0;
   }
   return r->p[r->pos++];
 }
-static uint64_t uv(Reader *r) {
+
+static uint64_t read_varint(Reader *r) {
   uint64_t n = 0;
   int i;
   for (i = 0; i < 10; i++) {
-    unsigned int c = get(r);
+    unsigned int c = read_byte(r);
     if (i == 9 && c > 1)
       r->bad = 1;
     n |= (uint64_t)(c & 127) << (i * 7);
@@ -203,7 +235,11 @@ static uint64_t uv(Reader *r) {
   r->bad = 1;
   return 0;
 }
-static int64_t unzig(uint64_t n) { return (int64_t)(n >> 1) ^ -(int64_t)(n & 1); }
+
+static int64_t zigzag_decode(uint64_t n) {
+  return (int64_t)(n >> 1) ^ -(int64_t)(n & 1);
+}
+
 static cJSON *read_value(Reader *, cJSON *, int, int, int);
 static cJSON *read_struct(Reader *r, cJSON *fs, int depth) {
   cJSON *o = cJSON_CreateObject();
@@ -213,22 +249,22 @@ static cJSON *read_struct(Reader *r, cJSON *fs, int depth) {
     return o;
   }
   while (!r->bad) {
-    int h = (int)get(r), id;
+    int h = (int)read_byte(r), id;
     cJSON *f, *t = NULL, *v;
     const char *name = NULL;
     char number[20];
     if (!h)
       break;
-    id = (h >> 4) ? last + (h >> 4) : (int)unzig(uv(r));
+    id = (h >> 4) ? last + (h >> 4) : (int)zigzag_decode(read_varint(r));
     last = id;
     if (id < -32768 || id > 32767) {
       r->bad = 1;
       break;
     }
     for (f = fs ? fs->child : NULL; f; f = f->next)
-      if (at(f, 0)->valueint == id) {
-        t = at(f, 2);
-        name = str(at(f, 1));
+      if (array_item(f, 0)->valueint == id) {
+        t = array_item(f, 2);
+        name = json_string(array_item(f, 1));
         break;
       }
     v = read_value(r, t, h & 15, depth + 1, 1);
@@ -248,24 +284,26 @@ static cJSON *read_struct(Reader *r, cJSON *fs, int depth) {
   }
   return o;
 }
+
 static cJSON *read_value(Reader *r, cJSON *t, int code, int depth, int field) {
   if (depth > 40) {
     r->bad = 1;
     return NULL;
   }
-  if (t && strcmp(kind(t), "_any") && code != type(t) && !(type(t) == 1 && code == 2)) {
+  if (t && strcmp(schema_kind(t), "_any") && code != compact_type(t) &&
+      !(compact_type(t) == 1 && code == 2)) {
     r->bad = 1;
     return NULL;
   }
   if (code == 1 || code == 2) {
     if (!field)
-      code = (int)get(r);
+      code = (int)read_byte(r);
     if (code != 1 && code != 2)
       r->bad = 1;
     return cJSON_CreateBool(code == 1);
   }
   if (code >= 3 && code <= 6) {
-    int64_t n = code == 3 ? (int8_t)get(r) : unzig(uv(r));
+    int64_t n = code == 3 ? (int8_t)read_byte(r) : zigzag_decode(read_varint(r));
     char s[32];
     if (code == 6) {
       snprintf(s, sizeof(s), "%lld", (long long)n);
@@ -278,19 +316,19 @@ static cJSON *read_value(Reader *r, cJSON *t, int code, int depth, int field) {
     double d;
     int i;
     for (i = 0; i < 8; i++)
-      bits |= (uint64_t)get(r) << (i * 8);
+      bits |= (uint64_t)read_byte(r) << (i * 8);
     memcpy(&d, &bits, 8);
     return cJSON_CreateNumber(d);
   }
   if (code == 8) {
-    uint64_t n = uv(r);
+    uint64_t n = read_varint(r);
     cJSON *v;
     char *s;
-    if (n > r->n - r->pos || n > LIMIT) {
+    if (n > r->n - r->pos || n > MAX_WIRE_SIZE) {
       r->bad = 1;
       return NULL;
     }
-    if (!strcmp(kind(t), "binary"))
+    if (!strcmp(schema_kind(t), "binary"))
       s = enil_b64_encode(r->p + r->pos, (size_t)n);
     else {
       if ((t || r->strict_strings) && memchr(r->p + r->pos, 0, (size_t)n)) {
@@ -309,23 +347,23 @@ static cJSON *read_value(Reader *r, cJSON *t, int code, int depth, int field) {
     return v;
   }
   if (code == 12)
-    return read_struct(r, fields(t), depth + 1);
+    return read_struct(r, schema_fields(t), depth + 1);
   if (code >= 9 && code <= 11) {
     uint64_t n, i;
     int kt = 0, vt;
     cJSON *o;
     if (code == 11) {
-      n = uv(r);
-      vt = n ? (int)get(r) : 0;
+      n = read_varint(r);
+      vt = n ? (int)read_byte(r) : 0;
       kt = vt >> 4;
       vt &= 15;
       o = cJSON_CreateObject();
     } else {
-      vt = (int)get(r);
+      vt = (int)read_byte(r);
       n = (unsigned)vt >> 4;
       vt &= 15;
       if (n == 15)
-        n = uv(r);
+        n = read_varint(r);
       o = cJSON_CreateArray();
     }
     if (n > 100000 || n > r->n - r->pos || !o) {
@@ -336,8 +374,8 @@ static cJSON *read_value(Reader *r, cJSON *t, int code, int depth, int field) {
       cJSON *k = NULL, *v;
       char key[40];
       if (code == 11)
-        k = read_value(r, at(t, 1), kt, depth + 1, 0);
-      v = read_value(r, at(t, code == 11 ? 2 : 1), vt, depth + 1, 0);
+        k = read_value(r, array_item(t, 1), kt, depth + 1, 0);
+      v = read_value(r, array_item(t, code == 11 ? 2 : 1), vt, depth + 1, 0);
       if (!v || (code == 11 && !k)) {
         r->bad = 1;
         cJSON_Delete(k);
@@ -346,7 +384,7 @@ static cJSON *read_value(Reader *r, cJSON *t, int code, int depth, int field) {
       }
       if (code == 11) {
         if (cJSON_IsString(k))
-          cJSON_AddItemToObject(o, str(k), v);
+          cJSON_AddItemToObject(o, json_string(k), v);
         else if (cJSON_IsNumber(k)) {
           snprintf(key, sizeof(key), "%.0f", k->valuedouble);
           cJSON_AddItemToObject(o, key, v);
@@ -363,6 +401,7 @@ static cJSON *read_value(Reader *r, cJSON *t, int code, int depth, int field) {
   r->bad = 1;
   return NULL;
 }
+
 int enil_thrift_encode(const char *method, cJSON *args, ENILBuf *out) {
   char name[160];
   cJSON *fs;
@@ -372,36 +411,38 @@ int enil_thrift_encode(const char *method, cJSON *args, ENILBuf *out) {
   fs = cJSON_GetObjectItemCaseSensitive(schema, name);
   if (!fs)
     return 0;
-  ok = byte(out, 0x82) && byte(out, 0x21) && var(out, 0) && var(out, strlen(method)) &&
-       put(out, method, strlen(method)) && write_struct(out, fs, args, 0);
+  ok = write_byte(out, 0x82) && write_byte(out, 0x21) && write_varint(out, 0) &&
+       write_varint(out, strlen(method)) && append_bytes(out, method, strlen(method)) &&
+       write_struct(out, fs, args, 0);
   if (!ok)
     enil_buf_free(out);
   return ok;
 }
-static cJSON *decode(const char *method, const void *data, size_t size,
-                      int *exception) {
+
+static cJSON *decode_message(const char *method, const void *data, size_t size, int *exception) {
   Reader r;
   uint64_t n;
   char name[160];
   cJSON *o;
   int mt;
   pthread_once(&once, init_schema);
-  if (!data || size > LIMIT)
+  if (!data || size > MAX_WIRE_SIZE)
     return NULL;
   r.p = data;
   r.n = size;
   r.pos = 0;
   r.bad = 0;
   r.strict_strings = exception != NULL;
-  if (get(&r) != 0x82)
+  if (read_byte(&r) != 0x82)
     return NULL;
-  mt = (int)get(&r);
+  mt = (int)read_byte(&r);
   if ((mt & 31) != 1 || ((mt >> 5) != 2 && !(exception && (mt >> 5) == 3)))
     return NULL;
-  if (exception) *exception = (mt >> 5) == 3;
-  if (uv(&r) != 0)
+  if (exception)
+    *exception = (mt >> 5) == 3;
+  if (read_varint(&r) != 0)
     return NULL;
-  n = uv(&r);
+  n = read_varint(&r);
   if (n != strlen(method) || n > r.n - r.pos || memcmp(r.p + r.pos, method, (size_t)n))
     return NULL;
   r.pos += (size_t)n;
@@ -418,12 +459,12 @@ static cJSON *decode(const char *method, const void *data, size_t size,
 }
 
 cJSON *enil_thrift_decode(const char *method, const void *data, size_t size) {
-  return decode(method, data, size, NULL);
+  return decode_message(method, data, size, NULL);
 }
 
-cJSON *enil_thrift_decode_raw(const char *method, const void *data, size_t size,
-                              int *exception) {
-  if (!exception) return NULL;
+cJSON *enil_thrift_decode_raw(const char *method, const void *data, size_t size, int *exception) {
+  if (!exception)
+    return NULL;
   *exception = 0;
-  return decode(method, data, size, exception);
+  return decode_message(method, data, size, exception);
 }

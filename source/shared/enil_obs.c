@@ -492,7 +492,7 @@ int enil_obs_upload(const char           *session_path,
   }
   *out_oid = NULL;
 
-  if (!enil_session_bind_identity(session_path)) return -1;
+  if (!enil_session_continue_identity(session_path)) return -1;
   obs_token = load_obs_token(session_path);
   if (!obs_token) { LOG("upload", "no OBS token in session"); goto done; }
 
@@ -531,7 +531,7 @@ int enil_obs_upload_with_oid(const char          *session_path,
     LOG("upload_oid", "NULL argument"); return -1;
   }
 
-  if (!enil_session_bind_identity(session_path)) return -1;
+  if (!enil_session_continue_identity(session_path)) return -1;
   obs_token = load_obs_token(session_path);
   if (!obs_token) { LOG("upload_oid", "no OBS token in session"); goto done; }
 
@@ -618,7 +618,7 @@ int enil_obs_download_message(const char *session_path,
     LOG("download", "NULL argument"); return -1;
   }
 
-  if (!enil_session_bind_identity(session_path)) return -1;
+  if (!enil_session_continue_identity(session_path)) return -1;
   identity = enil_identity_current();
 
   /* Read OBS token from session.json */

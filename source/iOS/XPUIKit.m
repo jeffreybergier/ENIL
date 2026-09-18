@@ -5,6 +5,7 @@
 
 #import "XPUIKit.h"
 #import "XPFoundation.h"   /* ENILLog */
+#import "UIViewController+ENILModal.h"
 
 @implementation UIDevice (XPUIKit)
 
@@ -17,6 +18,31 @@
 @end
 
 @implementation UIViewController (XPUIKit)
+
+- (void)XP_showAlertWithTitle:(NSString *)title
+                      message:(NSString *)message
+                 dismissTitle:(NSString *)dismissTitle
+{
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunguarded-availability"
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+  if (NSClassFromString(@"UIAlertController")) {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+      message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:dismissTitle
+      style:UIAlertActionStyleCancel handler:nil]];
+    [self enil_presentModalViewController:alert];
+  } else {
+    UIAlertView *alert = [[UIAlertView alloc] initWithTitle:title message:message
+      delegate:nil cancelButtonTitle:dismissTitle otherButtonTitles:nil];
+    [alert show];
+  }
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+}
 
 - (void)XP_layoutBelowBars
 {

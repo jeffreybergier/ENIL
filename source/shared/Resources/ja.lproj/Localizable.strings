@@ -162,6 +162,8 @@
 "Message boxes fetch failed"              = "メッセージボックスの取得に失敗しました";
 "Message boxes write failed"              = "メッセージボックスの書き込みに失敗しました";
 "Could not enable SSE"                    = "SSE を有効にできませんでした";
+"Could not load pending sync requests"    = "未完了の同期リクエストを読み込めませんでした";
+"Could not save partial sync completion"  = "部分同期の完了状態を保存できませんでした";
 
 /* --- C-side transient send/SSE statuses (from ENILAccount.m) --- */
 "Sending message"                         = "メッセージを送信中";
@@ -217,6 +219,7 @@
 "Could not save login recovery" = "ログインの再開を保存できませんでした";
 
 /* Login sections and actions */
+"Could not recover message encryption keys. Retry the saved login." = "メッセージの暗号化キーを復元できませんでした。保存済みのログインを再試行してください。";
 "Client" = "クライアント";
 "QR Code" = "QRコード";
 "Start Login" = "ログイン開始";

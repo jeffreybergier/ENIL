@@ -761,16 +761,34 @@ and stop delivery of later operations in that response. Message inserts and
 their unread-count changes commit together so redelivery does not double-count.
 Reactions to messages outside the local history cache are successful no-ops;
 actual database read/write failures still retain the cursor for retry.
+Chat-update operations whose successful `getChats` lookup returns an empty
+array are also no-ops, so updates for inaccessible chats cannot block later
+messages. Failed or malformed lookups and chat database writes remain retryable.
 Full-sync responses stop event delivery
 without advancing any cursor and schedule the account's full data sync. That
 sync captures its operation revision before fetching data and commits it only
 after success; fetch/write failures keep the previous cursor for retry. Each
-account resumes polling from its own worker completion, so a concurrent token
+sync fetches history and read receipts only for its current, fully paginated
+message-box response. Old cached chats and their history remain on disk but
+are not queried as current chats. A failed or incomplete message-box page
+aborts the sync without advancing its cursor. Each account resumes polling
+from its own worker completion, so a concurrent token
 refresh or another account's progress notification cannot resume it early.
+Both transports save partial-sync requests in `pendingPartialFullSyncs`, while
+only completed timestamps in `lastPartialFullSyncs` are sent to LINE. A data sync
+captures the pending requests before fetching data and acknowledges that snapshot
+after the data and operation cursor are saved. Failed syncs retain pending work;
+redelivery still requests another sync. Completion preserves any newer pending
+timestamps and rejects snapshots from a replaced login.
 Wake/reconnect cancels an outstanding native poll, including either LEGY Worker
 request, and retries immediately without consuming the failure budget or setting
-the Worker health gate. Idle poll timeouts reconnect without invalidating
-the session; permanent errors use the existing account error flow.
+the Worker health gate. A poll timeout is idle only after connection setup and
+the complete request upload, with no response body received. Connection/upload
+timeouts and interrupted responses count toward the polling retry limit.
+Idle poll timeouts reconnect without invalidating
+the session and reset the consecutive-failure counter, just like a valid reply.
+Cancellation alone does not reset it. Five consecutive polling failures still
+stop polling; permanent errors use the existing account error flow.
 
 `enil_native_login.c` supplies the production native QR flow and uses the shared
 Compact Thrift encoder/decoder in `enil_thrift.c`. `enil_login_store.c` owns the
@@ -800,13 +818,21 @@ snapshots merely by assigning that ID. The generation check, merge, and write
 share a lock with activation and other session writes. Activation also retires
 the old refresh journal under that lock, before a refresh of the newly activated
 login can write its journal.
-`enil_session_write` uses a unique 0600 temporary file, fsync, and atomic rename.
+`enil_session_write` uses a unique 0600 temporary file, fsync, atomic rename,
+and a parent-directory fsync. Journal retirement also flushes its directory.
+A directory flush failure is reported even when the rename is already visible;
+the replacement is retained so credential recovery can retry safely.
 Refresh responses have a private recovery journal with the owning `loginId`
 and a unique `refreshId`. The session commits `refreshJournalId` with its new
 tokens, making replay idempotent even if the access token subsequently rotates.
 Superseded journals are renamed to unique `.retired.*` files, and activation
 retires the previous login's journal. `x-line-next-access` inside LEGY responses
 is also persisted, and native calls reload the bound account's access token.
+That reload requires the original `loginId` as well as the identity: token
+rotation within a login is accepted, but a replacement or missing session
+stops the old request without falling back to its supplied token. Native
+requests check again after LEGY encoding and reject obsolete Talk replies;
+refresh replies retain their existing generation-checked recovery journal.
 
 Host protocol tests require the dependencies in
 `source/tools/windows-login/requirements.txt`, plus the normal C host libraries:
@@ -824,7 +850,7 @@ interrupted refresh/login recovery. Live read-only validation of the saved
 Windows session covered profile, contacts, chats/history, E2EE negotiation,
 purchases, and sync; sending still needs a user-driven device test.
 
-Account operations bind a copied identity to their thread before network work,
+Account operations bind a copied identity and login generation to their thread before network work,
 alongside the existing health binding. `enil_line_post` requires that binding;
 it never silently defaults to Chrome. New account operations must bind from
 their session before calling token-only Talk helpers. SSE and parallel asset
@@ -832,3 +858,5 @@ downloads also carry the snapshot across their pthread boundaries. Public
 LINE assets use its User-Agent; authenticated API/media/event requests use
 both the application header and User-Agent. Worker requests keep their own
 transport behavior. Changes to defaults affect new logins, not saved snapshots.
+Nested OBS preparation and event callbacks use `enil_session_continue_identity`
+to preserve the operation's generation instead of binding a replacement login.

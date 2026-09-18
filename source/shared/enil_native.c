@@ -10,7 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-static const char *s(cJSON *o, const char *key) {
+static const char *json_string(cJSON *o, const char *key) {
   cJSON *v = cJSON_GetObjectItemCaseSensitive(o, key);
   return cJSON_IsString(v) ? v->valuestring : NULL;
 }
@@ -21,7 +21,7 @@ static int cancel_request(void *p, curl_off_t a, curl_off_t b, curl_off_t c, cur
   (void)d;
   return p && *(const volatile int *)p;
 }
-static void header(struct curl_slist **hs, const char *name, const char *value) {
+static void append_header(struct curl_slist **hs, const char *name, const char *value) {
   size_t n;
   char *h;
   if (!value)
@@ -34,6 +34,28 @@ static void header(struct curl_slist **hs, const char *name, const char *value) 
   *hs = curl_slist_append(*hs, h);
   free(h);
 }
+
+/* A normal long poll may expire while waiting for its first response byte.
+ * DNS/TCP/TLS timeouts, incomplete uploads, and truncated responses are real
+ * failures and must reach the polling loop's backoff/error handling. */
+static int idle_poll_timeout(CURL *curl, size_t request_size, size_t response_size,
+                             long status) {
+  double ready_at = 0;
+  curl_off_t uploaded = 0;
+  return response_size == 0 && (status == 0 || status == 200) &&
+         curl_easy_getinfo(curl, CURLINFO_PRETRANSFER_TIME, &ready_at) == CURLE_OK &&
+         ready_at > 0 &&
+         curl_easy_getinfo(curl, CURLINFO_SIZE_UPLOAD_T, &uploaded) == CURLE_OK &&
+         uploaded == (curl_off_t)request_size;
+}
+
+static int current_login(void) {
+  char *token = NULL;
+  int result = enil_session_bound_access_token(&token);
+  free(token);
+  return result >= 0;
+}
+
 ENILLineResponse enil_native_post(const char *path, const char *body, const char *token,
                                   long timeout_ms, const volatile int *cancel) {
   ENILLineResponse out = {0, NULL};
@@ -52,7 +74,10 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
     return out;
   if (cancel && *cancel)
     return out;
-  bound_token = enil_session_bound_access_token();
+  if (enil_session_bound_access_token(&bound_token) < 0) {
+    ENIL_LOG("Native.post", "bound login is no longer available");
+    goto done;
+  }
   if (bound_token)
     token = bound_token;
   method = strrchr(path, '/');
@@ -118,9 +143,9 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
     payload = NULL;
     free(base64);
     base64 = NULL;
-    if ((cancel && *cancel) || !s(encoded, "body") || !s(encoded, "key") || !s(encoded, "xLcs"))
+    if ((cancel && *cancel) || !json_string(encoded, "body") || !json_string(encoded, "key") || !json_string(encoded, "xLcs"))
       goto done;
-    len = enil_b64_decode_alloc(s(encoded, "body"), &wire);
+    len = enil_b64_decode_alloc(json_string(encoded, "body"), &wire);
     if (len < 0)
       goto done;
     enil_buf_free(&request);
@@ -128,21 +153,21 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
     request.size = (size_t)len;
     wire = NULL;
     url = "https://gf.line.naver.jp/enc";
-    header(&hs, "X-LE", "7");
-    header(&hs, "X-LAP", "5");
-    header(&hs, "X-LPV", "1");
-    header(&hs, "X-LCS", s(encoded, "xLcs"));
-    header(&hs, "X-LHM", "POST");
+    append_header(&hs, "X-LE", "7");
+    append_header(&hs, "X-LAP", "5");
+    append_header(&hs, "X-LPV", "1");
+    append_header(&hs, "X-LCS", json_string(encoded, "xLcs"));
+    append_header(&hs, "X-LHM", "POST");
   } else {
     url = !strcmp(method, "refresh") ? "https://legy.line-apps.com/EXT/auth/tokenrefresh/v1"
                                      : "https://legy.line-apps.com/TSHOP4";
     if (*token)
-      header(&hs, "X-Line-Access", token);
+      append_header(&hs, "X-Line-Access", token);
   }
-  header(&hs, "Content-Type", "application/x-thrift");
-  header(&hs, "Accept", "application/x-thrift");
-  header(&hs, "X-Line-Application", identity->application);
-  header(&hs, "X-LAL", "en_US");
+  append_header(&hs, "Content-Type", "application/x-thrift");
+  append_header(&hs, "Accept", "application/x-thrift");
+  append_header(&hs, "X-Line-Application", identity->application);
+  append_header(&hs, "X-LAL", "en_US");
   curl = enil_curl_new(&response);
   if (!curl)
     goto done;
@@ -151,6 +176,7 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hs);
   curl_easy_setopt(curl, CURLOPT_POSTFIELDS, request.data);
   curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)request.size);
+  curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
   curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, timeout_ms > 0 ? timeout_ms : 60000L);
   curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
   curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
@@ -159,12 +185,16 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, cancel_request);
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, (void *)cancel);
   }
+  /* LEGY encoding may have overlapped reauthentication. Do not send the
+   * prepared request if its login was replaced while the Worker ran. */
+  if (!current_login()) goto done;
   ENIL_LOG("Native.post", "POST %s %s (%lu bytes)", url, method, (unsigned long)request.size);
   rc = curl_easy_perform(curl);
   curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &out.status);
   ENIL_LOG("Native.post", "%s %s HTTP %ld curl=%d", url, method, out.status, (int)rc);
   if (rc != CURLE_OK) {
-    if (rc == CURLE_OPERATION_TIMEDOUT && !strcmp(method, "sync"))
+    if (rc == CURLE_OPERATION_TIMEDOUT && !strcmp(method, "sync") &&
+        idle_poll_timeout(curl, request.size, response.size, out.status))
       out.status = 204;
     if (rc != CURLE_ABORTED_BY_CALLBACK)
       ENIL_LOG("Native.post", "%s: transport %d", method, (int)rc);
@@ -177,10 +207,10 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
     base64 = enil_b64_encode((unsigned char *)response.data, response.size);
     if (!base64 || !payload)
       goto done;
-    cJSON_AddStringToObject(payload, "key", s(encoded, "key"));
+    cJSON_AddStringToObject(payload, "key", json_string(encoded, "key"));
     cJSON_AddStringToObject(payload, "body", base64);
     decoded = enil_worker_decrypt_ex("/transport/legy/decode", payload, cancel);
-    if (!s(decoded, "body"))
+    if (!json_string(decoded, "body"))
       goto done;
     data = cJSON_GetObjectItemCaseSensitive(decoded, "status");
     ENIL_LOG("Native.post", "%s %s LEGY status=%d", endpoint, method,
@@ -189,15 +219,16 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
       out.status = data->valueint;
       goto done;
     }
+    if (!current_login()) goto done;
     {
       const char *next =
-          s(cJSON_GetObjectItemCaseSensitive(decoded, "headers"), "x-line-next-access");
+          json_string(cJSON_GetObjectItemCaseSensitive(decoded, "headers"), "x-line-next-access");
       if (next && !enil_session_accept_next_access(token, next)) {
         enil_health_set_failure(ENIL_ERR_LINE, "Could not save updated native access token");
         goto done;
       }
     }
-    len = enil_b64_decode_alloc(s(decoded, "body"), &wire);
+    len = enil_b64_decode_alloc(json_string(decoded, "body"), &wire);
     if (len < 0)
       goto done;
     enil_buf_free(&response);
@@ -205,6 +236,9 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
     response.size = (size_t)len;
     wire = NULL;
   }
+  /* Refresh retains its response for the generation-checked recovery journal.
+   * Other replies from an obsolete login must not reach account consumers. */
+  if (strcmp(method, "refresh") && !current_login()) goto done;
   reply = enil_thrift_decode(method, response.data, response.size);
   if (!reply) {
     ENIL_LOG("Native.post", "invalid Thrift reply: %s", method);
@@ -231,7 +265,7 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
   if (contacts) {
     cJSON *item, *wrapped = cJSON_CreateObject(), *map = cJSON_CreateObject();
     for (item = data->child; item; item = item->next) {
-      const char *mid = s(item, "mid");
+      const char *mid = json_string(item, "mid");
       cJSON *entry;
       if (!mid)
         continue;

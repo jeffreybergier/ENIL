@@ -14,6 +14,11 @@
 /* Keep fixed-frame content below navigation/status bars on iOS 7+.
  * Earlier iOS versions already lay out this way; leave them unchanged. */
 - (void)XP_layoutBelowBars;
+/* Informational alert; dismissing it leaves the presenting controller open.
+ * Uses UIAlertController on iOS 8+ and UIAlertView on earlier versions. */
+- (void)XP_showAlertWithTitle:(NSString *)title
+                      message:(NSString *)message
+                 dismissTitle:(NSString *)dismissTitle;
 @end
 
 @interface UIDevice (XPUIKit)

@@ -21,6 +21,32 @@
 static pthread_mutex_t session_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int session_write_locked(const char *path, cJSON *root);
 
+/* Flushing file contents does not persist a rename. Flush the containing
+ * directory too, and report failure even if the new name is already visible.
+ * Use O_RDONLY for the older Apple SDKs, which lack O_DIRECTORY. */
+static int sync_parent_directory(const char *path) {
+  char *directory = strdup(path), *slash;
+  int fd, ok;
+  if (!directory) return 0;
+  slash = strrchr(directory, '/');
+  if (slash) {
+    if (slash == directory) slash[1] = '\0';
+    else *slash = '\0';
+  } else {
+    free(directory);
+    directory = strdup(".");
+    if (!directory) return 0;
+  }
+  fd = open(directory, O_RDONLY);
+  free(directory);
+  if (fd < 0) return 0;
+  do {
+    ok = fsync(fd);
+  } while (ok != 0 && errno == EINTR);
+  close(fd);
+  return ok == 0;
+}
+
 char *enil_session_new_id(void) {
   unsigned char bytes[16];
   char value[33];
@@ -80,6 +106,7 @@ int enil_session_retire_file(const char *path) {
   close(fd);
   ok = rename(path, retired) == 0;
   if (!ok) unlink(retired);
+  else ok = sync_parent_directory(path);
   free(retired);
   return ok;
 }
@@ -135,35 +162,87 @@ cJSON *enil_session_read(const char *path) {
   return root;
 }
 
-static pthread_key_t bound_path_key;
-static pthread_once_t bound_path_once = PTHREAD_ONCE_INIT;
-static int bound_path_ready;
-static void make_bound_path_key(void) { bound_path_ready = pthread_key_create(&bound_path_key, free) == 0; }
-static int bind_path(const char *path) {
-  char *copy = path ? strdup(path) : NULL; void *old;
-  pthread_once(&bound_path_once, make_bound_path_key);
-  if (!bound_path_ready) { free(copy); return 0; }
-  old = pthread_getspecific(bound_path_key);
-  if (pthread_setspecific(bound_path_key, copy)) { free(copy); return 0; }
-  free(old); return !path || copy != NULL;
+typedef struct {
+  char *path;
+  char *login_id;
+} SessionBinding;
+static pthread_key_t binding_key;
+static pthread_once_t binding_once = PTHREAD_ONCE_INIT;
+static int binding_ready;
+static void free_binding(void *value) {
+  SessionBinding *binding = value;
+  if (!binding) return;
+  free(binding->path);
+  free(binding->login_id);
+  free(binding);
 }
-static const char *bound_path(void) {
-  pthread_once(&bound_path_once, make_bound_path_key);
-  return bound_path_ready ? pthread_getspecific(bound_path_key) : NULL;
+static void make_binding_key(void) {
+  binding_ready = pthread_key_create(&binding_key, free_binding) == 0;
+}
+static SessionBinding *current_binding(void) {
+  pthread_once(&binding_once, make_binding_key);
+  return binding_ready ? pthread_getspecific(binding_key) : NULL;
+}
+static int set_binding(SessionBinding *binding) {
+  SessionBinding *old = current_binding();
+  if (!binding_ready || pthread_setspecific(binding_key, binding)) return 0;
+  free_binding(old);
+  return 1;
+}
+static int binding_matches(const SessionBinding *binding, cJSON *root) {
+  const enil_identity_t *identity = enil_identity_current();
+  enil_identity_t saved;
+  cJSON *id = cJSON_GetObjectItemCaseSensitive(root, "loginId");
+  if (!binding || !identity || !cJSON_IsObject(root)) return 0;
+  if (binding->login_id || id) {
+    if (!binding->login_id || !cJSON_IsString(id) ||
+        strcmp(binding->login_id, id->valuestring)) return 0;
+  }
+  return enil_identity_parse(cJSON_GetObjectItemCaseSensitive(root, "clientIdentity"), &saved) &&
+         !memcmp(identity, &saved, sizeof(saved));
 }
 
 /* Load a snapshot before the calling account operation touches the network. */
 int enil_session_bind_identity(const char *path) {
-  cJSON *root;
+  cJSON *root, *id;
+  SessionBinding *binding = NULL;
   enil_identity_t identity;
   int ok;
-  if (!bind_path(NULL) || !enil_identity_bind(NULL)) return 0;
+  if (!set_binding(NULL) || !enil_identity_bind(NULL)) return 0;
   root = enil_session_read(path);
   if (!cJSON_IsObject(root)) { cJSON_Delete(root); return 0; }
   ok = enil_identity_parse(cJSON_GetObjectItemCaseSensitive(root, "clientIdentity"),
                            &identity);
+  id = cJSON_GetObjectItemCaseSensitive(root, "loginId");
+  if (id && (!cJSON_IsString(id) || !id->valuestring[0])) ok = 0;
+  if (ok) {
+    binding = calloc(1, sizeof(*binding));
+    if (binding) {
+      binding->path = strdup(path);
+      binding->login_id = id ? strdup(id->valuestring) : NULL;
+    }
+    ok = binding && binding->path && (!id || binding->login_id);
+  }
   cJSON_Delete(root);
-  return ok && enil_identity_bind(&identity) && bind_path(path);
+  if (ok && enil_identity_bind(&identity) && set_binding(binding)) return 1;
+  free_binding(binding);
+  enil_identity_bind(NULL);
+  return 0;
+}
+
+int enil_session_continue_identity(const char *path) {
+  SessionBinding *binding = current_binding();
+  cJSON *root;
+  int ok;
+  if (!path) return 0;
+  if (!binding) return enil_session_bind_identity(path);
+  /* Nested calls must never turn an old operation into a new login. Keep a
+   * failed binding too, so subsequent calls cannot silently bind afresh. */
+  if (strcmp(binding->path, path)) return 0;
+  root = enil_session_read(path);
+  ok = binding_matches(binding, root);
+  cJSON_Delete(root);
+  return ok;
 }
 
 int enil_session_prepare_login(const char *path, const char *profile_id,
@@ -248,6 +327,10 @@ static int session_write_locked(const char *path, cJSON *root) {
   }
   free(tmp);
   free(text);
+  if (!sync_parent_directory(path)) {
+    LOG("write", "directory sync failed; replacement may already be visible");
+    return 0;
+  }
   return 1;
 }
 
@@ -503,45 +586,93 @@ char *enil_session_get_partial_full_syncs_json(const char *path) {
   return out ? out : strdup("{}");
 }
 
-/* ============================================================================
- * Merge target_categories (from a partialFullSync event) into the persisted
- * lastPartialFullSyncs map, keeping the larger numeric timestamp per key.
- * Returns 1 if any category advanced (caller should trigger a sync), 0 if
- * every incoming timestamp was <= the persisted one. Persists session.json
- * when a change is made.
- * ==========================================================================*/
-int enil_session_update_partial_full_syncs(const char *path,
-                                           cJSON      *target_categories) {
-  session_t s;
-  cJSON    *child;
-  int       changed = 0;
-  if (!path || !cJSON_IsObject(target_categories)) return 0;
-  if (!enil_session_load(path, &s)) return 0;
-  if (!cJSON_IsObject(s.lastPartialFullSyncs)) {
-    if (s.lastPartialFullSyncs) cJSON_Delete(s.lastPartialFullSyncs);
-    s.lastPartialFullSyncs = cJSON_CreateObject();
-  }
-  if (!s.lastPartialFullSyncs) { enil_session_free(&s); return 0; }
+/* Monotonic per-category timestamps; never acknowledge work at receipt time. */
+static int merge_partial_timestamp(cJSON *map, const char *key, long long value) {
+  char text[32];
+  cJSON *item;
+  if (value <= enil_json_coerce_int64(cJSON_GetObjectItemCaseSensitive(map, key)))
+    return 0;
+  snprintf(text, sizeof(text), "%lld", value);
+  item = cJSON_CreateString(text);
+  if (!item) return -1;
+  if (cJSON_HasObjectItem(map, key)) {
+    if (cJSON_ReplaceItemInObjectCaseSensitive(map, key, item)) return 1;
+  } else if (cJSON_AddItemToObject(map, key, item)) return 1;
+  cJSON_Delete(item);
+  return -1;
+}
 
-  for (child = target_categories->child; child; child = child->next) {
-    long long incoming, existing;
-    cJSON    *cur;
-    char      buf[32];
-    if (!child->string) continue;
-    incoming = enil_json_coerce_int64(child);
-    cur      = cJSON_GetObjectItem(s.lastPartialFullSyncs, child->string);
-    existing = cur ? enil_json_coerce_int64(cur) : 0;
-    if (incoming <= existing) continue;
-    snprintf(buf, sizeof(buf), "%lld", incoming);
-    cJSON_DeleteItemFromObject(s.lastPartialFullSyncs, child->string);
-    cJSON_AddStringToObject(s.lastPartialFullSyncs, child->string, buf);
-    changed = 1;
-  }
+static cJSON *partial_map(cJSON *root, const char *name) {
+  cJSON *map = cJSON_GetObjectItemCaseSensitive(root, name);
+  if (!map) map = cJSON_AddObjectToObject(root, name);
+  return cJSON_IsObject(map) ? map : NULL;
+}
 
-  if (!changed) { enil_session_free(&s); return 0; }
-  changed = enil_session_save(path, &s);
-  enil_session_free(&s);
-  return changed;
+int enil_session_update_partial_full_syncs(const char *path, cJSON *target_categories) {
+  cJSON *root, *pending, *completed, *item;
+  SessionBinding *binding = current_binding();
+  int needed = 0, changed = 0, result = -1;
+  if (!path || !cJSON_IsObject(target_categories)) return -1;
+  pthread_mutex_lock(&session_mutex);
+  root = enil_session_read(path);
+  if (!cJSON_IsObject(root) || (binding &&
+      (strcmp(binding->path, path) || !binding_matches(binding, root)))) goto done;
+  pending = partial_map(root, "pendingPartialFullSyncs");
+  completed = partial_map(root, "lastPartialFullSyncs");
+  if (!pending || !completed) goto done;
+  for (item = target_categories->child; item; item = item->next) {
+    long long incoming = enil_json_coerce_int64(item);
+    int merged;
+    if (!item->string || incoming <= enil_json_coerce_int64(
+          cJSON_GetObjectItemCaseSensitive(completed, item->string))) continue;
+    needed = 1;
+    merged = merge_partial_timestamp(pending, item->string, incoming);
+    if (merged < 0) goto done;
+    changed |= merged;
+  }
+  if (changed && !session_write_locked(path, root)) goto done;
+  result = needed;
+done:
+  cJSON_Delete(root);
+  pthread_mutex_unlock(&session_mutex);
+  return result;
+}
+
+int enil_session_complete_partial_full_syncs(const char *path, const cJSON *snapshot) {
+  cJSON *root, *pending, *completed, *item, *before, *now;
+  cJSON *requests = cJSON_GetObjectItemCaseSensitive(snapshot, "pendingPartialFullSyncs");
+  int result = 0;
+  if (!path || !cJSON_IsObject(snapshot)) return 0;
+  pthread_mutex_lock(&session_mutex);
+  root = enil_session_read(path);
+  before = cJSON_GetObjectItemCaseSensitive(snapshot, "loginId");
+  now = cJSON_GetObjectItemCaseSensitive(root, "loginId");
+  if (!cJSON_IsObject(root) || ((before || now) &&
+      (!cJSON_IsString(before) || !cJSON_IsString(now) || !cJSON_Compare(before, now, 1))))
+    goto done;
+  if (!requests || (cJSON_IsObject(requests) && !requests->child)) {
+    result = 1;
+    goto done;
+  }
+  if (!cJSON_IsObject(requests)) goto done;
+  pending = partial_map(root, "pendingPartialFullSyncs");
+  completed = partial_map(root, "lastPartialFullSyncs");
+  if (!pending || !completed) goto done;
+  for (item = requests->child; item; item = item->next) {
+    long long value = enil_json_coerce_int64(item);
+    cJSON *queued;
+    if (!item->string || merge_partial_timestamp(completed, item->string, value) < 0)
+      goto done;
+    queued = cJSON_GetObjectItemCaseSensitive(pending, item->string);
+    if (queued && enil_json_coerce_int64(queued) <= value)
+      cJSON_DeleteItemFromObjectCaseSensitive(pending, item->string);
+  }
+  if (!pending->child) cJSON_DeleteItemFromObjectCaseSensitive(root, "pendingPartialFullSyncs");
+  result = session_write_locked(path, root);
+done:
+  cJSON_Delete(root);
+  pthread_mutex_unlock(&session_mutex);
+  return result;
 }
 
 /* ============================================================================
@@ -689,38 +820,36 @@ int enil_session_patch(const char *path, cJSON *patch) {
   return ok;
 }
 
-char *enil_session_bound_access_token(void) {
-  const char *path = bound_path();
-  const enil_identity_t *current = enil_identity_current();
+int enil_session_bound_access_token(char **out) {
+  SessionBinding *binding = current_binding();
   cJSON *root, *token;
-  enil_identity_t saved;
-  char *copy = NULL;
-  if (!path || !current)
-    return NULL;
-  root = enil_session_read(path);
-  if (enil_identity_parse(cJSON_GetObjectItemCaseSensitive(root, "clientIdentity"), &saved) &&
-      !memcmp(current, &saved, sizeof(saved))) {
+  *out = NULL;
+  if (!binding) return 0;
+  root = enil_session_read(binding->path);
+  if (binding_matches(binding, root)) {
     token = cJSON_GetObjectItemCaseSensitive(root, "accessToken");
-    if (cJSON_IsString(token))
-      copy = strdup(token->valuestring);
+    if (cJSON_IsString(token) && token->valuestring[0])
+      *out = strdup(token->valuestring);
   }
   cJSON_Delete(root);
-  return copy;
+  return *out ? 1 : -1;
 }
 int enil_session_accept_next_access(const char *previous, const char *next) {
-  const char *path = bound_path();
+  SessionBinding *binding = current_binding();
   cJSON *root, *token;
   int ok = 0;
-  if (!path || !previous || !next || !*next || strpbrk(next, "\r\n"))
+  if (!binding || !previous || !next || !*next || strpbrk(next, "\r\n"))
     return 0;
   pthread_mutex_lock(&session_mutex);
-  root = enil_session_read(path);
+  root = enil_session_read(binding->path);
+  if (!binding_matches(binding, root)) goto done;
   token = cJSON_GetObjectItemCaseSensitive(root, "accessToken");
   if (cJSON_IsString(token) && !strcmp(token->valuestring, previous)) {
     cJSON_ReplaceItemInObjectCaseSensitive(root, "accessToken", cJSON_CreateString(next));
-    ok = session_write_locked(path, root);
+    ok = session_write_locked(binding->path, root);
   } else if (cJSON_IsString(token))
     ok = 1; /* another request already rotated it */
+done:
   cJSON_Delete(root);
   pthread_mutex_unlock(&session_mutex);
   return ok;

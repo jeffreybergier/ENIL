@@ -589,19 +589,25 @@ int enil_qrlogin_run_user_attempt(const char *staging_dir,
   native = !strcmp(enil_identity_current()->transport, "native-thrift");
   if (native) {
     durable = enil_login_store_select(staging_dir);
-    if (!durable)
+    if (!durable) {
+      emit_status(cb, "Could not save login recovery");
       goto done;
+    }
   }
   if (cancelled(cb))
     goto done;
   /* Only an explicit login action reopens the gate. A failure during this
    * attempt sets it again, including before the follow-up key recovery. */
   enil_health_clear_failure(ENIL_ERR_WORKER);
-  if (native)
-    ok = enil_native_login_run(durable, cb) && !cancelled(cb) &&
-         enil_qrlogin_recover_e2ee(durable) &&
-         enil_login_store_stage(staging_dir, durable);
-  else
+  if (native) {
+    if (!enil_native_login_run(durable, cb) || cancelled(cb)) goto done;
+    if (!enil_qrlogin_recover_e2ee(durable)) {
+      emit_status(cb, "Could not recover message encryption keys. Retry the saved login.");
+      goto done;
+    }
+    ok = enil_login_store_stage(staging_dir, durable);
+    if (!ok) emit_status(cb, "Could not save login recovery");
+  } else
     ok = enil_qrlogin_run(staging_dir, cb);
 done:
   free(durable);

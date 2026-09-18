@@ -15,6 +15,12 @@
 
 static const char *origin;
 static int requests;
+static char last_status[256];
+
+static void login_status(const char *message, void *ctx) {
+  (void)ctx;
+  snprintf(last_status, sizeof(last_status), "%s", message);
+}
 
 CURLcode __real_curl_easy_perform(CURL *curl);
 CURLcode __wrap_curl_easy_perform(CURL *curl) {
@@ -76,9 +82,12 @@ int main(int argc, char **argv) {
   enil_worker_set_credentials(origin, "synthetic-secret");
   memset(&cb, 0, sizeof(cb));
   cb.cancel = &cancel;
+  cb.on_status = login_status;
 
   /* First attempt fails with HTTP 503 after credentials have been saved. */
   assert(!enil_qrlogin_run_user_attempt(staging, &cb));
+  assert(!strcmp(last_status,
+    "Could not recover message encryption keys. Retry the saved login."));
   assert(requests == 1 && enil_health_is_failed(ENIL_ERR_WORKER));
   after = enil_session_read(pending_path);
   assert(cJSON_Compare(before, after, 1));

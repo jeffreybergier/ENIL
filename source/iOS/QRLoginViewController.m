@@ -321,12 +321,16 @@ typedef enum {
    * completion after -cancelAction a no-op. */
   if (self.done) return;
   if (![result boolValue] && [ENILAccount canRestartQRLoginAtPath:self.accountDir]) {
+    NSString *failure = self.statusMessage;
     self.loginState = ENILLoginRecovery;
     self.qrImage = nil;
     self.pin = nil;
     self.statusMessage = NSLocalizedString(@"Sign-in needs recovery", nil);
     [self reloadLoginSection];
     [self showLoginRow:0];
+    [self XP_showAlertWithTitle:NSLocalizedString(@"Sign-in needs recovery", nil)
+                       message:failure
+                  dismissTitle:NSLocalizedString(@"Dismiss", nil)];
     return;
   }
   self.loginState = ENILLoginFinished;

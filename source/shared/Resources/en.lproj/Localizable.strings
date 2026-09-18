@@ -163,6 +163,8 @@
 "Message boxes fetch failed"              = "Message boxes fetch failed";
 "Message boxes write failed"              = "Message boxes write failed";
 "Could not enable SSE"                    = "Could not enable SSE";
+"Could not load pending sync requests"    = "Could not load pending sync requests";
+"Could not save partial sync completion"  = "Could not save partial sync completion";
 
 /* --- C-side transient send/SSE statuses (from ENILAccount.m) --- */
 "Sending message"                         = "Sending message";
@@ -216,6 +218,7 @@
 "Retry saved login" = "Retry saved login";
 "Start new QR" = "Start new QR";
 "Could not save login recovery" = "Could not save login recovery";
+"Could not recover message encryption keys. Retry the saved login." = "Could not recover message encryption keys. Retry the saved login.";
 
 /* Login sections and actions */
 "Client" = "Client";

@@ -27,6 +27,7 @@ class NativeSyncRecoveryTests(unittest.TestCase):
             str(REPO / "source/tests/native_sync_recovery.c"),
             *[str(p) for p in sorted(shared.glob("*.c"))],
             "-Wl,--gc-sections", "-Wl,--wrap=curl_easy_perform",
+            "-Wl,--wrap=sleep", "-Wl,--wrap=fsync",
             "-Wl,--wrap=enil_line_post", "-Wl,--wrap=enil_line_post_ex",
             "-Wl,--wrap=enil_line_acquire_obs_token", "-pthread", *flags, "-lz", "-o", str(binary),
         ], check=True)
@@ -48,5 +49,37 @@ class NativeSyncRecoveryTests(unittest.TestCase):
     def test_uncached_reactions_do_not_block_later_messages(self):
         self.run_recovery("reactions")
 
+    def test_inaccessible_chat_updates_do_not_block_later_messages(self):
+        self.run_recovery("chat-update-0")
+
+    def test_chat_update_failures_retain_cursors_until_retry_succeeds(self):
+        for mode, failure in enumerate([
+            "HTTP", "transport", "missing chats", "invalid chat", "database",
+            "invalid chats array", "invalid body",
+        ], start=1):
+            with self.subTest(failure=failure):
+                self.run_recovery(f"chat-update-{mode}")
+
     def test_legacy_startup_allows_inflight_saves_during_first_refresh(self):
         self.run_recovery("legacy")
+
+    def test_obsolete_cached_chats_do_not_block_history_or_read_receipt_sync(self):
+        self.run_recovery("obsolete")
+
+    def test_empty_current_chat_list_preserves_local_history(self):
+        self.run_recovery("empty")
+
+    def test_incomplete_current_chat_list_does_not_advance_cursor(self):
+        for mode in ["partial-boxes", "invalid-boxes"]:
+            with self.subTest(mode=mode):
+                self.run_recovery(mode)
+
+    def test_idle_polls_reset_failures_but_consecutive_errors_still_stop(self):
+        for mode in ["idle-reset", "consecutive-failures"]:
+            with self.subTest(mode=mode):
+                self.run_recovery(mode)
+
+    def test_partial_sync_requests_are_acknowledged_only_after_success(self):
+        for mode in ["partial-native", "partial-chrome", "partial-newer"]:
+            with self.subTest(mode=mode):
+                self.run_recovery(mode)
