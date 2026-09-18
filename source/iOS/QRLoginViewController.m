@@ -20,26 +20,30 @@ static const int kQRPixels = 256;
  * that the .textAlignment setter converts implicitly. */
 static const NSInteger kENILTextAlignCenter = 1;
 
-/* The QR-login C bridging (callback trampolines + main-thread marshalling)
- * lives behind +[ENILAccount runQRLoginAtPath:observer:cancelFlag:]; this
- * controller is the observer and receives every callback on the main thread. */
+typedef enum {
+  ENILLoginChoosingClient,
+  ENILLoginRunning,
+  ENILLoginRecovery,
+  ENILLoginFinished
+} ENILLoginState;
+
+/* Login data belongs to the controller, not reusable cells: callbacks can
+ * arrive while the QR or PIN row is offscreen. All callbacks use the main thread. */
 @interface QRLoginViewController () <ENILQRLoginObserver>
-@property (nonatomic, copy)   NSString *accountDir;
-@property (nonatomic, copy)   NSString *expectedMid;
-@property (nonatomic, assign) id <QRLoginViewControllerDelegate> delegate; /* back-pointer (4.3 floor: no zeroing weak) */
-@property (nonatomic, strong) UIImageView *qrImageView;
-@property (nonatomic, strong) UILabel *statusLabel;
-@property (nonatomic, strong) UILabel *pinLabel;
-@property (nonatomic, strong) UIButton *chromeButton;
-@property (nonatomic, strong) UIButton *windowsButton;
-@property (nonatomic, assign) BOOL running;
-@property (nonatomic, assign) BOOL done;     /* terminal handling reached */
+@property (nonatomic, copy) NSString *accountDir;
+@property (nonatomic, copy) NSString *expectedMid;
+@property (nonatomic, assign) id <QRLoginViewControllerDelegate> delegate;
+@property (nonatomic, copy) NSString *selectedProfile;
+@property (nonatomic, copy) NSString *statusMessage;
+@property (nonatomic, copy) NSString *pin;
+@property (nonatomic, strong) UIImage *qrImage;
+@property (nonatomic, assign) ENILLoginState loginState;
 @property (nonatomic, assign) BOOL prepared;
 @end
 
 @implementation QRLoginViewController
 {
-  volatile int cancelFlag_;  /* read by the C flow; set when the user cancels */
+  volatile int cancelFlag_;
 }
 
 - (instancetype)initWithAccountDir:(NSString *)accountDir
@@ -51,93 +55,182 @@ static const NSInteger kENILTextAlignCenter = 1;
                                   reason:@"accountDir empty"
                                 userInfo:nil];
   }
-  if ((self = [super initWithNibName:nil bundle:nil])) {
+  if ((self = [super initWithStyle:UITableViewStyleGrouped])) {
     [self XP_layoutBelowBars];
     _accountDir = [accountDir copy];
-    _expectedMid = [expectedMid copy];  /* nil-safe: copy of nil is nil */
-    _delegate = delegate;
-    self.navigationItem.title = NSLocalizedString(@"Add Account", nil);
+    _expectedMid = [expectedMid copy];
+    _delegate = delegate;  /* assign back-pointer: iOS 4.3 has no zeroing weak */
+    _selectedProfile = @"chrome";
+    _loginState = ENILLoginChoosingClient;
+    self.navigationItem.title = expectedMid
+      ? NSLocalizedString(@"Reauthenticate", nil) : NSLocalizedString(@"Add Account", nil);
     self.navigationItem.leftBarButtonItem =
       [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel
-                                                    target:self
-                                                    action:@selector(cancelAction)];
+                                                 target:self action:@selector(cancelAction)];
   }
   return self;
-}
-
-- (void)viewDidLoad
-{
-  [super viewDidLoad];
-  self.view.backgroundColor = [UIColor whiteColor];
-  CGFloat w = self.view.bounds.size.width;
-
-  UIImageView *qr = [[UIImageView alloc] initWithFrame:
-    CGRectMake((w - kQRPixels) / 2.0f, 40.0f, kQRPixels, kQRPixels)];
-  qr.autoresizingMask =
-    UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin;
-  qr.contentMode = UIViewContentModeScaleAspectFit;
-  qr.hidden = YES;
-  [self.view addSubview:qr];
-  self.qrImageView = qr;
-
-  UIButton *chrome = [UIButton buttonWithType:UIButtonTypeRoundedRect];
-  chrome.frame = CGRectMake((w - 210.0f) / 2.0f, 110.0f, 210.0f, 44.0f);
-  chrome.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin;
-  [chrome setTitle:NSLocalizedString(@"Chrome", nil) forState:UIControlStateNormal];
-  [chrome addTarget:self action:@selector(chooseClient:) forControlEvents:UIControlEventTouchUpInside];
-  chrome.tag = 0;
-  chrome.hidden = self.expectedMid != nil;
-  [self.view addSubview:chrome];
-  self.chromeButton = chrome;
-  UIButton *windows = [UIButton buttonWithType:UIButtonTypeRoundedRect];
-  windows.frame = CGRectMake((w - 210.0f) / 2.0f, 175.0f, 210.0f, 44.0f);
-  windows.autoresizingMask = chrome.autoresizingMask;
-  [windows setTitle:NSLocalizedString(@"Windows desktop", nil) forState:UIControlStateNormal];
-  [windows addTarget:self action:@selector(chooseClient:) forControlEvents:UIControlEventTouchUpInside];
-  windows.tag = 1;
-  windows.hidden = self.expectedMid != nil;
-  [self.view addSubview:windows];
-  self.windowsButton = windows;
-
-  UILabel *status = [[UILabel alloc] initWithFrame:
-    CGRectMake(16.0f, 40.0f + kQRPixels + 8.0f, w - 32.0f, 60.0f)];
-  status.numberOfLines = 3;
-  status.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-  status.textAlignment = kENILTextAlignCenter;
-  status.font = [UIFont systemFontOfSize:15.0];
-  status.textColor = [UIColor darkGrayColor];
-  status.text = NSLocalizedString(@"Choose a client identity", nil);
-  [self.view addSubview:status];
-  self.statusLabel = status;
-
-  UILabel *pin = [[UILabel alloc] initWithFrame:
-    CGRectMake(16.0f, 40.0f + kQRPixels + 72.0f, w - 32.0f, 40.0f)];
-  pin.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-  pin.textAlignment = kENILTextAlignCenter;
-  pin.font = [UIFont boldSystemFontOfSize:30.0];
-  pin.hidden = YES;
-  [self.view addSubview:pin];
-  self.pinLabel = pin;
 }
 
 - (void)viewDidAppear:(BOOL)animated
 {
   [super viewDidAppear:animated];
+  /* Reauthentication retains the saved identity and existing automatic start. */
   if (self.expectedMid && !self.prepared) [self startLoginWithProfile:nil];
 }
 
-- (void)chooseClient:(id)sender
+- (NSInteger)loginSection { return self.expectedMid ? 0 : 1; }
+- (BOOL)running { return self.loginState == ENILLoginRunning; }
+- (BOOL)done { return self.loginState == ENILLoginFinished; }
+
+#pragma mark - Grouped table
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
 {
-  [self startLoginWithProfile:[sender tag] == 1 ? @"desktopwin" : @"chrome"];
+  (void)tableView;
+  return self.loginSection + 1;
 }
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
+{
+  (void)tableView;
+  if (section != self.loginSection) return 2;
+  if (self.running) return [self.pin length] ? 3 : 2;
+  return self.loginState == ENILLoginRecovery ? 2 : 1;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
+{
+  (void)tableView;
+  if (section != self.loginSection) return NSLocalizedString(@"Client", nil);
+  return self.running ? NSLocalizedString(@"QR Code", nil) : nil;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
+{
+  (void)tableView;
+  if (section != self.loginSection) return nil;
+  if (self.running) return nil;
+  if (self.loginState == ENILLoginRecovery) {
+    return [NSString stringWithFormat:@"%@\n%@", self.statusMessage,
+      NSLocalizedString(@"Retry resumes the saved login. Restart creates a new QR code.", nil)];
+  }
+  return self.statusMessage;
+}
+
+- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  if (indexPath.section != self.loginSection || !self.running) return 44.0f;
+  if (indexPath.row == 0) return self.qrImage ? kQRPixels + 24.0f : 88.0f;
+  if (indexPath.row == 2) return 60.0f;
+  UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
+  label.font = [UIFont systemFontOfSize:15.0f];
+  label.numberOfLines = 0;
+  label.text = self.statusMessage;
+  CGSize size = [label sizeThatFits:CGSizeMake(MAX(1.0f, tableView.bounds.size.width - 64.0f), CGFLOAT_MAX)];
+  return MAX(60.0f, size.height + 24.0f);
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  /* This small form uses separate cells for each role, so changing state never
+   * carries a checkmark, spinner, or old PIN into an unrelated row. */
+  UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
+                                                              reuseIdentifier:nil];
+  if (indexPath.section != self.loginSection) {
+    NSString *profile = indexPath.row == 0 ? @"desktopwin" : @"chrome";
+    cell.textLabel.text = indexPath.row == 0
+      ? NSLocalizedString(@"Windows", nil) : NSLocalizedString(@"Chrome", nil);
+    cell.accessoryType = [self.selectedProfile isEqualToString:profile]
+      ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+    cell.textLabel.enabled = !self.prepared && !self.done;
+    cell.selectionStyle = cell.textLabel.enabled
+      ? UITableViewCellSelectionStyleBlue : UITableViewCellSelectionStyleNone;
+    return cell;
+  }
+  if (!self.running) {
+    cell.textLabel.text = self.loginState == ENILLoginRecovery
+      ? (indexPath.row == 0 ? NSLocalizedString(@"Retry saved login", nil)
+                            : NSLocalizedString(@"Restart Login", nil))
+      : NSLocalizedString(@"Start Login", nil);
+    cell.textLabel.textColor = [UIColor blueColor];
+    cell.textLabel.enabled = !self.done;
+    return cell;
+  }
+  cell.selectionStyle = UITableViewCellSelectionStyleNone;
+  if (indexPath.row == 0) {
+    CGFloat height = [self tableView:tableView heightForRowAtIndexPath:indexPath];
+    cell.frame = CGRectMake(0.0f, 0.0f, tableView.bounds.size.width, height);
+    [cell layoutIfNeeded];
+    if (self.qrImage) {
+      CGFloat side = MIN((CGFloat)kQRPixels, cell.contentView.bounds.size.width - 32.0f);
+      UIImageView *qr = [[UIImageView alloc] initWithImage:self.qrImage];
+      qr.frame = CGRectMake((cell.contentView.bounds.size.width - side) / 2.0f,
+                            (height - side) / 2.0f, side, side);
+      qr.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin;
+      qr.contentMode = UIViewContentModeScaleAspectFit;
+      qr.isAccessibilityElement = YES;
+      qr.accessibilityLabel = NSLocalizedString(@"Scan with LINE on your phone", nil);
+      [cell.contentView addSubview:qr];
+    } else {
+      UIActivityIndicatorView *spinner = [[UIActivityIndicatorView alloc]
+        initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleGray];
+      spinner.center = CGPointMake(cell.contentView.bounds.size.width / 2.0f, height / 2.0f);
+      spinner.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin;
+      [cell.contentView addSubview:spinner];
+      [spinner startAnimating];
+    }
+  } else {
+    cell.textLabel.textAlignment = kENILTextAlignCenter;
+    cell.textLabel.numberOfLines = 0;
+    cell.textLabel.font = indexPath.row == 2
+      ? [UIFont boldSystemFontOfSize:30.0f] : [UIFont systemFontOfSize:15.0f];
+    cell.textLabel.textColor = [UIColor darkGrayColor];
+    cell.textLabel.text = indexPath.row == 2 ? self.pin : self.statusMessage;
+  }
+  return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
+{
+  [tableView deselectRowAtIndexPath:indexPath animated:YES];
+  if (self.running || self.done) return;
+  if (indexPath.section != self.loginSection) {
+    if (self.prepared) return;
+    self.selectedProfile = indexPath.row == 0 ? @"desktopwin" : @"chrome";
+    [tableView reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationNone];
+  } else if (self.loginState == ENILLoginRecovery) {
+    if (indexPath.row == 0) [self retrySavedLogin:nil];
+    else [self startNewQR:nil];
+  } else {
+    [self startLoginWithProfile:self.expectedMid ? nil : self.selectedProfile];
+  }
+}
+
+- (void)reloadLoginSection
+{
+  [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:(NSUInteger)self.loginSection]
+               withRowAnimation:UITableViewRowAnimationNone];
+  /* Resolve the new row heights before scrolling. Animated section updates
+   * still expose the old content size on older UIKit, clipping the new PIN. */
+  [self.tableView layoutIfNeeded];
+}
+
+- (void)showLoginRow:(NSInteger)row
+{
+  [self.tableView scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:self.loginSection]
+                      atScrollPosition:row == 0 ? UITableViewScrollPositionTop : UITableViewScrollPositionBottom
+                              animated:NO];
+}
+
+#pragma mark - Login actions
 
 - (void)startLoginWithProfile:(NSString *)profile
 {
   if (self.running || self.done) return;
-  if (![ENILAccount prepareQRLoginAtPath:self.accountDir
-                          clientProfile:profile
+  if (![ENILAccount prepareQRLoginAtPath:self.accountDir clientProfile:profile
                     reauthenticatingMid:self.expectedMid]) {
-    self.statusLabel.text = NSLocalizedString(@"Could not save client identity", nil);
+    self.statusMessage = NSLocalizedString(@"Could not save client identity", nil);
+    [self reloadLoginSection];
     return;
   }
   self.prepared = YES;
@@ -149,7 +242,8 @@ static const NSInteger kENILTextAlignCenter = 1;
   (void)sender;
   if (self.running || self.done) return;
   if (![ENILAccount restartQRLoginAtPath:self.accountDir]) {
-    self.statusLabel.text = NSLocalizedString(@"Could not save login recovery", nil);
+    self.statusMessage = NSLocalizedString(@"Could not save login recovery", nil);
+    [self reloadLoginSection];
     return;
   }
   [self retrySavedLogin:nil];
@@ -159,19 +253,14 @@ static const NSInteger kENILTextAlignCenter = 1;
 {
   (void)sender;
   if (self.running || self.done) return;
-  self.running = YES;
-  self.qrImageView.image = nil;
-  self.pinLabel.hidden = YES;
-  self.chromeButton.hidden = YES;
-  self.windowsButton.hidden = YES;
-  self.qrImageView.hidden = NO;
-  self.statusLabel.text = NSLocalizedString(@"Starting…", nil);
-  /* The detached thread retains self for its duration, so &cancelFlag_ and the
-   * observer callbacks stay valid until runQRLoginAtPath: returns — even if the
-   * modal is dismissed first. */
-  [NSThread detachNewThreadSelector:@selector(loginThreadMain)
-                           toTarget:self
-                         withObject:nil];
+  self.loginState = ENILLoginRunning;
+  self.qrImage = nil;
+  self.pin = nil;
+  self.statusMessage = NSLocalizedString(@"Starting…", nil);
+  [self.tableView reloadData];
+  /* The thread retains self so callbacks and cancelFlag_ remain valid even
+   * after dismissal. Starting a second attempt is blocked until it returns. */
+  [NSThread detachNewThreadSelector:@selector(loginThreadMain) toTarget:self withObject:nil];
 }
 
 - (void)loginThreadMain
@@ -190,17 +279,19 @@ static const NSInteger kENILTextAlignCenter = 1;
 
 - (void)qrLoginDidEmitURL:(NSString *)url
 {
-  if (self.done || ![url length]) return;
-  self.qrImageView.image = [ENILQRImage imageForString:url pixelSize:kQRPixels];
-  self.statusLabel.text =
-    NSLocalizedString(@"Scan with LINE on your phone", nil);
+  if (!self.running || ![url length]) return;
+  self.qrImage = [ENILQRImage imageForString:url pixelSize:kQRPixels];
+  self.statusMessage = NSLocalizedString(@"Scan with LINE on your phone", nil);
+  [self reloadLoginSection];
+  [self showLoginRow:0];
 }
 
 - (void)qrLoginDidEmitPIN:(NSString *)pin
 {
-  if (self.done || ![pin length]) return;
-  self.pinLabel.text = pin;
-  self.pinLabel.hidden = NO;
+  if (!self.running || ![pin length]) return;
+  self.pin = pin;
+  [self reloadLoginSection];
+  [self showLoginRow:2];
 }
 
 /* status_cb hands us the raw C status key; translate at the UI boundary so the
@@ -209,69 +300,63 @@ static const NSInteger kENILTextAlignCenter = 1;
  * format key with %d/%d placeholders the strings file owns. */
 - (void)qrLoginDidEmitStatus:(NSString *)status
 {
-  if (self.done || ![status length]) return;
+  if (!self.running || ![status length]) return;
   int cur = 0, total = 0;
   if (sscanf([status UTF8String], "waiting for scan (%d/%d)", &cur, &total) == 2) {
-    self.statusLabel.text = [NSString stringWithFormat:
+    self.statusMessage = [NSString stringWithFormat:
       NSLocalizedString(@"waiting for scan (%d/%d)", nil), cur, total];
-    return;
+  } else {
+    self.statusMessage = NSLocalizedString(status, nil);
   }
-  self.statusLabel.text = NSLocalizedString(status, nil);
+  [self.tableView reloadRowsAtIndexPaths:[NSArray arrayWithObject:
+    [NSIndexPath indexPathForRow:1 inSection:self.loginSection]]
+                        withRowAnimation:UITableViewRowAnimationNone];
 }
 
 #pragma mark - Terminal handling
 
 - (void)finishWithResult:(NSNumber *)result
 {
-  self.running = NO;
-  /* The background thread retains us, so this can fire after the user already
-   * cancelled — done_ (set first in -cancelAction) makes that a no-op. */
+  /* The thread retains us after dismissal. The finished state makes a late
+   * completion after -cancelAction a no-op. */
   if (self.done) return;
   if (![result boolValue] && [ENILAccount canRestartQRLoginAtPath:self.accountDir]) {
-    self.qrImageView.hidden = YES;
-    self.pinLabel.hidden = YES;
-    self.statusLabel.text = NSLocalizedString(@"Sign-in needs recovery", nil);
-    [self.chromeButton setTitle:NSLocalizedString(@"Retry saved login", nil) forState:UIControlStateNormal];
-    [self.chromeButton removeTarget:self action:NULL forControlEvents:UIControlEventTouchUpInside];
-    [self.chromeButton addTarget:self action:@selector(retrySavedLogin:) forControlEvents:UIControlEventTouchUpInside];
-    [self.windowsButton setTitle:NSLocalizedString(@"Start new QR", nil) forState:UIControlStateNormal];
-    [self.windowsButton removeTarget:self action:NULL forControlEvents:UIControlEventTouchUpInside];
-    [self.windowsButton addTarget:self action:@selector(startNewQR:) forControlEvents:UIControlEventTouchUpInside];
-    self.chromeButton.hidden = NO;
-    self.windowsButton.hidden = NO;
+    self.loginState = ENILLoginRecovery;
+    self.qrImage = nil;
+    self.pin = nil;
+    self.statusMessage = NSLocalizedString(@"Sign-in needs recovery", nil);
+    [self reloadLoginSection];
+    [self showLoginRow:0];
     return;
   }
-  self.done = YES;
+  self.loginState = ENILLoginFinished;
 
   if ([result boolValue]) {
-    /* Sign-in succeeded on the phone. Hand off: the delegate relocates the
-     * staged session and activates the account, reshaping the nav root behind
-     * the modal. On YES it owns the dismissal (-didComplete); on NO (a local
-     * validate/copy/start failure) surface it inline and leave the modal up so
-     * the user can Cancel and retry. */
+    /* The delegate activates the staged account and dismisses the modal on
+     * success. Local activation failure follows its existing cleanup path. */
     if ([self.delegate qrLoginViewController:self
                      didFinishWithAccountDir:self.accountDir]) {
       [self.delegate qrLoginViewControllerDidComplete:self];
       return;
     }
-    self.statusLabel.text =
+    self.statusMessage =
       NSLocalizedString(@"Couldn't finish adding the account", nil);
     [self.delegate qrLoginViewControllerDidFail:self];
     return;
   }
 
-  self.statusLabel.text = NSLocalizedString(@"Login cancelled", nil);
+  self.statusMessage = NSLocalizedString(@"Login cancelled", nil);
   [self.delegate qrLoginViewControllerDidFail:self];
 }
 
 /* User cancelled. Flip cancelFlag_ to both abandon the flow at the next step
  * boundary AND abort the in-flight long-poll (the C flow threads it into
- * libcurl's transfer-info callback, tearing the socket down within ~1s). done_
- * claims terminal handling so the late background -finishWithResult: no-ops. */
+ * libcurl's transfer-info callback, tearing the socket down within ~1s).
+ * The finished state makes the late background -finishWithResult: a no-op. */
 - (void)cancelAction
 {
   if (self.done) return;
-  self.done = YES;
+  self.loginState = ENILLoginFinished;
   cancelFlag_ = 1;
   [self.delegate qrLoginViewControllerDidFail:self];
 }

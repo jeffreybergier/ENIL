@@ -65,11 +65,22 @@
   #define XPBezelStyleTexturedSquare       NSBezelStyleTexturedSquare
   #define XPProgressIndicatorStyleBar      NSProgressIndicatorStyleBar
   #define XPButtonTypeMomentaryLight       NSButtonTypeMomentaryLight
+  #define XPButtonTypeRadio                NSButtonTypeRadio
 #else
   #define XPBezelStyleRounded              NSRoundedBezelStyle
   #define XPBezelStyleTexturedSquare       NSTexturedSquareBezelStyle
   #define XPProgressIndicatorStyleBar      NSProgressIndicatorBarStyle
   #define XPButtonTypeMomentaryLight       NSMomentaryLightButton
+  #define XPButtonTypeRadio                NSRadioButton
+#endif
+
+/* 10.13 High Sierra (control state names). */
+#if MAC_OS_X_VERSION_MAX_ALLOWED >= 101300
+  #define XPControlStateOn  NSControlStateValueOn
+  #define XPControlStateOff NSControlStateValueOff
+#else
+  #define XPControlStateOn  NSOnState
+  #define XPControlStateOff NSOffState
 #endif
 
 /* Suppress deprecated-declarations for APIs that are deprecated on modern SDKs

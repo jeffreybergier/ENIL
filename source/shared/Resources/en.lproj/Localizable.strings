@@ -216,3 +216,14 @@
 "Retry saved login" = "Retry saved login";
 "Start new QR" = "Start new QR";
 "Could not save login recovery" = "Could not save login recovery";
+
+/* Login sections and actions */
+"Client" = "Client";
+"QR Code" = "QR Code";
+"Start Login" = "Start Login";
+"Restart Login" = "Restart Login";
+"Retry resumes the saved login. Restart creates a new QR code." = "Retry resumes the saved login. Restart creates a new QR code.";
+
+/* macOS login sections */
+"Login" = "Login";
+"This account's saved client identity will be used." = "This account's saved client identity will be used.";

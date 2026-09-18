@@ -3,6 +3,10 @@
 #import "ENILAccount.h"
 
 static const int kQRPixels = 256;
+/* Reserve the full QR + multiline status + PIN layout from the first frame.
+ * Neither the window nor either box changes size as login progresses. */
+static const CGFloat kLoginWindowWidth = 460;
+static const CGFloat kLoginWindowHeight = 600;
 
 /* The QR-login C bridging (callback trampolines + main-thread marshalling)
  * now lives behind +[ENILAccount runQRLoginAtPath:observer:cancelFlag:]; this
@@ -10,6 +14,8 @@ static const int kQRPixels = 256;
 @interface QRLoginWindowController () <ENILQRLoginObserver>
 - (void)beginLoginWithProfile:(NSString *)profile;
 - (void)chooseClient:(id)sender;
+- (void)startSelectedLogin:(id)sender;
+- (void)showLoginActionsForRecovery:(BOOL)recovery;
 - (void)retrySavedLogin:(id)sender;
 - (void)startNewQR:(id)sender;
 @end
@@ -36,11 +42,12 @@ static const int kQRPixels = 256;
   XPWindowStyleMask mask = XPWindowStyleMaskTitled
                          | XPWindowStyleMaskClosable;
   NSWindow *window = [[[NSWindow alloc]
-    initWithContentRect:NSMakeRect(0, 0, 320, 400)
+    initWithContentRect:NSMakeRect(0, 0, kLoginWindowWidth, kLoginWindowHeight)
               styleMask:mask
                 backing:NSBackingStoreBuffered
                   defer:NO] autorelease];
-  [window setTitle:NSLocalizedString(@"Add Account", nil)];
+  [window setTitle:expectedMid_ ? NSLocalizedString(@"Reauthenticate", nil)
+                               : NSLocalizedString(@"Add Account", nil)];
   [window setReleasedWhenClosed:NO];
   [window setDelegate:(id)self]; /* for windowWillClose: (user-cancel);
     (id) cast — NSWindowDelegate is a 10.6+ formal protocol, absent on the
@@ -58,56 +65,144 @@ static const int kQRPixels = 256;
   [f setBezeled:NO];
   [f setDrawsBackground:NO];
   [f setAlignment:XPTextAlignmentCenter];
+  [f setFont:[NSFont systemFontOfSize:13]];
+  [[f cell] setWraps:YES];
+  [[f cell] setScrollable:NO];
   return f;
+}
+
+- (NSButton *)actionButtonInRect:(NSRect)frame title:(NSString *)title action:(SEL)action;
+{
+  NSButton *button = [[[NSButton alloc] initWithFrame:frame] autorelease];
+  [button setTitle:title];
+  [button setBezelStyle:XPBezelStyleRounded];
+  [button setTarget:self];
+  [button setAction:action];
+  [button setAutoresizingMask:NSViewMinXMargin | NSViewMaxXMargin | NSViewMinYMargin];
+  return button;
 }
 
 - (void)windowDidLoad;
 {
   [super windowDidLoad];
   NSView *cv = [[self window] contentView];
+  NSBox *clientBox = [[[NSBox alloc]
+    initWithFrame:NSMakeRect(20, 484, kLoginWindowWidth - 40, 96)] autorelease];
+  [clientBox setTitle:NSLocalizedString(@"Client", nil)];
+  [clientBox setContentViewMargins:NSMakeSize(12, 8)];
+  [cv addSubview:clientBox];
+  NSView *clients = [clientBox contentView];
+  CGFloat clientWidth = [clients bounds].size.width;
+  CGFloat clientHeight = [clients bounds].size.height;
 
-  qrImageView_ = [[NSImageView alloc]
-    initWithFrame:NSMakeRect(32, 120, kQRPixels, kQRPixels)];
-  [qrImageView_ setImageScaling:XPImageScaleAxesIndependently];
-  [qrImageView_ setHidden:YES];
-  [cv addSubview:qrImageView_];
-
-  chromeButton_ = [[NSButton alloc] initWithFrame:NSMakeRect(55, 255, 210, 36)];
+  /* Center the pair as one unit when NSBox settles its content bounds on
+   * Tiger. Offset slightly to center the radio artwork, which sits above
+   * the center of its control frames. */
+  NSView *choices = [[[NSView alloc] initWithFrame:
+    NSMakeRect(0, (clientHeight - 48) / 2 - 3, clientWidth, 48)] autorelease];
+  [choices setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin | NSViewMaxYMargin];
+  [clients addSubview:choices];
+  chromeButton_ = [[NSButton alloc] initWithFrame:NSMakeRect(8, 26, clientWidth - 16, 22)];
   [chromeButton_ setTitle:NSLocalizedString(@"Chrome", nil)];
+  [chromeButton_ setButtonType:XPButtonTypeRadio];
   [chromeButton_ setTarget:self];
   [chromeButton_ setAction:@selector(chooseClient:)];
-  [chromeButton_ setTag:0];
-  [cv addSubview:chromeButton_];
-  windowsButton_ = [[NSButton alloc] initWithFrame:NSMakeRect(55, 200, 210, 36)];
+  [chromeButton_ setState:XPControlStateOn];
+  [chromeButton_ setAutoresizingMask:NSViewWidthSizable];
+  [choices addSubview:chromeButton_];
+  windowsButton_ = [[NSButton alloc] initWithFrame:NSMakeRect(8, 0, clientWidth - 16, 22)];
   [windowsButton_ setTitle:NSLocalizedString(@"Windows", nil)];
+  [windowsButton_ setButtonType:XPButtonTypeRadio];
   [windowsButton_ setTarget:self];
   [windowsButton_ setAction:@selector(chooseClient:)];
-  [windowsButton_ setTag:1];
-  [cv addSubview:windowsButton_];
+  [windowsButton_ setState:XPControlStateOff];
+  [windowsButton_ setAutoresizingMask:NSViewWidthSizable];
+  [choices addSubview:windowsButton_];
   [chromeButton_ setHidden:expectedMid_ != nil];
   [windowsButton_ setHidden:expectedMid_ != nil];
+  if (expectedMid_) {
+    NSTextField *savedClient = [self labelInRect:NSMakeRect(8, 4, clientWidth - 16, clientHeight - 8)];
+    [savedClient setStringValue:NSLocalizedString(@"This account's saved client identity will be used.", nil)];
+    [savedClient setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+    [clients addSubview:savedClient];
+  }
 
-  statusField_ = [[self labelInRect:NSMakeRect(8, 80, 304, 20)] retain];
-  [statusField_ setStringValue:NSLocalizedString(@"Choose a client identity", nil)];
-  [cv addSubview:statusField_];
+  loginBox_ = [[NSBox alloc] initWithFrame:NSMakeRect(20, 20, kLoginWindowWidth - 40, 448)];
+  [loginBox_ setContentViewMargins:NSMakeSize(12, 12)];
+  [cv addSubview:loginBox_];
+  NSView *login = [loginBox_ contentView];
+  CGFloat width = [login bounds].size.width;
+  CGFloat height = [login bounds].size.height;
 
-  pinField_ = [[self labelInRect:NSMakeRect(8, 36, 304, 36)] retain];
+  qrImageView_ = [[NSImageView alloc]
+    initWithFrame:NSMakeRect((width - kQRPixels) / 2, height - 12 - kQRPixels, kQRPixels, kQRPixels)];
+  [qrImageView_ setImageScaling:XPImageScaleAxesIndependently];
+  /* Tiger tiles NSBox's content view on first display. Anchor children to its
+   * final bounds even though the outer window and boxes never resize. */
+  [qrImageView_ setAutoresizingMask:NSViewMinXMargin | NSViewMaxXMargin | NSViewMinYMargin];
+  [login addSubview:qrImageView_];
+
+  statusField_ = [[self labelInRect:NSMakeRect(8, 66, width - 16, 64)] retain];
+  [statusField_ setStringValue:@""];
+  [statusField_ setAutoresizingMask:NSViewWidthSizable];
+  [login addSubview:statusField_];
+  pinField_ = [[self labelInRect:NSMakeRect(8, 8, width - 16, 40)] retain];
   [pinField_ setFont:[NSFont boldSystemFontOfSize:28]];
+  [pinField_ setSelectable:YES];
   [pinField_ setStringValue:@""];
+  [pinField_ setAutoresizingMask:NSViewWidthSizable];
+  [login addSubview:pinField_];
+
+  CGFloat buttonWidth = 260;
+  CGFloat buttonX = (width - buttonWidth) / 2;
+  startButton_ = [[self actionButtonInRect:NSMakeRect(buttonX, height - 120, buttonWidth, 32)
+    title:NSLocalizedString(@"Start Login", nil) action:@selector(startSelectedLogin:)] retain];
+  retryButton_ = [[self actionButtonInRect:NSMakeRect(buttonX, height - 120, buttonWidth, 32)
+    title:NSLocalizedString(@"Retry saved login", nil) action:@selector(retrySavedLogin:)] retain];
+  restartButton_ = [[self actionButtonInRect:NSMakeRect(buttonX, height - 164, buttonWidth, 32)
+    title:NSLocalizedString(@"Restart Login", nil) action:@selector(startNewQR:)] retain];
+  [login addSubview:startButton_];
+  [login addSubview:retryButton_];
+  [login addSubview:restartButton_];
+  recoveryHelpField_ = [[self labelInRect:NSMakeRect(8, 146, width - 16, 72)] retain];
+  [recoveryHelpField_ setStringValue:NSLocalizedString(
+    @"Retry resumes the saved login. Restart creates a new QR code.", nil)];
+  [recoveryHelpField_ setAutoresizingMask:NSViewWidthSizable];
+  [login addSubview:recoveryHelpField_];
+  [self showLoginActionsForRecovery:NO];
+}
+
+- (void)showLoginActionsForRecovery:(BOOL)recovery;
+{
+  [loginBox_ setTitle:NSLocalizedString(@"Login", nil)];
+  [qrImageView_ setHidden:YES];
   [pinField_ setHidden:YES];
-  [cv addSubview:pinField_];
+  [startButton_ setHidden:recovery];
+  [retryButton_ setHidden:!recovery];
+  [restartButton_ setHidden:!recovery];
+  [recoveryHelpField_ setHidden:!recovery];
+  [[self window] setDefaultButtonCell:[(recovery ? retryButton_ : startButton_) cell]];
 }
 
 - (void)start;
 {
   if (running_ || done_) return;
   [self showWindow:self];
-  if (expectedMid_) [self beginLoginWithProfile:nil];
+  if (expectedMid_ && !prepared_) [self beginLoginWithProfile:nil];
 }
 
 - (void)chooseClient:(id)sender;
 {
-  [self beginLoginWithProfile:[sender tag] == 1 ? @"desktopwin" : @"chrome"];
+  if (running_ || done_ || prepared_ || expectedMid_) return;
+  [windowsButton_ setState:sender == windowsButton_ ? XPControlStateOn : XPControlStateOff];
+  [chromeButton_ setState:sender == chromeButton_ ? XPControlStateOn : XPControlStateOff];
+}
+
+- (void)startSelectedLogin:(id)sender;
+{
+  (void)sender;
+  [self beginLoginWithProfile:expectedMid_ ? nil :
+    ([windowsButton_ state] == XPControlStateOn ? @"desktopwin" : @"chrome")];
 }
 
 - (void)beginLoginWithProfile:(NSString *)profile;
@@ -119,6 +214,9 @@ static const int kQRPixels = 256;
     [statusField_ setStringValue:NSLocalizedString(@"Could not save client identity", nil)];
     return;
   }
+  prepared_ = YES;
+  [chromeButton_ setEnabled:NO];
+  [windowsButton_ setEnabled:NO];
   [self retrySavedLogin:nil];
 }
 
@@ -140,8 +238,13 @@ static const int kQRPixels = 256;
   running_ = YES;
   [qrImageView_ setImage:nil];
   [pinField_ setHidden:YES];
-  [chromeButton_ setHidden:YES];
-  [windowsButton_ setHidden:YES];
+  [pinField_ setStringValue:@""];
+  [startButton_ setHidden:YES];
+  [retryButton_ setHidden:YES];
+  [restartButton_ setHidden:YES];
+  [recoveryHelpField_ setHidden:YES];
+  [loginBox_ setTitle:NSLocalizedString(@"QR Code", nil)];
+  [[self window] setDefaultButtonCell:nil];
   [qrImageView_ setHidden:NO];
   [statusField_ setStringValue:NSLocalizedString(@"Starting…", nil)];
   [NSThread detachNewThreadSelector:@selector(loginThreadMain)
@@ -169,14 +272,14 @@ static const int kQRPixels = 256;
 
 - (void)qrLoginDidEmitURL:(NSString *)s;
 {
-  if (done_ || ![s length]) return;
+  if (!running_ || done_ || ![s length]) return;
   [qrImageView_ setImage:[ENILQRImage imageForString:s pixelSize:kQRPixels]];
   [statusField_ setStringValue:NSLocalizedString(@"Scan with LINE on your phone", nil)];
 }
 
 - (void)qrLoginDidEmitPIN:(NSString *)s;
 {
-  if (done_ || ![s length]) return;
+  if (!running_ || done_ || ![s length]) return;
   [pinField_ setStringValue:s];
   [pinField_ setHidden:NO];
 }
@@ -190,7 +293,7 @@ static const int kQRPixels = 256;
    * Special case: the poll loop pre-formats "waiting for scan (N/M)" in C.
    * That would produce a new key per tick, so detect it here and pivot to
    * a stable format key with %d/%d placeholders that the strings file owns. */
-  if (done_ || ![s length]) return;
+  if (!running_ || done_ || ![s length]) return;
   int cur = 0, total = 0;
   if (sscanf([s UTF8String], "waiting for scan (%d/%d)", &cur, &total) == 2) {
     [statusField_ setStringValue:
@@ -213,15 +316,10 @@ static const int kQRPixels = 256;
      [window close] below doesn't re-enter the windowWillClose: cancel path. */
   if (done_) return;
   if (![result boolValue] && [ENILAccount canRestartQRLoginAtPath:accountDir_]) {
-    [qrImageView_ setHidden:YES];
-    [pinField_ setHidden:YES];
+    [qrImageView_ setImage:nil];
+    [pinField_ setStringValue:@""];
     [statusField_ setStringValue:NSLocalizedString(@"Sign-in needs recovery", nil)];
-    [chromeButton_ setTitle:NSLocalizedString(@"Retry saved login", nil)];
-    [chromeButton_ setAction:@selector(retrySavedLogin:)];
-    [windowsButton_ setTitle:NSLocalizedString(@"Start new QR", nil)];
-    [windowsButton_ setAction:@selector(startNewQR:)];
-    [chromeButton_ setHidden:NO];
-    [windowsButton_ setHidden:NO];
+    [self showLoginActionsForRecovery:YES];
     return;
   }
   done_ = YES;
@@ -305,6 +403,11 @@ static const int kQRPixels = 256;
 
 - (void)dealloc;
 {
+  [loginBox_ release];
+  [startButton_ release];
+  [retryButton_ release];
+  [restartButton_ release];
+  [recoveryHelpField_ release];
   [accountDir_ release];
   [expectedMid_ release];
   [qrImageView_ release];

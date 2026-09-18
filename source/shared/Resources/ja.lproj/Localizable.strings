@@ -215,3 +215,14 @@
 "Retry saved login" = "保存したログインを再試行";
 "Start new QR" = "新しいQRでログイン";
 "Could not save login recovery" = "ログインの再開を保存できませんでした";
+
+/* Login sections and actions */
+"Client" = "クライアント";
+"QR Code" = "QRコード";
+"Start Login" = "ログイン開始";
+"Restart Login" = "ログインをやり直す";
+"Retry resumes the saved login. Restart creates a new QR code." = "再試行すると保存したログインを再開します。やり直すと新しいQRコードを作成します。";
+
+/* macOS login sections */
+"Login" = "ログイン";
+"This account's saved client identity will be used." = "このアカウントに保存されたクライアント情報を使用します。";

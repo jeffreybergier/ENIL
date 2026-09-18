@@ -17,7 +17,8 @@
 - (void)qrLoginWindowControllerDidFail:(QRLoginWindowController *)c;
 @end
 
-/* Presents the QR/PIN login UI and drives the QR-login handshake via
+/* Fixed-size client and login NSBox sections. Login actions are replaced by
+ * QR/status/PIN controls without resizing or animation. Drives the handshake via
  * +[ENILAccount runQRLoginAtPath:observer:cancelFlag:] on a background thread.
  * The blocking long-polls never touch the main runloop; ENILAccount marshals
  * the observer callbacks back to the main thread. Closing the window flips
@@ -26,15 +27,21 @@
 @interface QRLoginWindowController : NSWindowController {
  @private
   NSString      *accountDir_;
+  NSBox         *loginBox_;
   NSImageView   *qrImageView_;
   NSTextField   *statusField_;
   NSTextField   *pinField_;
   NSButton      *chromeButton_;
   NSButton      *windowsButton_;
+  NSButton      *startButton_;
+  NSButton      *retryButton_;
+  NSButton      *restartButton_;
+  NSTextField   *recoveryHelpField_;
   NSString      *expectedMid_; /* nil = Add Account; non-nil = Reauthenticate
                                   (the mid we expect the scan to match) */
   id <QRLoginWindowControllerDelegate> delegate_; /* weak */
   BOOL           running_;
+  BOOL           prepared_;   /* client selection is locked after preparation */
   BOOL           done_;       /* terminal handling reached (success / sheet /
                                  user-close) — guards against the late
                                  background thread resurrecting the window */
