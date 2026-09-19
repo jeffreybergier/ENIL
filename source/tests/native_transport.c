@@ -79,7 +79,7 @@ int enil_health_is_failed(enil_err_source_t s) {
 }
 int enil_health_any_failed(void) { return health_failed; }
 void enil_health_bind(enil_health_t *h) { (void)h; }
-int enil_db_set_local_rev(sqlite3 *db, long long rev) {
+int __wrap_enil_db_set_local_rev(sqlite3 *db, long long rev) {
   (void)db;
   last_revision = rev;
   return 0;
@@ -263,6 +263,27 @@ int main(int argc, char **argv) {
   origin = argv[1];
   assert(enil_identity_default("desktopwin", &id));
   assert(enil_identity_bind(&id));
+  if (!strcmp(argv[2], "language")) {
+    sticker_package_t *stickers = NULL;
+    sticon_package_t *sticons = NULL;
+    int count;
+    if (strcmp(argv[3], "default")) enil_line_set_language(argv[3]);
+    assert(sticker_package_fetch_all("synthetic-token", &stickers, &count) == 0 && count == 0);
+    assert(sticon_package_fetch_all("synthetic-token", &sticons, &count) == 0 && count == 0);
+    free(stickers);
+    free(sticons);
+    r = enil_line_post("/api/talk/thrift/Talk/TalkService/getProfile", "[0]", "synthetic-token");
+    assert(r.status == 200);
+    enil_line_response_free(&r);
+    r = enil_line_post("/native/sync", "[{\"lastRevision\":\"10\",\"count\":100}]", "synthetic-token");
+    assert(r.status == 200);
+    enil_line_response_free(&r);
+    r = enil_line_post("/api/auth/tokenRefresh", "{\"refreshToken\":\"synthetic-refresh\"}", "synthetic-token");
+    assert(r.status == 200);
+    enil_line_response_free(&r);
+    assert(requests == 5);
+    return 0;
+  }
   if (!strcmp(argv[2], "request-generation")) {
     request_generation(argv[3], &id);
     return 0;

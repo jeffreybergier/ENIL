@@ -167,7 +167,7 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
   append_header(&hs, "Content-Type", "application/x-thrift");
   append_header(&hs, "Accept", "application/x-thrift");
   append_header(&hs, "X-Line-Application", identity->application);
-  append_header(&hs, "X-LAL", "en_US");
+  hs = enil_line_language_headers(hs);
   curl = enil_curl_new(&response);
   if (!curl)
     goto done;

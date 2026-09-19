@@ -494,7 +494,7 @@ static void *sse_thread(void *arg)
     hdrs = curl_slist_append(hdrs,  "Pragma: no-cache");
     hdrs = curl_slist_append(hdrs, version_header);
     hdrs = curl_slist_append(hdrs, application_header);
-    hdrs = curl_slist_append(hdrs,  "X-LAL: en_US");
+    hdrs = enil_line_language_headers(hdrs);
     hdrs = curl_slist_append(hdrs,  "Origin: " ENIL_LINE_ORIGIN);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, identity.user_agent);
     if (access_hdr) hdrs = curl_slist_append(hdrs, access_hdr);

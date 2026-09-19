@@ -22,6 +22,12 @@ WINDOWS_UA = "Line/9.7.0.3556"
 
 class ClientIdentityTests(unittest.TestCase):
     def test_session_lifecycle_and_wire_identity(self):
+        self.check_session_lifecycle_and_wire_identity("default", "en", "en-US", "en_US")
+
+    def test_japanese_gateway_headers_catalog_and_events(self):
+        self.check_session_lifecycle_and_wire_identity("ja", "ja", "ja-JP", "ja_JP")
+
+    def check_session_lifecycle_and_wire_identity(self, selected, language, accept, lal):
         records = []
 
         class Handler(BaseHTTPRequestHandler):
@@ -56,6 +62,8 @@ class ClientIdentityTests(unittest.TestCase):
                                          "encryptedKeyChain": "synthetic"}}
                 elif self.path.endswith("/getProfile"):
                     data = {"mid": "synthetic-mid", "displayName": "Synthetic", "regionCode": "JP"}
+                elif self.path.endswith("/getOwnedProductSummaries"):
+                    data = {"productList": []}
                 elif self.path.endswith("/tokenRefresh"):
                     data = {"tokenV3IssueResult": {"accessToken": profile + "-refreshed",
                             "refreshToken": "synthetic-refreshed", "durationUntilRefreshInSec": 3600,
@@ -82,10 +90,10 @@ class ClientIdentityTests(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory(prefix="enil-identity-tests-") as temp:
                 flags = shlex.split(subprocess.check_output(
-                    ["pkg-config", "--cflags", "--libs", "libcjson", "libcurl", "openssl"], text=True))
+                    ["pkg-config", "--cflags", "--libs", "libcjson", "libcurl", "openssl", "sqlite3"], text=True))
                 shared = REPO / "source/shared"
                 sources = ["enil_identity.c", "enil_session.c", "enil_api_json.c", "enil_line.c",
-                           "enil_http.c", "enil_talkserv.c", "enil_api_call.c", "enil_qrlogin.c",
+                           "enil_http.c", "enil_talkserv.c", "enil_db.c", "enil_api_call.c", "enil_qrlogin.c",
                            "enil_native.c", "enil_thrift.c", "enil_native_login.c", "enil_obs.c", "enil_b64.c", "enil_crypto.c", "enil_sse.c"]
                 binary = str(Path(temp) / "identity-test")
                 subprocess.run(["cc", "-std=gnu99", "-Wall", "-Wextra",
@@ -93,8 +101,9 @@ class ClientIdentityTests(unittest.TestCase):
                                 "-I" + str(shared), str(REPO / "source/tests/client_identity.c"),
                                 *[str(shared / name) for name in sources],
                                 "-Wl,--gc-sections", "-Wl,--wrap=curl_easy_perform", "-pthread",
+                                "-Wl,--wrap=enil_db_set_local_rev",
                                 *flags, "-o", binary], check=True, timeout=60)
-                result = subprocess.run([binary, temp, f"http://127.0.0.1:{server.server_port}"],
+                result = subprocess.run([binary, temp, f"http://127.0.0.1:{server.server_port}", selected],
                                         capture_output=True, text=True, timeout=30)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         finally:
@@ -105,6 +114,14 @@ class ClientIdentityTests(unittest.TestCase):
         self.assertFalse(any(path == "/must-not-send" for path, _, _ in records))
         for application, user_agent in [(CHROME_APP, CHROME_UA), (WINDOWS_APP, WINDOWS_UA)]:
             requests = [(path, h, b) for path, h, b in records if h.get("x-line-application") == application]
+            for path, headers, body in requests:
+                if path.startswith("/api/"):
+                    self.assertEqual(headers.get("accept-language"), accept, path)
+                    self.assertEqual(headers.get("x-lal"), lal, path)
+            catalogs = [json.loads(b) for path, _, b in requests
+                        if path.endswith("/getOwnedProductSummaries")]
+            self.assertEqual(catalogs, [[shop, 0, 1000, {"language": language, "country": "JP"}]
+                                        for shop in ["stickershop", "sticonshop"]])
             for method in ["createSession", "createQrCode", "checkQrCodeVerified",
                            "verifyCertificate", "qrCodeLoginV2", "getProfile"]:
                 matches = [(h, b) for path, h, b in requests if path.endswith("/" + method)]

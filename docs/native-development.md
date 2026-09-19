@@ -738,6 +738,16 @@ crypto results; it does not contact LINE or verify live Windows compatibility.
 Client identity is an exact snapshot in `session.json` (`clientIdentity`).
 `profileId` identifies the client kind; `transport` selects its complete protocol.
 Missing identity resolves to the frozen Chrome profile; unknown identities fail.
+
+LINE's language follows the app bundle's selected localization, independently
+of the saved client identity or the system's region. At startup, `ENILAccount`
+passes `en` or `ja` to `enil_line_set_language` before network threads start.
+Chrome API/event requests and native API/login requests use the shared
+`enil_line_language_headers` helper for `Accept-Language` and `X-LAL`.
+ShopService catalog requests use `enil_line_language()` in their locale payload;
+the existing shop country remains `JP`. A full sync refreshes owned sticker and
+emoji package names after changing the app language and restarting it. Host
+tests capture both English and Japanese headers and JSON/Thrift catalog locales.
 New Windows sessions use `native-thrift`. Existing `chrome-gateway` snapshots,
 including the old Windows-header experiment, keep their original behavior.
 

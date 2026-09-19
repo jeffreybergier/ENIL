@@ -1925,16 +1925,9 @@ static int sse_event_cb(const ENILSSEEvent *ev, void *ctx)
    * single source of truth so headers never desync from displayed text. */
   NSArray *prefs = [[NSBundle mainBundle] preferredLocalizations];
   NSString *lang = [prefs count] ? [prefs objectAtIndex:0] : @"en";
-  const char *acceptLang = "en-US";
-  const char *xLal       = "en_US";
-  if ([lang isEqualToString:@"ja"]) {
-    acceptLang = "ja-JP";
-    xLal       = "ja_JP";
-  }
   ENILLog(@"ENILAccount.bootstrapProcess",
-          @"fonts=%@ language: preferred=%@ accept=%s x-lal=%s",
-          fonts, lang, acceptLang, xLal);
-  enil_line_set_language(acceptLang, xLal);
+          @"fonts=%@ language: preferred=%@", fonts, lang);
+  enil_line_set_language([lang UTF8String]);
 }
 
 + (void)syncWorkerCredentialsFromKeychain;

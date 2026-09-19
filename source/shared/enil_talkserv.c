@@ -843,7 +843,8 @@ static cJSON *fetch_owned_product_list(const char *access_token, const char *sho
 
   if (!access_token || !shop) return NULL;
   snprintf(body, sizeof(body),
-           "[\"%s\",0,1000,{\"language\":\"en\",\"country\":\"JP\"}]", shop);
+           "[\"%s\",0,1000,{\"language\":\"%s\",\"country\":\"JP\"}]",
+           shop, enil_line_language());
 
   r = enil_line_post(path, body, access_token);
   if (r.status != 200) {

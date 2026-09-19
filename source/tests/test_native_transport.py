@@ -11,7 +11,7 @@ import unittest
 from thrift.Thrift import TType, TMessageType
 from thrift.protocol.TCompactProtocol import TCompactProtocol
 from thrift.transport.TTransport import TMemoryBuffer
-from test_windows_login_probe import reply
+from test_windows_login_probe import reply, probe
 REPO = Path(__file__).resolve().parents[2]
 
 
@@ -22,12 +22,12 @@ class NativeTransportTests(unittest.TestCase):
         cls.addClassCleanup(cls.build_dir.cleanup)
         cls.binary = str(Path(cls.build_dir.name) / 'native')
         flags = shlex.split(subprocess.check_output(
-            ['pkg-config', '--cflags', '--libs', 'libcjson', 'libcurl', 'openssl'], text=True))
+            ['pkg-config', '--cflags', '--libs', 'libcjson', 'libcurl', 'openssl', 'sqlite3'], text=True))
         shared = REPO / 'source/shared'
         sources = [
             'enil_native.c', 'enil_thrift.c', 'enil_identity.c', 'enil_line.c',
             'enil_http.c', 'enil_b64.c', 'enil_session.c', 'enil_login_store.c',
-            'enil_api_json.c', 'enil_sse.c', 'enil_talkserv.c', 'enil_api_call.c',
+            'enil_api_json.c', 'enil_sse.c', 'enil_talkserv.c', 'enil_api_call.c', 'enil_db.c',
         ]
         subprocess.run([
             'cc', '-std=gnu99', '-Wall', '-Wextra', '-Werror',
@@ -36,6 +36,7 @@ class NativeTransportTests(unittest.TestCase):
             *[str(shared / name) for name in sources],
             '-Wl,--gc-sections', '-Wl,--wrap=curl_easy_perform',
             '-Wl,--wrap=curl_easy_getinfo', '-pthread', *flags, '-o', cls.binary,
+            '-Wl,--wrap=enil_db_set_local_rev',
         ], check=True)
 
     def run_native(self, *args, **kw):
@@ -44,6 +45,69 @@ class NativeTransportTests(unittest.TestCase):
 
     def decode(self, method, wire):
         return json.loads(self.run_native('decode', method, input=wire))
+
+    def test_language_headers_and_catalog_locale_on_native_wire(self):
+        records = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_POST(self):
+                raw = self.rfile.read(int(self.headers['Content-Length']))
+                protocol = TCompactProtocol(TMemoryBuffer(raw))
+                method, _, _ = protocol.readMessageBegin()
+                args = probe.read_value(protocol, TType.STRUCT)
+                records.append((self.path, method, dict(self.headers), args))
+                # Empty successful structs suffice for these transport checks.
+                # Catalog replies additionally contain an empty product list.
+                buffer = TMemoryBuffer()
+                protocol = TCompactProtocol(buffer)
+                protocol.writeMessageBegin(method, TMessageType.REPLY, 0)
+                protocol.writeStructBegin('result')
+                protocol.writeFieldBegin('success', TType.STRUCT, 0)
+                protocol.writeStructBegin('success')
+                if method == 'getOwnedProductSummaries':
+                    protocol.writeFieldBegin('productList', TType.LIST, 1)
+                    protocol.writeListBegin(TType.STRUCT, 0)
+                    protocol.writeListEnd()
+                    protocol.writeFieldEnd()
+                protocol.writeFieldStop()
+                protocol.writeStructEnd()
+                protocol.writeFieldEnd()
+                protocol.writeFieldStop()
+                protocol.writeStructEnd()
+                protocol.writeMessageEnd()
+                wire = buffer.getvalue()
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(wire)))
+                self.end_headers()
+                self.wfile.write(wire)
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            for selected, language, accept, lal in [('default', 'en', 'en-US', 'en_US'),
+                                                     ('ja', 'ja', 'ja-JP', 'ja_JP')]:
+                with self.subTest(language=language):
+                    records.clear()
+                    subprocess.run([self.binary, f'http://127.0.0.1:{server.server_port}',
+                                    'language', selected], check=True, timeout=10)
+                    self.assertEqual([method for _, method, _, _ in records],
+                                     ['getOwnedProductSummaries', 'getOwnedProductSummaries',
+                                      'getProfile', 'sync', 'refresh'])
+                    for _, _, headers, _ in records:
+                        self.assertEqual(headers.get('Accept-Language'), accept)
+                        self.assertEqual(headers.get('X-LAL'), lal)
+                    for (path, _, _, args), shop in zip(records[:2], ['stickershop', 'sticonshop']):
+                        self.assertEqual(path, '/TSHOP4')
+                        self.assertEqual(args, {2: shop, 3: 0, 4: 1000,
+                                                5: {1: language, 2: 'JP'}})
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
 
     def test_exact_binary_message_and_i64_encoding(self):
         chunks = [b'\0\xff\x80test', bytes(range(256))]

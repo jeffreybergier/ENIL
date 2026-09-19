@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include "enil_native_login.h"
 #include "enil_http.h"
+#include "enil_line.h"
 #include "enil_identity.h"
 #include "enil_session.h"
 #include "enil_worker.h"
@@ -159,7 +160,7 @@ static cJSON *call(NativeLogin *p, const char *method, int polling, int interval
   headers = curl_slist_append(headers, "Accept: application/x-thrift");
   headers = curl_slist_append(headers, "X-LPV: 1");
   headers = curl_slist_append(headers, "X-LHM: POST");
-  headers = curl_slist_append(headers, "X-LAL: en_US");
+  headers = enil_line_language_headers(headers);
   snprintf(app, sizeof(app), "X-Line-Application: %s", id.application);
   headers = curl_slist_append(headers, app);
   if (polling) {

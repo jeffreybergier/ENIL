@@ -7,6 +7,7 @@
 #include "enil_native_login.h"
 #include "enil_session.h"
 #include "enil_http.h"
+#include "enil_line.h"
 #include "enil_worker.h"
 
 static const char *origin;
@@ -95,7 +96,8 @@ int main(int argc, char **argv) {
   volatile int cancel = 1;
   cJSON *s;
   int before;
-  assert(argc == 4);
+  assert(argc == 4 || argc == 5);
+  if (argc == 5) enil_line_set_language(argv[4]);
   directory = argv[1]; origin = argv[2]; fail_unwrap = strcmp(argv[3], "unwrap-fails") == 0;
   memset(&cb, 0, sizeof(cb));
   cb.on_qr_url = qr; cb.on_pin = pin; cb.on_status = status; cb.cancel = &cancel;

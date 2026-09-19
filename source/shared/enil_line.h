@@ -9,13 +9,15 @@ typedef struct {
   char *body; /* malloc'd; call enil_line_response_free when done */
 } ENILLineResponse;
 
-/* Process-global language settings sent on every LINE API request. The
- * LINE backend uses these for content negotiation — sticker/sticon catalog
- * names, system event text ("X joined the group"), official-account display
- * names and push payload language all key off them. Defaults are "en-US"
- * (Accept-Language) and "en_US" (X-LAL); call once at app launch before
- * any LINE request fires. NULL/empty args leave the existing value in place. */
-void enil_line_set_language(const char *accept_lang, const char *x_lal);
+/* Process-global language selected by the app bundle (en or ja). Call once
+ * at launch before starting network threads. Unsupported languages fall back
+ * to English; NULL/empty leaves the current setting in place. This controls
+ * both LINE language headers and the ShopService locale language. */
+void enil_line_set_language(const char *language);
+const char *enil_line_language(void);
+struct curl_slist;
+/* Append Accept-Language and X-LAL to a request's curl header list. */
+struct curl_slist *enil_line_language_headers(struct curl_slist *headers);
 
 /* Requires this operation's identity to be bound via enil_session_bind_identity
  * (or enil_identity_bind during QR login). Missing binding sends no request. */

@@ -25,11 +25,11 @@ class NativeWindowsProbeTests(unittest.TestCase):
                         "-ffunction-sections", "-fdata-sections", "-I" + str(shared),
                         str(REPO / "source/tests/native_windows_probe.c"),
                         *[str(shared / name) for name in ["enil_native_login.c", "enil_thrift.c", "enil_session.c",
-                          "enil_identity.c", "enil_http.c", "enil_b64.c"]],
+                          "enil_identity.c", "enil_http.c", "enil_b64.c", "enil_line.c"]],
                         "-Wl,--gc-sections", "-Wl,--wrap=curl_easy_perform", "-pthread",
                         *flags, "-o", cls.binary], check=True, timeout=60)
 
-    def run_probe(self, mode):
+    def run_probe(self, mode, language=None):
         flow, failures = Flow(), []
         flow.model_name = "DESKTOPWIN"
 
@@ -59,12 +59,16 @@ class NativeWindowsProbeTests(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory(prefix="enil-native-probe-test-") as temp:
                 result = subprocess.run([self.binary, str(Path(temp) / "session"),
-                                        f"http://127.0.0.1:{server.server_port}", mode],
+                                        f"http://127.0.0.1:{server.server_port}", mode]
+                                        + ([language] if language else []),
                                         capture_output=True, text=True, timeout=20)
                 self.assertFalse(failures, failures)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(flow.calls.count("createSession"), 1)
                 self.assertEqual(flow.calls.count("qrCodeLoginV2ForSecure"), 1)
+                for _, headers, _ in flow.requests:
+                    self.assertEqual(headers["Accept-Language"], "ja-JP" if language == "ja" else "en-US")
+                    self.assertEqual(headers["X-LAL"], "ja_JP" if language == "ja" else "en_US")
         finally:
             server.shutdown()
             server.server_close()
@@ -72,6 +76,9 @@ class NativeWindowsProbeTests(unittest.TestCase):
 
     def test_durable_credentials_and_reopen_without_network(self):
         self.run_probe("success")
+
+    def test_japanese_login_and_polling_headers(self):
+        self.run_probe("success", "ja")
 
     def test_unwrap_failure_keeps_tokens_and_reopen_avoids_login(self):
         self.run_probe("unwrap-fails")

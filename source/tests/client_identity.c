@@ -11,6 +11,7 @@
 #include "enil_http.h"
 #include "enil_session.h"
 #include "enil_line.h"
+#include "enil_talkserv.h"
 #include "enil_qrlogin.h"
 #include "enil_obs.h"
 #include "enil_sse.h"
@@ -42,7 +43,7 @@ int enil_health_is_failed(enil_err_source_t source) { (void)source; return 0; }
 int enil_health_any_failed(void) { return 0; }
 void enil_health_bind(enil_health_t *h) { (void)h; }
 void enil_health_set_failure(enil_err_source_t s, const char *m) { (void)s; (void)m; }
-int enil_db_set_local_rev(sqlite3 *db, long long rev) { (void)db; (void)rev; return 0; }
+int __wrap_enil_db_set_local_rev(sqlite3 *db, long long rev) { (void)db; (void)rev; return 0; }
 char *enil_worker_sign(const char *p, const char *b, const char *t) {
   (void)p; (void)b; (void)t;
   assert(enil_identity_current());
@@ -104,6 +105,9 @@ static void check_profile(const char *root, const char *profile) {
   volatile int cancel = 1;
   enil_qrlogin_callbacks_t cb;
   int code;
+  sticker_package_t *stickers = NULL;
+  sticon_package_t *sticons = NULL;
+  int count;
 
   snprintf(dir, sizeof(dir), "%s/%s", root, profile);
   assert(mkdir(dir, 0700) == 0);
@@ -125,6 +129,13 @@ static void check_profile(const char *root, const char *profile) {
   assert(enil_session_load(path, &session));
   assert(memcmp(&identity, &session.clientIdentity, sizeof(identity)) == 0);
   enil_session_free(&session);
+
+  assert(enil_session_bind_identity(path));
+  assert(sticker_package_fetch_all(profile, &stickers, &count) == 0 && count == 0);
+  assert(sticon_package_fetch_all(profile, &sticons, &count) == 0 && count == 0);
+  free(stickers);
+  free(sticons);
+  enil_identity_bind(NULL);
 
   /* Prove exact persisted values survive refresh, not merely default lookup. */
   json = enil_session_read(path);
@@ -185,8 +196,9 @@ int main(int argc, char **argv) {
   cJSON *json;
   session_t session;
   pthread_t chrome, windows;
-  assert(argc == 3);
+  assert(argc == 4);
   fixture_origin = argv[2];
+  if (strcmp(argv[3], "default")) enil_line_set_language(argv[3]);
   assert(enil_identity_parse(NULL, &id));
   assert(strcmp(id.profile_id, "chrome") == 0);
   assert(!enil_identity_default("unknown", &id));

@@ -29,20 +29,26 @@
  * "Line.<fn>" tag. Formatted sites should call ENIL_LOG directly. */
 #define LOG(fn, msg) enil_log("Line." fn, "%s", msg)
 
-/* Pre-formatted language headers — written once by enil_line_set_language()
- * from AppDelegate at launch, read by every request. Defaults match the
- * original hard-coded values so the C side still works if no one ever calls
- * the setter (e.g. from a non-Cocoa client). */
-static char accept_lang_hdr[64] = "Accept-Language: en-US";
-static char x_lal_hdr[32]       = "X-LAL: en_US";
+/* Set before network threads start; all transports share these values. */
+static const char *line_language = "en";
+static const char *accept_lang_hdr = "Accept-Language: en-US";
+static const char *x_lal_hdr = "X-LAL: en_US";
 
-void enil_line_set_language(const char *accept_lang, const char *x_lal) {
-  if (accept_lang && *accept_lang)
-    snprintf(accept_lang_hdr, sizeof(accept_lang_hdr),
-             "Accept-Language: %s", accept_lang);
-  if (x_lal && *x_lal)
-    snprintf(x_lal_hdr, sizeof(x_lal_hdr), "X-LAL: %s", x_lal);
+void enil_line_set_language(const char *language) {
+  int japanese;
+  if (!language || !*language) return;
+  japanese = strcmp(language, "ja") == 0;
+  line_language = japanese ? "ja" : "en";
+  accept_lang_hdr = japanese ? "Accept-Language: ja-JP" : "Accept-Language: en-US";
+  x_lal_hdr = japanese ? "X-LAL: ja_JP" : "X-LAL: en_US";
   ENIL_LOG("Line.set_language", "%s | %s", accept_lang_hdr, x_lal_hdr);
+}
+
+const char *enil_line_language(void) { return line_language; }
+
+struct curl_slist *enil_line_language_headers(struct curl_slist *headers) {
+  headers = curl_slist_append(headers, accept_lang_hdr);
+  return curl_slist_append(headers, x_lal_hdr);
 }
 
 static char *make_header(const char *name, const char *value) {
@@ -136,7 +142,7 @@ ENILLineResponse enil_line_post_ex(
   if (!curl) { free(hmac); LOG("post", "enil_curl_new failed"); return result; }
 
   hdrs = curl_slist_append(hdrs, "Accept: application/json, text/plain, */*");
-  hdrs = curl_slist_append(hdrs, accept_lang_hdr);
+  hdrs = enil_line_language_headers(hdrs);
   hdrs = curl_slist_append(hdrs, "Content-Type: application/json");
   snprintf(version_header, sizeof(version_header), "X-Line-Chrome-Version: %s",
            identity->gateway_version);
@@ -144,7 +150,6 @@ ENILLineResponse enil_line_post_ex(
            identity->application);
   hdrs = curl_slist_append(hdrs, version_header);
   hdrs = curl_slist_append(hdrs, application_header);
-  hdrs = curl_slist_append(hdrs, x_lal_hdr);
   hdrs = curl_slist_append(hdrs, "Origin: " ENIL_LINE_ORIGIN);
   curl_easy_setopt(curl, CURLOPT_USERAGENT, identity->user_agent);
 
