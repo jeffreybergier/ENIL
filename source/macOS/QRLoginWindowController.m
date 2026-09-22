@@ -6,7 +6,7 @@ static const int kQRPixels = 256;
 /* Reserve the full QR + multiline status + PIN layout from the first frame.
  * Neither the window nor either box changes size as login progresses. */
 static const CGFloat kLoginWindowWidth = 460;
-static const CGFloat kLoginWindowHeight = 600;
+static const CGFloat kLoginWindowHeight = 626;
 
 /* The QR-login C bridging (callback trampolines + main-thread marshalling)
  * now lives behind +[ENILAccount runQRLoginAtPath:observer:cancelFlag:]; this
@@ -87,7 +87,7 @@ static const CGFloat kLoginWindowHeight = 600;
   [super windowDidLoad];
   NSView *cv = [[self window] contentView];
   NSBox *clientBox = [[[NSBox alloc]
-    initWithFrame:NSMakeRect(20, 484, kLoginWindowWidth - 40, 96)] autorelease];
+    initWithFrame:NSMakeRect(20, 484, kLoginWindowWidth - 40, 122)] autorelease];
   [clientBox setTitle:NSLocalizedString(@"Client", nil)];
   [clientBox setContentViewMargins:NSMakeSize(12, 8)];
   [cv addSubview:clientBox];
@@ -95,31 +95,40 @@ static const CGFloat kLoginWindowHeight = 600;
   CGFloat clientWidth = [clients bounds].size.width;
   CGFloat clientHeight = [clients bounds].size.height;
 
-  /* Center the pair as one unit when NSBox settles its content bounds on
+  /* Center the choices as one unit when NSBox settles its content bounds on
    * Tiger. Offset slightly to center the radio artwork, which sits above
    * the center of its control frames. */
   NSView *choices = [[[NSView alloc] initWithFrame:
-    NSMakeRect(0, (clientHeight - 48) / 2 - 3, clientWidth, 48)] autorelease];
+    NSMakeRect(0, (clientHeight - 74) / 2 - 3, clientWidth, 74)] autorelease];
   [choices setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin | NSViewMaxYMargin];
   [clients addSubview:choices];
-  chromeButton_ = [[NSButton alloc] initWithFrame:NSMakeRect(8, 26, clientWidth - 16, 22)];
-  [chromeButton_ setTitle:NSLocalizedString(@"Chrome", nil)];
+  chromeButton_ = [[NSButton alloc] initWithFrame:NSMakeRect(8, 52, clientWidth - 16, 22)];
+  [chromeButton_ setTitle:NSLocalizedString(@"Web (Chrome)", nil)];
   [chromeButton_ setButtonType:XPButtonTypeRadio];
   [chromeButton_ setTarget:self];
   [chromeButton_ setAction:@selector(chooseClient:)];
   [chromeButton_ setState:XPControlStateOn];
   [chromeButton_ setAutoresizingMask:NSViewWidthSizable];
   [choices addSubview:chromeButton_];
-  windowsButton_ = [[NSButton alloc] initWithFrame:NSMakeRect(8, 0, clientWidth - 16, 22)];
-  [windowsButton_ setTitle:NSLocalizedString(@"Windows", nil)];
+  windowsButton_ = [[NSButton alloc] initWithFrame:NSMakeRect(8, 26, clientWidth - 16, 22)];
+  [windowsButton_ setTitle:NSLocalizedString(@"Desktop (Windows)", nil)];
   [windowsButton_ setButtonType:XPButtonTypeRadio];
   [windowsButton_ setTarget:self];
   [windowsButton_ setAction:@selector(chooseClient:)];
   [windowsButton_ setState:XPControlStateOff];
   [windowsButton_ setAutoresizingMask:NSViewWidthSizable];
   [choices addSubview:windowsButton_];
+  androidButton_ = [[NSButton alloc] initWithFrame:NSMakeRect(8, 0, clientWidth - 16, 22)];
+  [androidButton_ setTitle:NSLocalizedString(@"Tablet (Android)", nil)];
+  [androidButton_ setButtonType:XPButtonTypeRadio];
+  [androidButton_ setTarget:self];
+  [androidButton_ setAction:@selector(chooseClient:)];
+  [androidButton_ setState:XPControlStateOff];
+  [androidButton_ setAutoresizingMask:NSViewWidthSizable];
+  [choices addSubview:androidButton_];
   [chromeButton_ setHidden:expectedMid_ != nil];
   [windowsButton_ setHidden:expectedMid_ != nil];
+  [androidButton_ setHidden:expectedMid_ != nil];
   if (expectedMid_) {
     NSTextField *savedClient = [self labelInRect:NSMakeRect(8, 4, clientWidth - 16, clientHeight - 8)];
     [savedClient setStringValue:NSLocalizedString(@"This account's saved client identity will be used.", nil)];
@@ -196,13 +205,15 @@ static const CGFloat kLoginWindowHeight = 600;
   if (running_ || done_ || prepared_ || expectedMid_) return;
   [windowsButton_ setState:sender == windowsButton_ ? XPControlStateOn : XPControlStateOff];
   [chromeButton_ setState:sender == chromeButton_ ? XPControlStateOn : XPControlStateOff];
+  [androidButton_ setState:sender == androidButton_ ? XPControlStateOn : XPControlStateOff];
 }
 
 - (void)startSelectedLogin:(id)sender;
 {
   (void)sender;
   [self beginLoginWithProfile:expectedMid_ ? nil :
-    ([windowsButton_ state] == XPControlStateOn ? @"desktopwin" : @"chrome")];
+    ([androidButton_ state] == XPControlStateOn ? @"android" :
+     ([windowsButton_ state] == XPControlStateOn ? @"desktopwin" : @"chrome"))];
 }
 
 - (void)beginLoginWithProfile:(NSString *)profile;
@@ -217,6 +228,7 @@ static const CGFloat kLoginWindowHeight = 600;
   prepared_ = YES;
   [chromeButton_ setEnabled:NO];
   [windowsButton_ setEnabled:NO];
+  [androidButton_ setEnabled:NO];
   [self retrySavedLogin:nil];
 }
 
@@ -433,6 +445,7 @@ static const CGFloat kLoginWindowHeight = 600;
   [pinField_ release];
   [chromeButton_ release];
   [windowsButton_ release];
+  [androidButton_ release];
   [super dealloc];
 }
 

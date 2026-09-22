@@ -213,6 +213,17 @@ int main(int argc, char **argv) {
   json = enil_identity_to_json(&id);
   cJSON_ReplaceItemInObjectCaseSensitive(json, "userAgent", cJSON_CreateString("bad\r\nInjected: header"));
   assert(!enil_identity_parse(json, &id)); cJSON_Delete(json);
+  assert(enil_identity_default("android", &id));
+  json = enil_identity_to_json(&id);
+  assert(enil_identity_parse(json, &id));
+  /* Android secondary can neither become a primary phone nor use the gateway. */
+  cJSON_ReplaceItemInObjectCaseSensitive(json, "application",
+    cJSON_CreateString("ANDROID\t26.6.2\tAndroid OS\t16"));
+  assert(!enil_identity_parse(json, &id)); cJSON_Delete(json);
+  assert(enil_identity_default("android", &id));
+  json = enil_identity_to_json(&id);
+  cJSON_ReplaceItemInObjectCaseSensitive(json, "transport", cJSON_CreateString("chrome-gateway"));
+  assert(!enil_identity_parse(json, &id)); cJSON_Delete(json);
   check_profile(argv[1], "chrome");
   check_profile(argv[1], "desktopwin");
   assert(pthread_create(&chrome, NULL, parallel_request, "chrome") == 0);

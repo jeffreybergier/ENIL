@@ -52,6 +52,9 @@ def reply(method, fields, kind=TMessageType.REPLY, sequence=0):
 
 class Flow:
     model_name = "ENIL Windows login probe"
+    system_name = "WINDOWS"
+    application = probe.APPLICATION
+    user_agent = probe.USER_AGENT
     def __init__(self, *, certificate_code=2, poll_timeout=False, unwrap_fails=False):
         self.certificate_code = certificate_code
         self.poll_timeout = poll_timeout
@@ -80,8 +83,8 @@ class Flow:
                           "workerRestoreState": {}}
             return 200, json.dumps(result).encode()
         assert url.startswith(probe.GATEWAY + "/")
-        assert headers["X-Line-Application"] == probe.APPLICATION
-        assert headers["User-Agent"] == probe.USER_AGENT
+        assert headers["X-Line-Application"] == self.application
+        assert headers["User-Agent"] == self.user_agent
         assert headers["Content-Type"] == "application/x-thrift"
         assert not ({"X-Worker-Secret", "X-Hmac", "Origin", "X-Line-Chrome-Version"} & headers.keys())
         p = TCompactProtocol(TMemoryBuffer(body))
@@ -111,7 +114,7 @@ class Flow:
         elif method == "createPinCode":
             result = [(1, TType.STRING, "123456")]
         elif method == "qrCodeLoginV2ForSecure":
-            assert args[1] == {1: "synthetic-session", 2: "WINDOWS",
+            assert args[1] == {1: "synthetic-session", 2: self.system_name,
                                3: self.model_name, 4: False, 5: "nonce"}
             result = [(1, TType.STRING, "certificate"),
                       (3, TType.STRUCT, [(1, TType.STRING, "private-access-token"),

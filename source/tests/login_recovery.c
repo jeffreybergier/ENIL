@@ -251,6 +251,39 @@ static void directory_durability(const char *root) {
   cJSON_Delete(value);
 }
 
+static void android_pending_isolation(const char *root) {
+  char windows[4096], android[4096], retry[4096], account[4096], reauth[4096];
+  char *win_pending, *android_pending, *resumed;
+  cJSON *saved;
+  enil_identity_t identity;
+  staging(windows, sizeof(windows), root, 50, NULL);
+  win_pending = enil_login_store_select(windows);
+  assert(win_pending);
+  patch(win_pending, "{\"nativeTokenRequestStarted\":true}");
+  path(android, sizeof(android), root, ".staging-android");
+  assert(mkdir(android, 0700) == 0);
+  assert(enil_login_store_prepare(android, "android", NULL));
+  android_pending = enil_login_store_select(android);
+  assert(android_pending && strcmp(android_pending, win_pending));
+  complete(android_pending);
+  path(retry, sizeof(retry), root, ".staging-android-retry");
+  assert(mkdir(retry, 0700) == 0);
+  assert(enil_login_store_prepare(retry, "android", NULL));
+  resumed = enil_login_store_select(retry);
+  assert(resumed && !strcmp(resumed, android_pending));
+  assert(enil_login_store_stage(retry, resumed));
+  path(account, sizeof(account), root, "synthetic-mid");
+  assert(enil_login_store_activate(retry, account));
+  path(reauth, sizeof(reauth), root, ".staging-android-reauth");
+  assert(mkdir(reauth, 0700) == 0);
+  assert(enil_login_store_prepare(reauth, NULL, "synthetic-mid"));
+  saved = read_saved(reauth);
+  assert(enil_identity_parse(cJSON_GetObjectItem(saved, "clientIdentity"), &identity));
+  assert(!strcmp(identity.profile_id, "android"));
+  cJSON_Delete(saved);
+  free(win_pending); free(android_pending); free(resumed);
+}
+
 int main(int argc, char **argv) {
   assert(argc == 3);
   if (!strcmp(argv[2], "durability"))
@@ -261,6 +294,8 @@ int main(int argc, char **argv) {
     restart_uncertain(argv[1]);
   else if (!strcmp(argv[2], "import"))
     import_saved_and_retire(argv[1]);
+  else if (!strcmp(argv[2], "android"))
+    android_pending_isolation(argv[1]);
   else if (!strcmp(argv[2], "stale") || !strcmp(argv[2], "stale-legacy"))
     reject_superseded_save(argv[1], !strcmp(argv[2], "stale-legacy"));
   else

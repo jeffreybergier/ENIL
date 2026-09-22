@@ -33,6 +33,7 @@
   NSTextField   *pinField_;
   NSButton      *chromeButton_;
   NSButton      *windowsButton_;
+  NSButton      *androidButton_;
   NSButton      *startButton_;
   NSButton      *retryButton_;
   NSButton      *restartButton_;

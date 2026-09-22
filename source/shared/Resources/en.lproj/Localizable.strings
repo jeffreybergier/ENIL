@@ -197,19 +197,20 @@
 "New message"                             = "New message";
 
 /* QR client identity selection */
-"Chrome" = "Chrome";
-"Windows" = "Windows";
+"Web (Chrome)" = "Web (Chrome)";
+"Desktop (Windows)" = "Desktop (Windows)";
+"Tablet (Android)" = "Tablet (Android)";
 "Choose a client identity" = "Choose a client identity";
 "Could not save client identity" = "Could not save client identity";
 "Windows login test" = "Windows login test";
 "Windows session saved. Check LINE's logged-in devices on your phone." = "Windows session saved. Check LINE's logged-in devices on your phone.";
-"Preparing Windows login key" = "Preparing Windows login key";
-"Creating native Windows QR session" = "Creating Windows QR code";
+"Preparing login key" = "Preparing login key";
+"Creating QR session" = "Creating QR code";
 "Enter the PIN in LINE on your phone" = "Enter the PIN in LINE on your phone";
-"Completing Windows login" = "Completing Windows login";
-"Windows login succeeded. Session saved." = "Windows login succeeded. Session saved.";
-"Windows session already saved. No new login requested." = "Windows session already saved. No new login requested.";
-"Windows login stopped. Session state saved; see log for details." = "Windows login stopped. Session state saved; see log for details.";
+"Completing login" = "Completing login";
+"Login succeeded. Session saved." = "Login succeeded. Session saved.";
+"Login session already saved. No new login requested." = "Login session already saved. No new login requested.";
+"Login stopped. Session state saved; see log for details." = "Login stopped. Session state saved; see log for details.";
 
 "Windows desktop" = "Windows desktop";
 

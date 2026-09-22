@@ -10,6 +10,10 @@
 #import "XPUIKit.h"
 
 static const int kQRPixels = 256;
+static NSString * const kClientProfiles[] = { @"chrome", @"desktopwin", @"android" };
+static NSString * const kClientLabels[] = {
+  @"Web (Chrome)", @"Desktop (Windows)", @"Tablet (Android)"
+};
 
 /* NSTextAlignmentCenter is iOS 6.0+ (trips -Wunguarded-availability on the 4.3
  * floor) and its predecessor UITextAlignmentCenter is -Wdeprecated against the
@@ -93,7 +97,7 @@ typedef enum {
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
   (void)tableView;
-  if (section != self.loginSection) return 2;
+  if (section != self.loginSection) return sizeof(kClientProfiles) / sizeof(kClientProfiles[0]);
   if (self.running) return [self.pin length] ? 3 : 2;
   return self.loginState == ENILLoginRecovery ? 2 : 1;
 }
@@ -137,9 +141,8 @@ typedef enum {
   UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
                                                               reuseIdentifier:nil];
   if (indexPath.section != self.loginSection) {
-    NSString *profile = indexPath.row == 0 ? @"desktopwin" : @"chrome";
-    cell.textLabel.text = indexPath.row == 0
-      ? NSLocalizedString(@"Windows", nil) : NSLocalizedString(@"Chrome", nil);
+    NSString *profile = kClientProfiles[indexPath.row];
+    cell.textLabel.text = NSLocalizedString(kClientLabels[indexPath.row], nil);
     cell.accessoryType = [self.selectedProfile isEqualToString:profile]
       ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
     cell.textLabel.enabled = !self.prepared && !self.done;
@@ -196,7 +199,7 @@ typedef enum {
   if (self.running || self.done) return;
   if (indexPath.section != self.loginSection) {
     if (self.prepared) return;
-    self.selectedProfile = indexPath.row == 0 ? @"desktopwin" : @"chrome";
+    self.selectedProfile = kClientProfiles[indexPath.row];
     [tableView reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationNone];
   } else if (self.loginState == ENILLoginRecovery) {
     if (indexPath.row == 0) [self retrySavedLogin:nil];

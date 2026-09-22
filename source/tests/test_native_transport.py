@@ -47,6 +47,14 @@ class NativeTransportTests(unittest.TestCase):
         return json.loads(self.run_native('decode', method, input=wire))
 
     def test_language_headers_and_catalog_locale_on_native_wire(self):
+        self.check_language_and_identity("desktopwin", "DESKTOPWIN\t9.7.0.3556\tWINDOWS\t10.0.0-NT-x64",
+                                         "Line/9.7.0.3556")
+
+    def test_android_identity_for_catalog_talk_sync_and_refresh(self):
+        self.check_language_and_identity("android", "ANDROIDSECONDARY\t26.6.2\tAndroid OS\t16",
+                                         "Line/26.6.2")
+
+    def check_language_and_identity(self, profile, application, user_agent):
         records = []
 
         class Handler(BaseHTTPRequestHandler):
@@ -93,13 +101,17 @@ class NativeTransportTests(unittest.TestCase):
                 with self.subTest(language=language):
                     records.clear()
                     subprocess.run([self.binary, f'http://127.0.0.1:{server.server_port}',
-                                    'language', selected], check=True, timeout=10)
+                                    'language', selected, profile], check=True, timeout=10)
                     self.assertEqual([method for _, method, _, _ in records],
                                      ['getOwnedProductSummaries', 'getOwnedProductSummaries',
                                       'getProfile', 'sync', 'refresh'])
                     for _, _, headers, _ in records:
                         self.assertEqual(headers.get('Accept-Language'), accept)
                         self.assertEqual(headers.get('X-LAL'), lal)
+                        self.assertEqual(headers.get('X-Line-Application'), application)
+                        self.assertEqual(headers.get('User-Agent'), user_agent)
+                        for absent in ['origin', 'cookie', 'x-hmac', 'x-line-chrome-version']:
+                            self.assertNotIn(absent, {k.lower() for k in headers})
                     for (path, _, _, args), shop in zip(records[:2], ['stickershop', 'sticonshop']):
                         self.assertEqual(path, '/TSHOP4')
                         self.assertEqual(args, {2: shop, 3: 0, 4: 1000,

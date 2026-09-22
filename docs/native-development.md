@@ -751,6 +751,39 @@ tests capture both English and Japanese headers and JSON/Thrift catalog locales.
 New Windows sessions use `native-thrift`. Existing `chrome-gateway` snapshots,
 including the old Windows-header experiment, keep their original behavior.
 
+Both macOS and iOS offer **Web (Chrome)**, **Desktop (Windows)**, and
+**Tablet (Android)** in that order when adding an account. Web remains the
+default. These labels map to the saved `chrome`, `desktopwin`, and `android`
+profiles; changing a display label does not change an existing session.
+Tablet uses the Android secondary identity. Its wire application is
+`ANDROIDSECONDARY\t26.6.2\tAndroid OS\t16`, using `Line/26.6.2` and the native
+secure QR flow. These values come from the pinned LINEJS device
+reference used for Windows. Android attempts retain their own exact identity
+through pending-login recovery, activation, and reauthentication. They cannot
+reuse Windows attempts or select the Chrome gateway. No additional Worker
+deployment is needed for Android support.
+
+For a live coexistence test, keep the official Mac client signed in and choose
+**Tablet (Android)** in ENIL's **Add Account** screen, then complete QR/PIN
+approval on the main phone. Check the
+phone's logged-in devices and whether the official Mac client still works.
+Reauthenticate deliberately retains the old identity, so use Add Account to
+choose Android. Signing in to an existing ENIL account replaces that account's
+local session while retaining its data; it does not create parallel local
+sessions for the same MID.
+
+Android validation (2026-09-22): clean macOS/iOS debug and release builds and
+69 host identity/native protocol/recovery tests passed. On `x4-vm` (Mac OS X
+10.4.11, PowerPC), the macOS selector and QR layout were checked, and the user
+completed Android QR login while remaining signed in to the official Mac client
+and ENIL's Chrome session. Initial sync completed and native polling processed
+live operations. Group E2EE key requests and `sendMessage` succeeded; the user
+confirmed group messaging worked, and polling received the sent-message event
+and read-receipt updates. Sticker/emoji downloads completed without errors;
+three message-media requests returned HTTP 404. Attachment sending, restart
+resumption, and automatic token refresh remain to be validated on the device.
+The iOS three-choice selector has been cross-built but not tested on a device.
+
 `enil_native.c` adapts the existing named-JSON Talk call sites to Compact Thrift
 using `enil_thrift.c` and its checked-in schema. Talk `/S4` and sync `/SYNC4` use
 LEGY encryption and `https://gf.line.naver.jp/enc`. Shop `/TSHOP4` and refresh

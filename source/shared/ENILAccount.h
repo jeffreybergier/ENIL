@@ -80,7 +80,7 @@ typedef enum {
  * bad input / encode failure. *outSize (may be NULL) = modules per side,
  * excluding the quiet zone (a render-side concern). */
 + (NSData *)qrModulesForString:(NSString *)string size:(int *)outSize;
-/* Prepare fresh staging before requesting a QR. profile is chrome/desktopwin
+/* Prepare fresh staging before requesting a QR. profile is chrome/desktopwin/android
  * for Add Account. Reauthentication copies the existing MID's exact identity. */
 + (BOOL)prepareQRLoginAtPath:(NSString *)accountDir
                clientProfile:(NSString *)profile

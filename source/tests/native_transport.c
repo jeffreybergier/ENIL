@@ -261,7 +261,8 @@ int main(int argc, char **argv) {
   ENILLineResponse r;
   assert(argc >= 4);
   origin = argv[1];
-  assert(enil_identity_default("desktopwin", &id));
+  assert(enil_identity_default(!strcmp(argv[2], "language") && argc > 4
+                              ? argv[4] : "desktopwin", &id));
   assert(enil_identity_bind(&id));
   if (!strcmp(argv[2], "language")) {
     sticker_package_t *stickers = NULL;

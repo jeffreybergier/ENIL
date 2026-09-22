@@ -61,7 +61,7 @@ static int fail(NativeLogin *p, const char *message) {
  * under a permissive app umask; a .tmp recovery copy is never a login trigger. */
 static int save(NativeLogin *p) {
   if (!enil_session_write(p->path, p->state))
-    return fail(p, "Could not save Windows session");
+    return fail(p, "Could not save login session");
   return 1;
 }
 
@@ -202,7 +202,7 @@ static cJSON *call(NativeLogin *p, const char *method, int polling, int interval
     goto done;
   root = decode(method, &response, &exception);
   if (!root) {
-    fail(p, "Invalid Windows login response; reply saved");
+    fail(p, "Invalid login response; reply saved");
     goto done;
   }
   set(p->state, "lastNativeResponse", cJSON_Duplicate(root, 1));
@@ -212,7 +212,7 @@ static cJSON *call(NativeLogin *p, const char *method, int polling, int interval
   if (error) {
     code = cJSON_GetObjectItemCaseSensitive(error, exception ? "2" : "1");
     p->error_code = !exception && cJSON_IsNumber(code) ? code->valueint : -1;
-    snprintf(message, sizeof(message), "Windows login: %s error %d", method, p->error_code);
+    snprintf(message, sizeof(message), "Login: %s error %d", method, p->error_code);
     snprintf(p->request_error, sizeof(p->request_error), "%s", message);
     status(p, message);
     goto done;
@@ -229,7 +229,7 @@ done:
   enil_buf_free(&request);
   enil_buf_free(&response);
   if (!result && !p->failed && !cancelled(p) && p->error_code < 0) {
-    snprintf(message, sizeof(message), "Windows login: %s HTTP %ld, transport %d", method,
+    snprintf(message, sizeof(message), "Login: %s HTTP %ld, transport %d", method,
              p->http_status, (int)p->curl_code);
     snprintf(p->request_error, sizeof(p->request_error), "%s", message);
     status(p, message);
@@ -325,45 +325,45 @@ int enil_native_login_run(const char *directory, const enil_qrlogin_callbacks_t 
   if (!directory || strlen(directory) > 1950)
     return 0;
   if (mkdir(directory, 0700) != 0 && errno != EEXIST)
-    return fail(&p, "Could not save Windows session");
+    return fail(&p, "Could not save login session");
   if (chmod(directory, 0700) != 0)
-    return fail(&p, "Could not save Windows session");
+    return fail(&p, "Could not save login session");
   snprintf(p.path, sizeof(p.path), "%s/session.json", directory);
   snprintf(lock_path, sizeof(lock_path), "%s/retired.json", directory);
   if (access(lock_path, F_OK) == 0)
-    return fail(&p, "This Windows login has been retired. Start a new QR.");
+    return fail(&p, "This login has been retired. Start a new QR.");
   snprintf(lock_path, sizeof(lock_path), "%s/session.lock", directory);
   lock_fd = open(lock_path, O_CREAT | O_RDWR | O_NOFOLLOW, 0600);
   if (lock_fd < 0 || flock(lock_fd, LOCK_EX | LOCK_NB) != 0) {
     if (lock_fd >= 0)
       close(lock_fd);
-    return fail(&p, "Windows login is already running");
+    return fail(&p, "Login is already running");
   }
   snprintf(lock_path, sizeof(lock_path), "%s/retired.json", directory);
   if (access(lock_path, F_OK) == 0) {
-    fail(&p, "This Windows login has been retired. Start a new QR.");
+    fail(&p, "This login has been retired. Start a new QR.");
     goto done;
   }
   s = enil_session_read(p.path);
   if (!s && access(p.path, F_OK) == 0) {
-    fail(&p, "Saved Windows session cannot be read; no new login attempted");
+    fail(&p, "Saved login session cannot be read; no new login attempted");
     goto done;
   }
   if (!s)
     s = cJSON_CreateObject();
   p.state = s;
   if (!cJSON_IsObject(s)) {
-    fail(&p, "Saved Windows session cannot be read; no new login attempted");
+    fail(&p, "Saved login session cannot be read; no new login attempted");
     goto done;
   }
   if (str(s, "accessToken")) {
-    status(&p, "Windows session already saved. No new login requested.");
+    status(&p, "Login session already saved. No new login requested.");
     ok = 1;
     goto done;
   }
   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(s, "nativeTokenRequestStarted"))) {
     if (recover_login_reply(&p)) {
-      status(&p, "Windows session already saved. No new login requested.");
+      status(&p, "Login session already saved. No new login requested.");
       ok = 1;
       goto done;
     }
@@ -394,9 +394,9 @@ int enil_native_login_run(const char *directory, const enil_qrlogin_callbacks_t 
     free(id);
   }
   if (!str(s, "e2eePublicKey")) {
-    status(&p, "Preparing Windows login key");
+    status(&p, "Preparing login key");
     if (!enil_worker_keygen(NULL, &key)) {
-      fail(&p, "Windows login key generation failed");
+      fail(&p, "Login key generation failed");
       goto done;
     }
     set(s, "e2eePublicKey", cJSON_CreateString(key.public_key));
@@ -407,7 +407,7 @@ int enil_native_login_run(const char *directory, const enil_qrlogin_callbacks_t 
       goto done;
   }
   if (!str(s, "authSessionId")) {
-    status(&p, "Creating native Windows QR session");
+    status(&p, "Creating QR session");
     result = call(&p, "createSession", 0, 0);
     if (!result || !str(result, "1"))
       goto done;
@@ -438,7 +438,7 @@ int enil_native_login_run(const char *directory, const enil_qrlogin_callbacks_t 
   if (cJSON_IsNumber(value))
     interval = value->valueint;
   if (count < 1 || count > 120 || interval < 1 || interval > 180 || count * interval > 1800) {
-    fail(&p, "Invalid Windows QR polling limits");
+    fail(&p, "Invalid QR polling limits");
     goto done;
   }
   callback = str(s, "callbackUrl");
@@ -494,19 +494,19 @@ int enil_native_login_run(const char *directory, const enil_qrlogin_callbacks_t 
   set(s, "nativeTokenRequestStarted", cJSON_CreateBool(1));
   if (!save(&p))
     goto done;
-  status(&p, "Completing Windows login");
+  status(&p, "Completing login");
   result = call(&p, "qrCodeLoginV2ForSecure", 0, 0);
   if (!result)
     goto done;
   if (!save_login_result(&p, result))
     goto done;
   if (!str(s, "accessToken")) {
-    fail(&p, "Windows reply saved; no access token found");
+    fail(&p, "Login reply saved; no access token found");
     goto done;
   }
   /* Every credential and the complete reply are durable before optional unwrap. */
   ok = 1;
-  status(&p, "Windows login succeeded. Session saved.");
+  status(&p, "Login succeeded. Session saved.");
   meta = cJSON_GetObjectItemCaseSensitive(result, "10");
   if (str(meta, "publicKey") && str(meta, "encryptedKeyChain") && !cancelled(&p)) {
     ENILWorkerUnwrapResult unwrapped;
@@ -530,7 +530,7 @@ int enil_native_login_run(const char *directory, const enil_qrlogin_callbacks_t 
 done:
   if (!ok && !p.failed && !cancelled(&p))
     status(&p, p.request_error[0] ? p.request_error :
-      "Windows login stopped. Session state saved; see log for details.");
+      "Login stopped. Session state saved; see log for details.");
   free(restore);
   free(qr_url);
   if (encoded)

@@ -96,9 +96,15 @@ int main(int argc, char **argv) {
   volatile int cancel = 1;
   cJSON *s;
   int before;
-  assert(argc == 4 || argc == 5);
-  if (argc == 5) enil_line_set_language(argv[4]);
+  char path[2048];
+  const char *profile;
+  assert(argc == 6);
+  enil_line_set_language(argv[4]);
+  profile = argv[5];
   directory = argv[1]; origin = argv[2]; fail_unwrap = strcmp(argv[3], "unwrap-fails") == 0;
+  assert(mkdir(directory, 0700) == 0);
+  snprintf(path, sizeof(path), "%s/session.json", directory);
+  assert(enil_session_prepare_login(path, profile, NULL));
   memset(&cb, 0, sizeof(cb));
   cb.on_qr_url = qr; cb.on_pin = pin; cb.on_status = status; cb.cancel = &cancel;
   assert(!enil_native_login_run(directory, &cb));
@@ -106,7 +112,7 @@ int main(int argc, char **argv) {
   cancel = 0;
   if (strcmp(argv[3], "token-error") == 0) {
     assert(!enil_native_login_run(directory, &cb));
-    assert(!strcmp(last_status, "Windows login: qrCodeLoginV2ForSecure error 5"));
+    assert(!strcmp(last_status, "Login: qrCodeLoginV2ForSecure error 5"));
     s = read_saved();
     assert(cJSON_IsTrue(cJSON_GetObjectItem(s, "nativeTokenRequestStarted")));
     assert(cJSON_GetObjectItem(s, "lastNativeResponseBase64"));
@@ -125,6 +131,8 @@ int main(int argc, char **argv) {
                 "native-thrift") == 0);
   assert(cJSON_GetObjectItem(s, "nativeLoginResult"));
   assert(cJSON_GetObjectItem(s, "e2eeLoginMetaData"));
+  assert(!strcmp(cJSON_GetObjectItem(cJSON_GetObjectItem(s, "clientIdentity"),
+                                   "profileId")->valuestring, profile));
   if (!fail_unwrap) assert(cJSON_GetObjectItem(s, "e2eeKeys"));
   cJSON_Delete(s);
   before = calls;
@@ -145,6 +153,8 @@ int main(int argc, char **argv) {
   assert(calls == before && keys == 1 && unwraps == 1);
   s = read_saved();
   assert(strcmp(cJSON_GetObjectItem(s, "accessToken")->valuestring, "private-access-token") == 0);
+  assert(!strcmp(cJSON_GetObjectItem(cJSON_GetObjectItem(s, "clientIdentity"),
+                                   "profileId")->valuestring, profile));
   cJSON_Delete(s);
   return 0;
 }

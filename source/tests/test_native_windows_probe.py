@@ -29,9 +29,14 @@ class NativeWindowsProbeTests(unittest.TestCase):
                         "-Wl,--gc-sections", "-Wl,--wrap=curl_easy_perform", "-pthread",
                         *flags, "-o", cls.binary], check=True, timeout=60)
 
-    def run_probe(self, mode, language=None):
+    def run_probe(self, mode, language=None, profile="desktopwin"):
         flow, failures = Flow(), []
         flow.model_name = "DESKTOPWIN"
+        if profile == "android":
+            flow.model_name = "ANDROIDSECONDARY"
+            flow.system_name = "Android OS"
+            flow.application = "ANDROIDSECONDARY\t26.6.2\tAndroid OS\t16"
+            flow.user_agent = "Line/26.6.2"
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *args):
@@ -59,8 +64,8 @@ class NativeWindowsProbeTests(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory(prefix="enil-native-probe-test-") as temp:
                 result = subprocess.run([self.binary, str(Path(temp) / "session"),
-                                        f"http://127.0.0.1:{server.server_port}", mode]
-                                        + ([language] if language else []),
+                                        f"http://127.0.0.1:{server.server_port}", mode,
+                                        language or "en", profile],
                                         capture_output=True, text=True, timeout=20)
                 self.assertFalse(failures, failures)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -85,6 +90,12 @@ class NativeWindowsProbeTests(unittest.TestCase):
 
     def test_uncertain_token_request_is_not_repeated(self):
         self.run_probe("token-error")
+
+    def test_android_identity_on_wire_and_recovery_without_new_login(self):
+        self.run_probe("success", profile="android")
+
+    def test_android_uncertain_token_request_is_not_repeated(self):
+        self.run_probe("token-error", profile="android")
 
 
 if __name__ == "__main__":

@@ -17,11 +17,19 @@ static const enil_identity_t windows_identity = {
   "desktopwin", "native-thrift", "DESKTOPWIN\t9.7.0.3556\tWINDOWS\t10.0.0-NT-x64",
   "Line/9.7.0.3556", "WINDOWS", "DESKTOPWIN", "3.7.2"
 };
+/* Android secondary identity from the same pinned LINEJS devices.ts reference.
+ * The short local profile ID fits saved identity buffers; the wire identity
+ * must be ANDROIDSECONDARY, never the primary ANDROID client. */
+static const enil_identity_t android_identity = {
+  "android", "native-thrift", "ANDROIDSECONDARY\t26.6.2\tAndroid OS\t16",
+  "Line/26.6.2", "Android OS", "ANDROIDSECONDARY", "3.7.2"
+};
 
 int enil_identity_default(const char *profile_id, enil_identity_t *out) {
   if (!profile_id || !out) return 0;
   if (strcmp(profile_id, "chrome") == 0) *out = legacy_chrome_identity;
   else if (strcmp(profile_id, "desktopwin") == 0) *out = windows_identity;
+  else if (strcmp(profile_id, "android") == 0) *out = android_identity;
   else return 0;
   return 1;
 }
@@ -44,7 +52,8 @@ static int read_string(const cJSON *json, const char *key, char *out,
 int enil_identity_parse(const cJSON *json, enil_identity_t *out) {
   enil_identity_t value, known;
   const cJSON *version, *transport;
-  const char *prefix;
+  const char *separator;
+  size_t prefix_length;
   if (!out) return 0;
   memset(out, 0, sizeof(*out));
   if (!json) { *out = legacy_chrome_identity; return 1; }
@@ -64,10 +73,16 @@ int enil_identity_parse(const cJSON *json, enil_identity_t *out) {
       !read_string(json, "modelName", value.model_name, sizeof(value.model_name), 0) ||
       !read_string(json, "gatewayVersion", value.gateway_version, sizeof(value.gateway_version), 0))
     return 0;
-  if (!strcmp(transport->valuestring, "native-thrift") && strcmp(value.profile_id, "desktopwin")) return 0;
+  /* Only Windows has historical gateway snapshots. New native profiles must
+   * not accidentally send native credentials through the Chrome gateway. */
+  if (strcmp(transport->valuestring, known.transport) &&
+      !(strcmp(value.profile_id, "desktopwin") == 0 &&
+        strcmp(transport->valuestring, "chrome-gateway") == 0)) return 0;
   strcpy(value.transport, transport->valuestring);
-  prefix = strcmp(value.profile_id, "chrome") == 0 ? "CHROMEOS\t" : "DESKTOPWIN\t";
-  if (strncmp(value.application, prefix, strlen(prefix)) != 0) return 0;
+  separator = strchr(known.application, '\t');
+  if (!separator) return 0;
+  prefix_length = (size_t)(separator - known.application) + 1;
+  if (strncmp(value.application, known.application, prefix_length) != 0) return 0;
   *out = value;
   return 1;
 }
