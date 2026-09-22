@@ -89,6 +89,14 @@
 "You signed in as \"%@\", not \"%@\". \"%@\" will be left signed out. Add \"%@\" as a separate account instead?" = "「%2$@」ではなく「%1$@」としてサインインしました。「%3$@」はログアウトされたままになります。代わりに「%4$@」を別のアカウントとして追加しますか?";
 
 /* --- QR login window --- */
+"PIN Code" = "PINコード";
+"Recovery" = "復旧";
+"Verify on your phone" = "スマートフォンで認証";
+"Enter this code in LINE on your phone." = "スマートフォンのLINEにこのコードを入力してください。";
+"Waiting for confirmation…" = "認証を待っています…";
+"Next" = "次へ";
+"Back" = "戻る";
+"Stopping login…" = "ログインを停止中…";
 "Starting…"                               = "開始しています…";
 "Scan with LINE on your phone"            = "スマートフォンの LINE で読み取ってください";
 "Couldn't finish adding the account"      = "アカウントの追加を完了できませんでした";

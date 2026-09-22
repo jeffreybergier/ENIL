@@ -21,8 +21,8 @@
 - (void)qrLoginViewControllerDidFail:(QRLoginViewController *)c;
 @end
 
-/* Grouped client selection and login actions, replaced by QR/status/PIN rows
- * during an attempt. Drives the QR-login handshake via
+/* Animated client, QR-scan and phone-verification pages, with native navigation-bar
+ * Back/Next controls and saved-login recovery. Drives the QR-login handshake via
  * +[ENILAccount runQRLoginAtPath:observer:cancelFlag:] on a background thread.
  * The blocking long-polls never touch the main runloop; ENILAccount marshals
  * the observer callbacks back to the main thread. Cancel (the nav-bar button)

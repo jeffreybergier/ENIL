@@ -90,6 +90,14 @@
 "You signed in as \"%@\", not \"%@\". \"%@\" will be left signed out. Add \"%@\" as a separate account instead?" = "You signed in as \"%@\", not \"%@\". \"%@\" will be left signed out. Add \"%@\" as a separate account instead?";
 
 /* --- QR login window --- */
+"PIN Code" = "PIN Code";
+"Recovery" = "Recovery";
+"Verify on your phone" = "Verify on your phone";
+"Enter this code in LINE on your phone." = "Enter this code in LINE on your phone.";
+"Waiting for confirmation…" = "Waiting for confirmation…";
+"Next" = "Next";
+"Back" = "Back";
+"Stopping login…" = "Stopping login…";
 "Starting…"                               = "Starting…";
 "Scan with LINE on your phone"            = "Scan with LINE on your phone";
 "Couldn't finish adding the account"      = "Couldn't finish adding the account";

@@ -17,8 +17,8 @@
 - (void)qrLoginWindowControllerDidFail:(QRLoginWindowController *)c;
 @end
 
-/* Fixed-size client and login NSBox sections. Login actions are replaced by
- * QR/status/PIN controls without resizing or animation. Drives the handshake via
+/* Three-step wizard with animated sizing and bottom Aqua navigation: client,
+ * QR scan, then phone verification. Drives the handshake via
  * +[ENILAccount runQRLoginAtPath:observer:cancelFlag:] on a background thread.
  * The blocking long-polls never touch the main runloop; ENILAccount marshals
  * the observer callbacks back to the main thread. Closing the window flips
@@ -27,14 +27,21 @@
 @interface QRLoginWindowController : NSWindowController {
  @private
   NSString      *accountDir_;
+  NSView        *clientPage_;
+  NSView        *loginPage_;
+  NSView        *verificationPage_;
+  NSView        *currentPage_; /* weak; one of the retained pages */
+  NSTextField   *selectionStatusField_;
   NSBox         *loginBox_;
   NSImageView   *qrImageView_;
   NSTextField   *statusField_;
+  NSTextField   *verificationStatusField_;
   NSTextField   *pinField_;
   NSButton      *chromeButton_;
   NSButton      *windowsButton_;
   NSButton      *androidButton_;
-  NSButton      *startButton_;
+  NSButton      *nextButton_;
+  NSButton      *backButton_;
   NSButton      *retryButton_;
   NSButton      *restartButton_;
   NSTextField   *recoveryHelpField_;
@@ -42,7 +49,9 @@
                                   (the mid we expect the scan to match) */
   id <QRLoginWindowControllerDelegate> delegate_; /* weak */
   BOOL           running_;
-  BOOL           prepared_;   /* client selection is locked after preparation */
+  NSMutableDictionary *preparedPaths_; /* one staging directory per client */
+  NSMutableArray *stagingPaths_; /* includes unprepared directories for cleanup */
+  BOOL           goingBack_; /* wait for the worker before changing identity */
   BOOL           done_;       /* terminal handling reached (success / sheet /
                                  user-close) — guards against the late
                                  background thread resurrecting the window */

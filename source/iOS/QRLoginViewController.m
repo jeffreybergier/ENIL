@@ -8,6 +8,7 @@
 #import "ENILAccount.h"
 #import "XPFoundation.h"
 #import "XPUIKit.h"
+#import <QuartzCore/QuartzCore.h>
 
 static const int kQRPixels = 256;
 static NSString * const kClientProfiles[] = { @"chrome", @"desktopwin", @"android" };
@@ -31,9 +32,16 @@ typedef enum {
   ENILLoginFinished
 } ENILLoginState;
 
+typedef enum {
+  ENILLoginClientPage,
+  ENILLoginQRPage,
+  ENILLoginVerificationPage,
+  ENILLoginRecoveryPage
+} ENILLoginPage;
+
 /* Login data belongs to the controller, not reusable cells: callbacks can
  * arrive while the QR or PIN row is offscreen. All callbacks use the main thread. */
-@interface QRLoginViewController () <ENILQRLoginObserver>
+@interface QRLoginViewController () <ENILQRLoginObserver, UINavigationControllerDelegate>
 @property (nonatomic, copy) NSString *accountDir;
 @property (nonatomic, copy) NSString *expectedMid;
 @property (nonatomic, assign) id <QRLoginViewControllerDelegate> delegate;
@@ -42,7 +50,15 @@ typedef enum {
 @property (nonatomic, copy) NSString *pin;
 @property (nonatomic, strong) UIImage *qrImage;
 @property (nonatomic, assign) ENILLoginState loginState;
-@property (nonatomic, assign) BOOL prepared;
+@property (nonatomic, assign) ENILLoginPage page;
+@property (nonatomic, assign) BOOL goingBack;
+@property (nonatomic, strong) NSMutableDictionary *preparedPaths;
+@property (nonatomic, strong) NSMutableArray *stagingPaths;
+@property (nonatomic, strong) UITableViewController *loginPageController;
+@property (nonatomic, assign) ENILLoginPage contentPage;
+@property (nonatomic, assign) ENILLoginPage requestedPage;
+@property (nonatomic, assign) BOOL navigationTransition;
+@property (nonatomic, strong) UIBarButtonItem *nextButton;
 @end
 
 @implementation QRLoginViewController
@@ -66,8 +82,10 @@ typedef enum {
     _delegate = delegate;  /* assign back-pointer: iOS 4.3 has no zeroing weak */
     _selectedProfile = @"chrome";
     _loginState = ENILLoginChoosingClient;
-    self.navigationItem.title = expectedMid
-      ? NSLocalizedString(@"Reauthenticate", nil) : NSLocalizedString(@"Add Account", nil);
+    _page = ENILLoginClientPage;
+    _preparedPaths = [[NSMutableDictionary alloc] init];
+    _stagingPaths = [[NSMutableArray alloc] initWithObjects:accountDir, nil];
+    self.navigationItem.title = NSLocalizedString(@"Client", nil);
     self.navigationItem.leftBarButtonItem =
       [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel
                                                  target:self action:@selector(cancelAction)];
@@ -75,92 +93,198 @@ typedef enum {
   return self;
 }
 
-- (void)viewDidAppear:(BOOL)animated
+- (void)viewDidLoad
 {
-  [super viewDidAppear:animated];
-  /* Reauthentication retains the saved identity and existing automatic start. */
-  if (self.expectedMid && !self.prepared) [self startLoginWithProfile:nil];
+  [super viewDidLoad];
+  self.nextButton = [[UIBarButtonItem alloc] initWithTitle:NSLocalizedString(@"Next", nil)
+    style:UIBarButtonItemStyleDone target:self action:@selector(nextAction:)];
+  self.navigationItem.rightBarButtonItem = self.nextButton;
+  [self updateNavigation];
 }
 
-- (NSInteger)loginSection { return self.expectedMid ? 0 : 1; }
+- (void)viewWillAppear:(BOOL)animated
+{
+  [super viewWillAppear:animated];
+  self.navigationController.delegate = self;
+  [self.navigationController setToolbarHidden:YES animated:NO];
+}
+
 - (BOOL)running { return self.loginState == ENILLoginRunning; }
 - (BOOL)done { return self.loginState == ENILLoginFinished; }
 
-#pragma mark - Grouped table
+- (UITableView *)currentTableView
+{
+  return self.page == ENILLoginClientPage ? self.tableView : self.loginPageController.tableView;
+}
+
+- (ENILLoginPage)pageForTableView:(UITableView *)tableView
+{
+  return tableView == self.tableView ? ENILLoginClientPage : self.contentPage;
+}
+
+- (void)updateNavigation
+{
+  self.nextButton.enabled = !self.running && !self.done && !self.navigationTransition;
+}
+
+/* Client selection is the navigation root; the active login is a pushed page.
+ * This gives UIKit ownership of the native Back button and its animation.
+ * QR/PIN/recovery transitions stay within the pushed controller, so Back
+ * always returns to client selection rather than to an already-consumed QR. */
+- (void)showPage:(ENILLoginPage)page
+{
+  self.requestedPage = page;
+  if (self.navigationTransition || self.done) return;
+  BOOL changed = self.page != page;
+  self.page = page;
+  if (page == ENILLoginClientPage) {
+    [self.tableView reloadData];
+    if (self.navigationController.topViewController != self) {
+      self.navigationTransition = YES;
+      [self.navigationController popToViewController:self animated:YES];
+    }
+  } else {
+    if (!self.loginPageController) {
+      self.loginPageController = [[UITableViewController alloc] initWithStyle:UITableViewStyleGrouped];
+      [self.loginPageController XP_layoutBelowBars];
+      self.loginPageController.tableView.dataSource = self;
+      self.loginPageController.tableView.delegate = self;
+    }
+    UITableView *table = self.loginPageController.tableView;
+    if (changed && table.window) {
+      CATransition *transition = [CATransition animation];
+      transition.type = kCATransitionPush;
+      transition.subtype = kCATransitionFromRight;
+      transition.duration = 0.25;
+      transition.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+      [table.layer addAnimation:transition forKey:@"ENILLoginPage"];
+    }
+    self.contentPage = page;
+    self.loginPageController.title = page == ENILLoginVerificationPage
+      ? NSLocalizedString(@"PIN Code", nil)
+      : (page == ENILLoginRecoveryPage ? NSLocalizedString(@"Recovery", nil)
+                                       : NSLocalizedString(@"QR Code", nil));
+    [table reloadData];
+    if (changed) [table setContentOffset:CGPointZero animated:NO];
+    if (self.navigationController.topViewController != self.loginPageController) {
+      self.navigationTransition = YES;
+      [self.navigationController pushViewController:self.loginPageController animated:YES];
+    }
+  }
+  [self updateNavigation];
+  if (changed) UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification, nil);
+}
+
+- (void)navigationController:(UINavigationController *)navigationController
+     willShowViewController:(UIViewController *)viewController animated:(BOOL)animated
+{
+  (void)navigationController; (void)animated;
+  self.navigationTransition = YES;
+  if (viewController != self || self.done) return;
+  self.page = ENILLoginClientPage;
+  self.requestedPage = ENILLoginClientPage;
+  if (self.running) {
+    /* Native Back can reveal the choices immediately, but they stay disabled
+     * until the old worker has acknowledged cancellation. Cancel stays usable. */
+    self.goingBack = YES;
+    cancelFlag_ = 1;
+    self.qrImage = nil;
+    self.pin = nil;
+    self.statusMessage = NSLocalizedString(@"Stopping login…", nil);
+  } else {
+    self.loginState = ENILLoginChoosingClient;
+    self.statusMessage = nil;
+  }
+  [self.tableView reloadData];
+  [self updateNavigation];
+}
+
+- (void)navigationController:(UINavigationController *)navigationController
+      didShowViewController:(UIViewController *)viewController animated:(BOOL)animated
+{
+  (void)navigationController; (void)viewController; (void)animated;
+  self.navigationTransition = NO;
+  /* A PIN can arrive during the QR push. Present it once that push finishes. */
+  if (!self.done) [self showPage:self.requestedPage];
+}
+
+#pragma mark - Grouped pages
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
 {
   (void)tableView;
-  return self.loginSection + 1;
+  return 1;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
-  (void)tableView;
-  if (section != self.loginSection) return sizeof(kClientProfiles) / sizeof(kClientProfiles[0]);
-  if (self.running) return [self.pin length] ? 3 : 2;
-  return self.loginState == ENILLoginRecovery ? 2 : 1;
-}
-
-- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
-{
-  (void)tableView;
-  if (section != self.loginSection) return NSLocalizedString(@"Client", nil);
-  return self.running ? NSLocalizedString(@"QR Code", nil) : nil;
+  (void)tableView; (void)section;
+  if ([self pageForTableView:tableView] == ENILLoginClientPage)
+    return self.expectedMid ? 1 : sizeof(kClientProfiles) / sizeof(kClientProfiles[0]);
+  return [self pageForTableView:tableView] == ENILLoginVerificationPage ? 3 : 2;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
 {
-  (void)tableView;
-  if (section != self.loginSection) return nil;
-  if (self.running) return nil;
-  if (self.loginState == ENILLoginRecovery) {
-    return [NSString stringWithFormat:@"%@\n%@", self.statusMessage,
+  (void)tableView; (void)section;
+  if ([self pageForTableView:tableView] == ENILLoginClientPage) return self.statusMessage;
+  if ([self pageForTableView:tableView] == ENILLoginRecoveryPage)
+    return [NSString stringWithFormat:@"%@\n%@", self.statusMessage ? self.statusMessage : @"",
       NSLocalizedString(@"Retry resumes the saved login. Restart creates a new QR code.", nil)];
+  return nil;
+}
+
+- (NSString *)textForRow:(NSInteger)row page:(ENILLoginPage)page
+{
+  if (page == ENILLoginClientPage)
+    return NSLocalizedString(@"This account's saved client identity will be used.", nil);
+  if (page == ENILLoginVerificationPage) {
+    if (row == 0) return NSLocalizedString(@"Enter this code in LINE on your phone.", nil);
+    if (row == 1) return self.pin;
   }
   return self.statusMessage;
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-  if (indexPath.section != self.loginSection || !self.running) return 44.0f;
-  if (indexPath.row == 0) return self.qrImage ? kQRPixels + 24.0f : 88.0f;
-  if (indexPath.row == 2) return 60.0f;
+  if ([self pageForTableView:tableView] == ENILLoginRecoveryPage || ([self pageForTableView:tableView] == ENILLoginClientPage && !self.expectedMid))
+    return 44.0f;
+  if ([self pageForTableView:tableView] == ENILLoginQRPage && indexPath.row == 0)
+    return self.qrImage ? kQRPixels + 24.0f : 88.0f;
+  if ([self pageForTableView:tableView] == ENILLoginVerificationPage && indexPath.row == 1) return 80.0f;
   UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
   label.font = [UIFont systemFontOfSize:15.0f];
   label.numberOfLines = 0;
-  label.text = self.statusMessage;
+  label.text = [self textForRow:indexPath.row page:[self pageForTableView:tableView]];
   CGSize size = [label sizeThatFits:CGSizeMake(MAX(1.0f, tableView.bounds.size.width - 64.0f), CGFLOAT_MAX)];
   return MAX(60.0f, size.height + 24.0f);
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-  /* This small form uses separate cells for each role, so changing state never
-   * carries a checkmark, spinner, or old PIN into an unrelated row. */
+  /* Data lives on the controller, so PIN/status callbacks remain valid even
+   * when their rows are offscreen on a small phone or in landscape. */
   UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
                                                               reuseIdentifier:nil];
-  if (indexPath.section != self.loginSection) {
+  if ([self pageForTableView:tableView] == ENILLoginClientPage && !self.expectedMid) {
     NSString *profile = kClientProfiles[indexPath.row];
     cell.textLabel.text = NSLocalizedString(kClientLabels[indexPath.row], nil);
     cell.accessoryType = [self.selectedProfile isEqualToString:profile]
       ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
-    cell.textLabel.enabled = !self.prepared && !self.done;
+    cell.textLabel.enabled = !self.running && !self.done;
     cell.selectionStyle = cell.textLabel.enabled
       ? UITableViewCellSelectionStyleBlue : UITableViewCellSelectionStyleNone;
     return cell;
   }
-  if (!self.running) {
-    cell.textLabel.text = self.loginState == ENILLoginRecovery
-      ? (indexPath.row == 0 ? NSLocalizedString(@"Retry saved login", nil)
-                            : NSLocalizedString(@"Restart Login", nil))
-      : NSLocalizedString(@"Start Login", nil);
+  if ([self pageForTableView:tableView] == ENILLoginRecoveryPage) {
+    cell.textLabel.text = indexPath.row == 0 ? NSLocalizedString(@"Retry saved login", nil)
+                                            : NSLocalizedString(@"Restart Login", nil);
     cell.textLabel.textColor = [UIColor blueColor];
-    cell.textLabel.enabled = !self.done;
+    cell.textLabel.enabled = !self.running && !self.done;
     return cell;
   }
   cell.selectionStyle = UITableViewCellSelectionStyleNone;
-  if (indexPath.row == 0) {
+  if ([self pageForTableView:tableView] == ENILLoginQRPage && indexPath.row == 0) {
     CGFloat height = [self tableView:tableView heightForRowAtIndexPath:indexPath];
     cell.frame = CGRectMake(0.0f, 0.0f, tableView.bounds.size.width, height);
     [cell layoutIfNeeded];
@@ -183,12 +307,12 @@ typedef enum {
       [spinner startAnimating];
     }
   } else {
+    BOOL isPIN = [self pageForTableView:tableView] == ENILLoginVerificationPage && indexPath.row == 1;
     cell.textLabel.textAlignment = kENILTextAlignCenter;
     cell.textLabel.numberOfLines = 0;
-    cell.textLabel.font = indexPath.row == 2
-      ? [UIFont boldSystemFontOfSize:30.0f] : [UIFont systemFontOfSize:15.0f];
+    cell.textLabel.font = isPIN ? [UIFont boldSystemFontOfSize:36.0f] : [UIFont systemFontOfSize:15.0f];
     cell.textLabel.textColor = [UIColor darkGrayColor];
-    cell.textLabel.text = indexPath.row == 2 ? self.pin : self.statusMessage;
+    cell.textLabel.text = [self textForRow:indexPath.row page:[self pageForTableView:tableView]];
   }
   return cell;
 }
@@ -197,46 +321,59 @@ typedef enum {
 {
   [tableView deselectRowAtIndexPath:indexPath animated:YES];
   if (self.running || self.done) return;
-  if (indexPath.section != self.loginSection) {
-    if (self.prepared) return;
+  if ([self pageForTableView:tableView] == ENILLoginClientPage && !self.expectedMid) {
     self.selectedProfile = kClientProfiles[indexPath.row];
-    [tableView reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationNone];
-  } else if (self.loginState == ENILLoginRecovery) {
+    /* Keep the tapped cell alive so UIKit can finish its selection fade.
+     * Reloading the table here removes the highlight along with the cells. */
+    for (NSIndexPath *visiblePath in [tableView indexPathsForVisibleRows]) {
+      UITableViewCell *cell = [tableView cellForRowAtIndexPath:visiblePath];
+      cell.accessoryType = [self.selectedProfile isEqualToString:kClientProfiles[visiblePath.row]]
+        ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+    }
+  } else if ([self pageForTableView:tableView] == ENILLoginRecoveryPage) {
     if (indexPath.row == 0) [self retrySavedLogin:nil];
     else [self startNewQR:nil];
-  } else {
-    [self startLoginWithProfile:self.expectedMid ? nil : self.selectedProfile];
   }
-}
-
-- (void)reloadLoginSection
-{
-  [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:(NSUInteger)self.loginSection]
-               withRowAnimation:UITableViewRowAnimationNone];
-  /* Resolve the new row heights before scrolling. Animated section updates
-   * still expose the old content size on older UIKit, clipping the new PIN. */
-  [self.tableView layoutIfNeeded];
-}
-
-- (void)showLoginRow:(NSInteger)row
-{
-  [self.tableView scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:self.loginSection]
-                      atScrollPosition:row == 0 ? UITableViewScrollPositionTop : UITableViewScrollPositionBottom
-                              animated:NO];
 }
 
 #pragma mark - Login actions
 
+- (void)nextAction:(id)sender
+{
+  (void)sender;
+  if (self.page != ENILLoginClientPage) return;
+  [self startLoginWithProfile:self.expectedMid ? nil : self.selectedProfile];
+}
+
 - (void)startLoginWithProfile:(NSString *)profile
 {
   if (self.running || self.done) return;
-  if (![ENILAccount prepareQRLoginAtPath:self.accountDir clientProfile:profile
-                    reauthenticatingMid:self.expectedMid]) {
-    self.statusMessage = NSLocalizedString(@"Could not save client identity", nil);
-    [self reloadLoginSection];
-    return;
+  NSString *key = self.expectedMid ? @"reauth" : profile;
+  NSString *path = [self.preparedPaths objectForKey:key];
+  if (!path) {
+    /* Preserve each client's attempt while navigating, just like macOS.
+     * Native credential recovery remains outside the transient staging dirs. */
+    path = self.accountDir;
+    if ([self.preparedPaths count]) {
+      path = [[self.accountDir stringByDeletingLastPathComponent] stringByAppendingPathComponent:
+        [@".staging-" stringByAppendingString:[[NSProcessInfo processInfo] globallyUniqueString]]];
+      if (![[NSFileManager defaultManager] XP_createDirectoryAtPath:path
+          withIntermediateDirectories:NO attributes:nil error:NULL]) {
+        self.statusMessage = NSLocalizedString(@"Could not save client identity", nil);
+        [[self currentTableView] reloadData];
+        return;
+      }
+      [self.stagingPaths addObject:path];
+    }
+    if (![ENILAccount prepareQRLoginAtPath:path clientProfile:profile
+                      reauthenticatingMid:self.expectedMid]) {
+      self.statusMessage = NSLocalizedString(@"Could not save client identity", nil);
+      [[self currentTableView] reloadData];
+      return;
+    }
+    [self.preparedPaths setObject:path forKey:key];
   }
-  self.prepared = YES;
+  self.accountDir = path;
   [self retrySavedLogin:nil];
 }
 
@@ -246,7 +383,7 @@ typedef enum {
   if (self.running || self.done) return;
   if (![ENILAccount restartQRLoginAtPath:self.accountDir]) {
     self.statusMessage = NSLocalizedString(@"Could not save login recovery", nil);
-    [self reloadLoginSection];
+    [[self currentTableView] reloadData];
     return;
   }
   [self retrySavedLogin:nil];
@@ -256,11 +393,12 @@ typedef enum {
 {
   (void)sender;
   if (self.running || self.done) return;
+  cancelFlag_ = 0;
   self.loginState = ENILLoginRunning;
   self.qrImage = nil;
   self.pin = nil;
   self.statusMessage = NSLocalizedString(@"Starting…", nil);
-  [self.tableView reloadData];
+  [self showPage:ENILLoginQRPage];
   /* The thread retains self so callbacks and cancelFlag_ remain valid even
    * after dismissal. Starting a second attempt is blocked until it returns. */
   [NSThread detachNewThreadSelector:@selector(loginThreadMain) toTarget:self withObject:nil];
@@ -282,19 +420,20 @@ typedef enum {
 
 - (void)qrLoginDidEmitURL:(NSString *)url
 {
-  if (!self.running || ![url length]) return;
+  if (!self.running || self.goingBack || ![url length]) return;
   self.qrImage = [ENILQRImage imageForString:url pixelSize:kQRPixels];
   self.statusMessage = NSLocalizedString(@"Scan with LINE on your phone", nil);
-  [self reloadLoginSection];
-  [self showLoginRow:0];
+  [[self currentTableView] reloadData];
 }
 
 - (void)qrLoginDidEmitPIN:(NSString *)pin
 {
-  if (!self.running || ![pin length]) return;
+  if (!self.running || self.goingBack || ![pin length]) return;
   self.pin = pin;
-  [self reloadLoginSection];
-  [self showLoginRow:2];
+  self.statusMessage = NSLocalizedString(@"Waiting for confirmation…", nil);
+  /* Advance only when LINE actually supplies a PIN; certificate-approved
+   * attempts can finish without ever visiting this page. */
+  [self showPage:ENILLoginVerificationPage];
 }
 
 /* status_cb hands us the raw C status key; translate at the UI boundary so the
@@ -303,7 +442,7 @@ typedef enum {
  * format key with %d/%d placeholders the strings file owns. */
 - (void)qrLoginDidEmitStatus:(NSString *)status
 {
-  if (!self.running || ![status length]) return;
+  if (!self.running || self.goingBack || ![status length]) return;
   int cur = 0, total = 0;
   if (sscanf([status UTF8String], "waiting for scan (%d/%d)", &cur, &total) == 2) {
     self.statusMessage = [NSString stringWithFormat:
@@ -311,9 +450,9 @@ typedef enum {
   } else {
     self.statusMessage = NSLocalizedString(status, nil);
   }
-  [self.tableView reloadRowsAtIndexPaths:[NSArray arrayWithObject:
-    [NSIndexPath indexPathForRow:1 inSection:self.loginSection]]
-                        withRowAnimation:UITableViewRowAnimationNone];
+  /* A page change can be queued behind a native push/pop animation. Reload
+   * the current table's own shape instead of assuming a QR/PIN row exists. */
+  [[self currentTableView] reloadData];
 }
 
 #pragma mark - Terminal handling
@@ -323,17 +462,22 @@ typedef enum {
   /* The thread retains us after dismissal. The finished state makes a late
    * completion after -cancelAction a no-op. */
   if (self.done) return;
+  if (self.goingBack) {
+    self.goingBack = NO;
+    cancelFlag_ = 0;
+    if (![result boolValue]) {
+      self.loginState = ENILLoginChoosingClient;
+      self.statusMessage = nil;
+      [self showPage:ENILLoginClientPage];
+      return;
+    }
+    /* A login that completed before cancellation still activates normally. */
+  }
   if (![result boolValue] && [ENILAccount canRestartQRLoginAtPath:self.accountDir]) {
-    NSString *failure = self.statusMessage;
     self.loginState = ENILLoginRecovery;
     self.qrImage = nil;
     self.pin = nil;
-    self.statusMessage = NSLocalizedString(@"Sign-in needs recovery", nil);
-    [self reloadLoginSection];
-    [self showLoginRow:0];
-    [self XP_showAlertWithTitle:NSLocalizedString(@"Sign-in needs recovery", nil)
-                       message:failure
-                  dismissTitle:NSLocalizedString(@"Dismiss", nil)];
+    [self showPage:ENILLoginRecoveryPage];
     return;
   }
   self.loginState = ENILLoginFinished;
@@ -366,6 +510,20 @@ typedef enum {
   self.loginState = ENILLoginFinished;
   cancelFlag_ = 1;
   [self.delegate qrLoginViewControllerDidFail:self];
+}
+
+- (void)dealloc
+{
+  if ([_loginPageController isViewLoaded]) {
+    _loginPageController.tableView.dataSource = nil;
+    _loginPageController.tableView.delegate = nil;
+  }
+  /* The coordinator cleans the active path. Saved native attempts are siblings
+   * of these transient directories and must survive this cleanup. */
+  for (NSString *path in _stagingPaths) {
+    if (![path isEqualToString:_accountDir])
+      [[NSFileManager defaultManager] XP_removeItemAtPath:path error:NULL];
+  }
 }
 
 @end

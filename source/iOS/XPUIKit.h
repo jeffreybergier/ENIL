@@ -92,14 +92,16 @@ typedef enum {
 
 @interface XPUserNotificationCenter : NSObject
 + (XPUserNotificationCenter *)defaultCenter;
+/* Call each launch; iOS prompts on the first request and remembers the answer. */
 - (void)requestAuthorization;
+/* On iOS 8+, empty settings include both unrequested and denied permission;
+ * this status must not be used to decide whether to register at launch. */
 - (XPNotificationAuthStatus)authorizationStatus;
 - (void)postNotificationWithTitle:(NSString *)title body:(NSString *)body;
 /* Set the app-icon badge to `count` (0 clears it). Separate from the
  * notification post: on iOS the badge is an app-level property
  * (-[UIApplication applicationIconBadgeNumber]), not something the
  * UILocalNotification has to carry — and the clear-on-foreground path needs it
- * with no notification in hand anyway. Available since iOS 2.0, so no floor
- * guard is needed. */
+ * with no notification in hand anyway. On iOS 8+ writes require badge permission. */
 - (void)setBadgeCount:(int)count;
 @end
