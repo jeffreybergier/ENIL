@@ -12,6 +12,7 @@
 #import "ENILAccount.h"
 #import "ENILKeychain.h"
 #import "XPFoundation.h"
+#import "XPUIKit.h"
 
 /* Persisted mid of the account the user last had active (iOS is single-active,
  * unlike the macOS all-windows model). Preferred at launch when its folder
@@ -369,10 +370,18 @@ static NSString * const kENILLastActiveAccountKey = @"ENILLastActiveAccountMid";
   NSString *staging = [[self enilRootPath] stringByAppendingPathComponent:
     [NSString stringWithFormat:@".staging-%.0f",
       [NSDate timeIntervalSinceReferenceDate]]];
-  [[NSFileManager defaultManager] XP_createDirectoryAtPath:staging
-                               withIntermediateDirectories:YES
-                                                attributes:nil
-                                                     error:NULL];
+  NSError *directoryError = nil;
+  if (![[NSFileManager defaultManager] XP_createDirectoryAtPath:staging
+                                 withIntermediateDirectories:YES
+                                                  attributes:nil
+                                                       error:&directoryError]) {
+    ENILLog(@"ENILRootCoordinator.beginQRLoginExpectingMid",
+            @"cannot create login directory: %@", directoryError);
+    [presenter XP_showAlertWithTitle:NSLocalizedString(@"Couldn't Add Account", nil)
+                            message:[directoryError localizedDescription]
+                       dismissTitle:NSLocalizedString(@"OK", nil)];
+    return;
+  }
   QRLoginViewController *qr = [[QRLoginViewController alloc]
     initWithAccountDir:staging expectedMid:expectedMid delegate:self];
   self.qrLogin = qr;

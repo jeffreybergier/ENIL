@@ -4,6 +4,8 @@
 <dict>
   <key>application-identifier</key>
   <string>com.altivecintelligence.ENIL</string>
+  <key>com.apple.private.security.container-required</key>
+  <string>com.altivecintelligence.ENIL</string>
   <key>keychain-access-groups</key>
   <array>
     <string>com.altivecintelligence.ENIL</string>
