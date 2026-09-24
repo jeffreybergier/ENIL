@@ -53,6 +53,7 @@ def reply(method, fields, kind=TMessageType.REPLY, sequence=0):
 class Flow:
     model_name = "ENIL Windows login probe"
     system_name = "WINDOWS"
+    auto_login_required = False
     application = probe.APPLICATION
     user_agent = probe.USER_AGENT
     def __init__(self, *, certificate_code=2, poll_timeout=False, unwrap_fails=False):
@@ -115,7 +116,7 @@ class Flow:
             result = [(1, TType.STRING, "123456")]
         elif method == "qrCodeLoginV2ForSecure":
             assert args[1] == {1: "synthetic-session", 2: self.system_name,
-                               3: self.model_name, 4: False, 5: "nonce"}
+                               3: self.model_name, 4: self.auto_login_required, 5: "nonce"}
             result = [(1, TType.STRING, "certificate"),
                       (3, TType.STRUCT, [(1, TType.STRING, "private-access-token"),
                                         (2, TType.STRING, "private-refresh-token"),

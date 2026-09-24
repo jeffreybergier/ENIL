@@ -763,6 +763,29 @@ through pending-login recovery, activation, and reauthentication. They cannot
 reuse Windows attempts or select the Chrome gateway. No additional Worker
 deployment is needed for Android support.
 
+New native identities (2026-09-24) separate QR device names from the HTTP
+application header. Android uses `Pixel Tablet` for both `systemName` and
+`modelName`; Windows uses `DESKTOPWIN` for both. Both save
+`autoLoginIsRequired: true` in `clientIdentity`, and the native secure QR request
+uses that saved value. The field is an optional boolean in identity schema 1:
+absence means false, preserving the previous behavior of saved sessions and
+pending attempts. Invalid field types fail identity validation. Reauthentication
+copies the saved names and flag instead of applying new defaults. Pending-login
+matching still requires the exact identity; a new profile will not silently
+adopt an attempt made with the previous defaults. HTTP application identifiers,
+versions, OS names, and user agents are unchanged.
+
+The Android QR names/boolean follow static analysis of the official 15.21.3 APK
+(`Build.MODEL` in both fields, automatic login requested). `Pixel Tablet` is
+ENIL's chosen emulated model, not a value hardcoded by LINE. Applying the same
+pattern to Windows is an explicit assumption, not a verified Windows finding.
+Research and binary evidence are in ENIL-extras under
+`research/2026-09-24-client-identity/`. The standalone Python Windows probe
+retains its historical diagnostic identity and login flag.
+Loopback tests cover new and legacy QR requests, saved token recovery, and
+identity persistence. Live token issuance, restart and refresh with the new
+defaults still need device validation.
+
 For a live coexistence test, keep the official Mac client signed in and choose
 **Tablet (Android)** in ENIL's **Add Account** screen, then complete QR/PIN
 approval on the main phone. Check the

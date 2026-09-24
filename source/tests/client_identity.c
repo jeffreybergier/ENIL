@@ -117,6 +117,12 @@ static void check_profile(const char *root, const char *profile) {
   json = enil_session_read(path);
   snapshot = cJSON_GetObjectItem(json, "clientIdentity");
   cJSON_ReplaceItemInObjectCaseSensitive(snapshot, "transport", cJSON_CreateString("chrome-gateway"));
+  if (!strcmp(profile, "desktopwin")) {
+    /* Historical gateway snapshots predate the native QR defaults. */
+    cJSON_ReplaceItemInObjectCaseSensitive(snapshot, "systemName", cJSON_CreateString("WINDOWS"));
+    cJSON_ReplaceItemInObjectCaseSensitive(snapshot, "modelName", cJSON_CreateString("DESKTOPWIN"));
+    cJSON_DeleteItemFromObjectCaseSensitive(snapshot, "autoLoginIsRequired");
+  }
   assert(enil_session_write(path, json)); cJSON_Delete(json);
   assert(!enil_session_prepare_login(path, "chrome", NULL));
   assert(enil_session_bind_identity(path));
@@ -162,6 +168,7 @@ static void check_profile(const char *root, const char *profile) {
   assert(enil_identity_parse(cJSON_GetObjectItemCaseSensitive(json, "clientIdentity"), &identity));
   assert(strcmp(identity.user_agent, "saved-session-agent") == 0);
   assert(strcmp(identity.profile_id, profile) == 0);
+  assert(!identity.auto_login_required);
   cJSON_Delete(json);
 
   assert(enil_obs_upload(path, (const unsigned char *)"image", 5, "m", &oid) == 0);
@@ -216,6 +223,17 @@ int main(int argc, char **argv) {
   assert(enil_identity_default("android", &id));
   json = enil_identity_to_json(&id);
   assert(enil_identity_parse(json, &id));
+  assert(id.auto_login_required);
+  cJSON_ReplaceItemInObjectCaseSensitive(json, "autoLoginIsRequired", cJSON_CreateString("true"));
+  assert(!enil_identity_parse(json, &id));
+  cJSON_ReplaceItemInObjectCaseSensitive(json, "autoLoginIsRequired", cJSON_CreateNumber(1));
+  assert(!enil_identity_parse(json, &id));
+  cJSON_ReplaceItemInObjectCaseSensitive(json, "autoLoginIsRequired", cJSON_CreateNull());
+  assert(!enil_identity_parse(json, &id));
+  cJSON_DeleteItemFromObjectCaseSensitive(json, "autoLoginIsRequired");
+  assert(enil_identity_parse(json, &id) && !id.auto_login_required);
+  cJSON_AddBoolToObject(json, "autoLoginIsRequired", 0);
+  assert(enil_identity_parse(json, &id) && !id.auto_login_required);
   /* Android secondary can neither become a primary phone nor use the gateway. */
   cJSON_ReplaceItemInObjectCaseSensitive(json, "application",
     cJSON_CreateString("ANDROID\t26.6.2\tAndroid OS\t16"));

@@ -9,20 +9,25 @@ static const enil_identity_t legacy_chrome_identity = {
   "chrome", "chrome-gateway", "CHROMEOS\t3.7.2\tChrome_OS",
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
   "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
-  "CHROMEOS", "CHROME", "3.7.2"
+  "CHROMEOS", "CHROME", "3.7.2", 0
 };
 /* Reference profile: evex-dev/linejs ef6c3d9, devices.ts / request/mod.ts.
- * Persist the resolved values; future default updates must not mutate sessions. */
+ * Persist the resolved values; future default updates must not mutate sessions.
+ * QR names use the Windows identifier in both fields, following the Android
+ * behavior by assumption; the Windows binary has not verified this choice. */
 static const enil_identity_t windows_identity = {
   "desktopwin", "native-thrift", "DESKTOPWIN\t9.7.0.3556\tWINDOWS\t10.0.0-NT-x64",
-  "Line/9.7.0.3556", "WINDOWS", "DESKTOPWIN", "3.7.2"
+  "Line/9.7.0.3556", "DESKTOPWIN", "DESKTOPWIN", "3.7.2", 1
 };
 /* Android secondary identity from the same pinned LINEJS devices.ts reference.
  * The short local profile ID fits saved identity buffers; the wire identity
- * must be ANDROIDSECONDARY, never the primary ANDROID client. */
+ * must be ANDROIDSECONDARY, never the primary ANDROID client.
+ * Official Android 15.21.3 uses Build.MODEL for both QR names and requests
+ * automatic login. Pixel Tablet is our fixed emulated Android device model;
+ * the header's OS name remains independent of these QR device names. */
 static const enil_identity_t android_identity = {
   "android", "native-thrift", "ANDROIDSECONDARY\t26.6.2\tAndroid OS\t16",
-  "Line/26.6.2", "Android OS", "ANDROIDSECONDARY", "3.7.2"
+  "Line/26.6.2", "Pixel Tablet", "Pixel Tablet", "3.7.2", 1
 };
 
 int enil_identity_default(const char *profile_id, enil_identity_t *out) {
@@ -51,7 +56,7 @@ static int read_string(const cJSON *json, const char *key, char *out,
 
 int enil_identity_parse(const cJSON *json, enil_identity_t *out) {
   enil_identity_t value, known;
-  const cJSON *version, *transport;
+  const cJSON *version, *transport, *auto_login;
   const char *separator;
   size_t prefix_length;
   if (!out) return 0;
@@ -65,6 +70,11 @@ int enil_identity_parse(const cJSON *json, enil_identity_t *out) {
       (strcmp(transport->valuestring, "chrome-gateway") != 0 &&
        strcmp(transport->valuestring, "native-thrift") != 0)) return 0;
   memset(&value, 0, sizeof(value));
+  /* Do not apply current defaults to a saved login. The old secure QR flow
+   * always sent false; retain that behavior when this additive field is absent. */
+  auto_login = cJSON_GetObjectItemCaseSensitive(json, "autoLoginIsRequired");
+  if (auto_login && !cJSON_IsBool(auto_login)) return 0;
+  value.auto_login_required = cJSON_IsTrue(auto_login);
   if (!read_string(json, "profileId", value.profile_id, sizeof(value.profile_id), 0) ||
       !enil_identity_default(value.profile_id, &known) ||
       !read_string(json, "application", value.application, sizeof(value.application), 1) ||
@@ -99,7 +109,8 @@ cJSON *enil_identity_to_json(const enil_identity_t *identity) {
       !cJSON_AddStringToObject(json, "userAgent", identity->user_agent) ||
       !cJSON_AddStringToObject(json, "systemName", identity->system_name) ||
       !cJSON_AddStringToObject(json, "modelName", identity->model_name) ||
-      !cJSON_AddStringToObject(json, "gatewayVersion", identity->gateway_version)) {
+      !cJSON_AddStringToObject(json, "gatewayVersion", identity->gateway_version) ||
+      !cJSON_AddBoolToObject(json, "autoLoginIsRequired", identity->auto_login_required)) {
     cJSON_Delete(json);
     return NULL;
   }

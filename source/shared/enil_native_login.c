@@ -105,7 +105,7 @@ static int encode(const char *method, cJSON *state, ENILBuf *out) {
         goto done;
       if (!cJSON_AddStringToObject(request, "systemName", identity.system_name) ||
           !cJSON_AddStringToObject(request, "modelName", identity.model_name) ||
-          !cJSON_AddBoolToObject(request, "autoLoginIsRequired", 0) ||
+          !cJSON_AddBoolToObject(request, "autoLoginIsRequired", identity.auto_login_required) ||
           !cJSON_AddStringToObject(request, "qrNonce", nonce))
         goto done;
     }

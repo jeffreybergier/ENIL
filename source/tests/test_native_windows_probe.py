@@ -32,11 +32,17 @@ class NativeWindowsProbeTests(unittest.TestCase):
     def run_probe(self, mode, language=None, profile="desktopwin"):
         flow, failures = Flow(), []
         flow.model_name = "DESKTOPWIN"
+        flow.system_name = "DESKTOPWIN"
+        flow.auto_login_required = True
         if profile == "android":
-            flow.model_name = "ANDROIDSECONDARY"
-            flow.system_name = "Android OS"
+            flow.model_name = "Pixel Tablet"
+            flow.system_name = "Pixel Tablet"
             flow.application = "ANDROIDSECONDARY\t26.6.2\tAndroid OS\t16"
             flow.user_agent = "Line/26.6.2"
+        if mode == "legacy":
+            flow.system_name = "Android OS" if profile == "android" else "WINDOWS"
+            flow.model_name = "ANDROIDSECONDARY" if profile == "android" else "DESKTOPWIN"
+            flow.auto_login_required = False
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *args):
@@ -96,6 +102,12 @@ class NativeWindowsProbeTests(unittest.TestCase):
 
     def test_android_uncertain_token_request_is_not_repeated(self):
         self.run_probe("token-error", profile="android")
+
+    def test_legacy_windows_reauthentication_preserves_qr_metadata(self):
+        self.run_probe("legacy")
+
+    def test_legacy_android_reauthentication_preserves_qr_metadata(self):
+        self.run_probe("legacy", profile="android")
 
 
 if __name__ == "__main__":

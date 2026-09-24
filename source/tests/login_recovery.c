@@ -280,6 +280,9 @@ static void android_pending_isolation(const char *root) {
   saved = read_saved(reauth);
   assert(enil_identity_parse(cJSON_GetObjectItem(saved, "clientIdentity"), &identity));
   assert(!strcmp(identity.profile_id, "android"));
+  assert(!strcmp(identity.system_name, "Pixel Tablet"));
+  assert(!strcmp(identity.model_name, "Pixel Tablet"));
+  assert(identity.auto_login_required);
   cJSON_Delete(saved);
   free(win_pending); free(android_pending); free(resumed);
 }

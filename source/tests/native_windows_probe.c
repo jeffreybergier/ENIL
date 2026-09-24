@@ -98,6 +98,7 @@ int main(int argc, char **argv) {
   int before;
   char path[2048];
   const char *profile;
+  enil_identity_t expected_identity, saved_identity;
   assert(argc == 6);
   enil_line_set_language(argv[4]);
   profile = argv[5];
@@ -105,6 +106,27 @@ int main(int argc, char **argv) {
   assert(mkdir(directory, 0700) == 0);
   snprintf(path, sizeof(path), "%s/session.json", directory);
   assert(enil_session_prepare_login(path, profile, NULL));
+  if (!strcmp(argv[3], "legacy")) {
+    char legacy[2048];
+    cJSON *identity;
+    s = read_saved();
+    identity = cJSON_GetObjectItem(s, "clientIdentity");
+    cJSON_DeleteItemFromObjectCaseSensitive(identity, "autoLoginIsRequired");
+    cJSON_ReplaceItemInObjectCaseSensitive(identity, "systemName",
+      cJSON_CreateString(!strcmp(profile, "android") ? "Android OS" : "WINDOWS"));
+    cJSON_ReplaceItemInObjectCaseSensitive(identity, "modelName",
+      cJSON_CreateString(!strcmp(profile, "android") ? "ANDROIDSECONDARY" : "DESKTOPWIN"));
+    assert(enil_session_write(path, s));
+    cJSON_Delete(s);
+    snprintf(legacy, sizeof(legacy), "%s/legacy-session.json", directory);
+    assert(rename(path, legacy) == 0);
+    /* Exercise reauthentication from an identity written before the new flag. */
+    assert(enil_session_prepare_login(path, NULL, legacy));
+  }
+  s = read_saved();
+  assert(enil_identity_parse(cJSON_GetObjectItem(s, "clientIdentity"), &expected_identity));
+  assert(expected_identity.auto_login_required == !!strcmp(argv[3], "legacy"));
+  cJSON_Delete(s);
   memset(&cb, 0, sizeof(cb));
   cb.on_qr_url = qr; cb.on_pin = pin; cb.on_status = status; cb.cancel = &cancel;
   assert(!enil_native_login_run(directory, &cb));
@@ -133,6 +155,8 @@ int main(int argc, char **argv) {
   assert(cJSON_GetObjectItem(s, "e2eeLoginMetaData"));
   assert(!strcmp(cJSON_GetObjectItem(cJSON_GetObjectItem(s, "clientIdentity"),
                                    "profileId")->valuestring, profile));
+  assert(enil_identity_parse(cJSON_GetObjectItem(s, "clientIdentity"), &saved_identity));
+  assert(!memcmp(&expected_identity, &saved_identity, sizeof(saved_identity)));
   if (!fail_unwrap) assert(cJSON_GetObjectItem(s, "e2eeKeys"));
   cJSON_Delete(s);
   before = calls;
@@ -155,6 +179,8 @@ int main(int argc, char **argv) {
   assert(strcmp(cJSON_GetObjectItem(s, "accessToken")->valuestring, "private-access-token") == 0);
   assert(!strcmp(cJSON_GetObjectItem(cJSON_GetObjectItem(s, "clientIdentity"),
                                    "profileId")->valuestring, profile));
+  assert(enil_identity_parse(cJSON_GetObjectItem(s, "clientIdentity"), &saved_identity));
+  assert(!memcmp(&expected_identity, &saved_identity, sizeof(saved_identity)));
   cJSON_Delete(s);
   return 0;
 }

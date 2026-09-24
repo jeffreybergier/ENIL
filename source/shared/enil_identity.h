@@ -12,6 +12,8 @@ typedef struct {
   char system_name[64];
   char model_name[64];
   char gateway_version[32];
+  /* Native QR login preference; absent in older snapshots means false. */
+  int auto_login_required;
 } enil_identity_t;
 
 #define ENIL_LINE_GATEWAY "https://line-chrome-gw.line-apps.com"
