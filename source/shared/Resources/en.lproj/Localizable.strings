@@ -216,25 +216,25 @@
 "Creating QR session" = "Creating QR code";
 "Enter the PIN in LINE on your phone" = "Enter the PIN in LINE on your phone";
 "Completing login" = "Completing login";
-"Login succeeded. Session saved." = "Login succeeded. Session saved.";
-"Login session already saved. No new login requested." = "Login session already saved. No new login requested.";
+"Login succeeded. Session saved." = "Signed in to LINE. Preparing message encryption…";
+"Login session already saved. No new login requested." = "Continuing your saved LINE sign-in…";
 "Login stopped. Session state saved; see log for details." = "Login stopped. Session state saved; see log for details.";
 
 "Windows desktop" = "Windows desktop";
 
-/* Windows login recovery */
-"Sign-in needs recovery" = "Sign-in needs recovery";
-"Retry saved login" = "Retry saved login";
+/* Native login recovery (macOS and iOS) */
+"Sign-in needs recovery" = "Could not finish login setup";
+"Retry saved login" = "Retry and Continue";
 "Start new QR" = "Start new QR";
-"Could not save login recovery" = "Could not save login recovery";
-"Could not recover message encryption keys. Retry the saved login." = "Could not recover message encryption keys. Retry the saved login.";
+"Could not save login recovery" = "Could not save your login progress. Check available storage, then try again.";
+"Could not recover message encryption keys. Retry the saved login." = "LINE sign-in succeeded, but message encryption setup failed. Choose “Retry and Continue” to try this step again.";
 
 /* Login sections and actions */
 "Client" = "Client";
 "QR Code" = "QR Code";
 "Start Login" = "Start Login";
-"Restart Login" = "Restart Login";
-"Retry resumes the saved login. Restart creates a new QR code." = "Retry resumes the saved login. Restart creates a new QR code.";
+"Restart Login" = "Start New QR Login";
+"Retry resumes the saved login. Restart creates a new QR code." = "Try “Retry and Continue” first to keep your progress. “Start New QR Login” starts over and requires you to scan a new QR code.";
 
 /* macOS login sections */
 "Login" = "Login";

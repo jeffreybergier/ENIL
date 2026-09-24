@@ -215,25 +215,25 @@
 "Creating QR session" = "QRコードを作成中";
 "Enter the PIN in LINE on your phone" = "スマートフォンのLINEに認証番号を入力してください";
 "Completing login" = "ログインを完了中";
-"Login succeeded. Session saved." = "ログイン成功。セッションを保存しました。";
-"Login session already saved. No new login requested." = "セッションは保存済みです。新しいログインは行いません。";
+"Login succeeded. Session saved." = "LINEへのログインが完了しました。メッセージ暗号化を準備中…";
+"Login session already saved. No new login requested." = "保存済みのLINEログイン情報を使って処理を再開中…";
 "Login stopped. Session state saved; see log for details." = "ログインを停止しました。状態は保存済みです。詳細はログをご確認ください。";
 
 "Windows desktop" = "Windows デスクトップ";
 
-/* Windows login recovery */
-"Sign-in needs recovery" = "ログインを再開してください";
-"Retry saved login" = "保存したログインを再試行";
+/* Native login recovery (macOS and iOS) */
+"Sign-in needs recovery" = "ログインの設定を完了できませんでした";
+"Retry saved login" = "再試行して続ける";
 "Start new QR" = "新しいQRでログイン";
-"Could not save login recovery" = "ログインの再開を保存できませんでした";
+"Could not save login recovery" = "ログインの進行状況を保存できませんでした。空き容量を確認して、再試行してください。";
 
 /* Login sections and actions */
-"Could not recover message encryption keys. Retry the saved login." = "メッセージの暗号化キーを復元できませんでした。保存済みのログインを再試行してください。";
+"Could not recover message encryption keys. Retry the saved login." = "LINEへのログインは成功しましたが、メッセージ暗号化の準備に失敗しました。「再試行して続ける」を選んでください。";
 "Client" = "クライアント";
 "QR Code" = "QRコード";
 "Start Login" = "ログイン開始";
-"Restart Login" = "ログインをやり直す";
-"Retry resumes the saved login. Restart creates a new QR code." = "再試行すると保存したログインを再開します。やり直すと新しいQRコードを作成します。";
+"Restart Login" = "新しいQRコードでログイン";
+"Retry resumes the saved login. Restart creates a new QR code." = "まず「再試行して続ける」を選んでください。保存済みの進行状況から再開します。「新しいQRコードでログイン」は最初からやり直すため、QRコードの読み取りが再度必要です。";
 
 /* macOS login sections */
 "Login" = "ログイン";

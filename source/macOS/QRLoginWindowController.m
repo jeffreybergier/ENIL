@@ -465,7 +465,8 @@ static const CGFloat kVerificationPageHeight = 300;
     [alert addButtonWithTitle:NSLocalizedString(@"Dismiss", nil)];
     [qrImageView_ setImage:nil];
     [pinField_ setStringValue:@""];
-    [self setLoginStatus:NSLocalizedString(@"Sign-in needs recovery", nil)];
+    /* Keep the specific failure visible after the alert is dismissed. In
+     * particular, encryption setup can fail after LINE sign-in succeeds. */
     [self showRecoveryActions];
     [alert XP_beginSheetModalForWindow:[self window]
                          modalDelegate:self
