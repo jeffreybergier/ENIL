@@ -40,6 +40,9 @@ class NativeSyncRecoveryTests(unittest.TestCase):
     def test_full_sync_preserves_cursor_until_successful_recovery(self):
         self.run_recovery()
 
+    def test_replayed_messages_preserve_synced_unread_count_but_new_events_update_it(self):
+        self.run_recovery("replay-synced")
+
     def test_failed_message_write_redelivers_before_advancing_cursors(self):
         self.run_recovery("message")
 

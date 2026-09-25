@@ -136,18 +136,17 @@ static const char * const kSQL_UpdateMessageBoxV2 =
 
 /* SSE SEND/RECEIVE events carry one message, not the server-authoritative
  * MessageBox object. Preserve sync-owned raw_json/lastSeenMessageId; only move
- * the delivered high-water mark and update unreadCount from the live event. */
+ * the delivered high-water mark and update unreadCount from the live event.
+ * Cached messages must preserve unreadCount when replayed after a full sync. */
 static const char * const kSQL_UpdateMessageBoxV2LiveMessage =
   "UPDATE message_boxes_v2 SET"
   "  midType = ?,"
   "  lastDeliveredMessageId = ?,"
   "  lastDeliveredTime = ?,"
-  "  unreadCount = CASE WHEN ? != 0 THEN"
-  "    COALESCE(unreadCount, 0) + CASE"
-  "      WHEN ? IS NOT NULL AND ? != ''"
-  "       AND NOT EXISTS (SELECT 1 FROM messages_v2 WHERE id = ?)"
-  "      THEN 1 ELSE 0 END"
-  "    ELSE 0 END"
+  "  unreadCount = CASE WHEN ? IS NOT NULL AND ? != ''"
+  "    AND NOT EXISTS (SELECT 1 FROM messages_v2 WHERE id = ?)"
+  "    THEN CASE WHEN ? != 0 THEN COALESCE(unreadCount, 0) + 1 ELSE 0 END"
+  "    ELSE unreadCount END"
   " WHERE id = ?";
 
 static const char * const kSQL_GetMessageBoxesV2 =
@@ -1561,10 +1560,10 @@ int enil_db_message_box_upsert_live_message(sqlite3 *db,
   sqlite3_bind_int  (stmt, 1, mid_type);
   bind_text_or_null (stmt, 2, last_message_id);
   sqlite3_bind_int64(stmt, 3, last_message_time);
-  sqlite3_bind_int  (stmt, 4, incoming ? 1 : 0);
+  bind_text_or_null (stmt, 4, message_id);
   bind_text_or_null (stmt, 5, message_id);
   bind_text_or_null (stmt, 6, message_id);
-  bind_text_or_null (stmt, 7, message_id);
+  sqlite3_bind_int  (stmt, 7, incoming ? 1 : 0);
   bind_text_or_null (stmt, 8, chat_mid);
 
   rc = sqlite3_step(stmt);

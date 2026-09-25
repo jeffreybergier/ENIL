@@ -553,6 +553,34 @@ static void partial_sync_recovery(int newer) {
   cJSON_Delete(replacement);
 }
 
+static void replay_synced_messages(void) {
+  const char *ids[] = {"sent", "received", "new-reply", "new-send"};
+  const int outgoing[] = {1, 0, 0, 1};
+  const int unread[] = {1, 1, 2, 0};
+  int i, handled;
+  char event_data[512];
+  /* Full sync already fetched our send and the unread reply. */
+  assert(sqlite3_exec(db,
+    "INSERT INTO contacts_v2(mid,displayName) VALUES('upeer','Peer');"
+    "INSERT INTO message_boxes_v2(id,unreadCount) VALUES('upeer',1);"
+    "INSERT INTO messages_v2(id,chat_id,text,contentType) VALUES"
+    "('sent','upeer','hello',0),('received','upeer','reply',0)",
+    NULL, NULL, NULL) == SQLITE_OK);
+  assert(enil_session_bind_identity(session_path));
+  for (i = 0; i < 4; i++) {
+    snprintf(event_data, sizeof(event_data),
+      "{\"revision\":\"%d\",\"type\":%d,\"message\":{\"id\":\"%s\","
+      "\"from\":\"%s\",\"to\":\"%s\",\"toType\":0,\"createdTime\":\"%d\","
+      "\"contentType\":0,\"text\":\"hello\"}}",
+      21 + i, outgoing[i] ? 25 : 26, ids[i],
+      outgoing[i] ? "self" : "upeer", outgoing[i] ? "upeer" : "self", 100 + i);
+    assert(enil_sync_process_sse_event(db, "synthetic", "self", session_path,
+      "message", event_data, &handled) == SQLITE_OK && handled);
+    /* Replayed messages preserve sync's count; new arrivals/sends still change it. */
+    assert(enil_db_message_box_unread_count(db, "upeer") == unread[i]);
+  }
+}
+
 int main(int argc, char **argv) {
   enil_identity_t identity;
   cJSON *root;
@@ -572,7 +600,8 @@ int main(int argc, char **argv) {
   assert(enil_session_write(session_path, root));
   cJSON_Delete(root);
   if (argc == 4) {
-    if (!strcmp(argv[3], "idle-reset")) polling_failure_streak(0);
+    if (!strcmp(argv[3], "replay-synced")) replay_synced_messages();
+    else if (!strcmp(argv[3], "idle-reset")) polling_failure_streak(0);
     else if (!strncmp(argv[3], "chat-update-", 12)) chat_update_recovery(atoi(argv[3] + 12));
     else if (!strcmp(argv[3], "consecutive-failures")) polling_failure_streak(1);
     else if (!strncmp(argv[3], "partial-", 8) && strcmp(argv[3], "partial-boxes"))
