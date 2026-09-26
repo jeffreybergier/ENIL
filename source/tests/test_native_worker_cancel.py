@@ -24,9 +24,9 @@ class NativeWorkerCancelTests(unittest.TestCase):
         shared = REPO / "source/shared"
         flags = shlex.split(subprocess.check_output(
             ["pkg-config", "--cflags", "--libs", "libcjson", "libcurl", "openssl"], text=True))
-        sources = ["enil_native.c", "enil_thrift.c", "enil_identity.c", "enil_line.c",
+        sources = ["enil_native.c", "enil_thrift.c", "enil_identity.c", "enil_line.c", "enil_chrome_gateway.c",
                    "enil_http.c", "enil_b64.c", "enil_session.c", "enil_api_json.c",
-                   "enil_sse.c", "enil_worker.c", "enil_health.c"]
+                   "enil_sse.c", "enil_native_poll.c", "enil_worker.c", "enil_health.c"]
         subprocess.run([
             "cc", "-std=gnu99", "-Wall", "-Wextra", "-Werror", "-Wno-deprecated-declarations",
             "-ffunction-sections", "-fdata-sections", "-I" + str(shared),

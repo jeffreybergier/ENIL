@@ -92,9 +92,9 @@ class ClientIdentityTests(unittest.TestCase):
                 flags = shlex.split(subprocess.check_output(
                     ["pkg-config", "--cflags", "--libs", "libcjson", "libcurl", "openssl", "sqlite3"], text=True))
                 shared = REPO / "source/shared"
-                sources = ["enil_identity.c", "enil_session.c", "enil_api_json.c", "enil_line.c",
+                sources = ["enil_identity.c", "enil_session.c", "enil_api_json.c", "enil_line.c", "enil_chrome_gateway.c",
                            "enil_http.c", "enil_talkserv.c", "enil_db.c", "enil_api_call.c", "enil_qrlogin.c",
-                           "enil_native.c", "enil_thrift.c", "enil_native_login.c", "enil_obs.c", "enil_b64.c", "enil_crypto.c", "enil_sse.c"]
+                           "enil_native.c", "enil_thrift.c", "enil_native_login.c", "enil_obs.c", "enil_b64.c", "enil_crypto.c", "enil_sse.c", "enil_native_poll.c"]
                 binary = str(Path(temp) / "identity-test")
                 subprocess.run(["cc", "-std=gnu99", "-Wall", "-Wextra",
                                 "-Wno-deprecated-declarations", "-ffunction-sections", "-fdata-sections",

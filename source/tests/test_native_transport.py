@@ -25,9 +25,9 @@ class NativeTransportTests(unittest.TestCase):
             ['pkg-config', '--cflags', '--libs', 'libcjson', 'libcurl', 'openssl', 'sqlite3'], text=True))
         shared = REPO / 'source/shared'
         sources = [
-            'enil_native.c', 'enil_thrift.c', 'enil_identity.c', 'enil_line.c',
+            'enil_native.c', 'enil_thrift.c', 'enil_identity.c', 'enil_line.c', 'enil_chrome_gateway.c',
             'enil_http.c', 'enil_b64.c', 'enil_session.c', 'enil_login_store.c',
-            'enil_api_json.c', 'enil_sse.c', 'enil_talkserv.c', 'enil_api_call.c', 'enil_db.c',
+            'enil_api_json.c', 'enil_sse.c', 'enil_native_poll.c', 'enil_talkserv.c', 'enil_api_call.c', 'enil_db.c',
         ]
         subprocess.run([
             'cc', '-std=gnu99', '-Wall', '-Wextra', '-Werror',

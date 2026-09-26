@@ -25,7 +25,7 @@ class NativeWindowsProbeTests(unittest.TestCase):
                         "-ffunction-sections", "-fdata-sections", "-I" + str(shared),
                         str(REPO / "source/tests/native_windows_probe.c"),
                         *[str(shared / name) for name in ["enil_native_login.c", "enil_thrift.c", "enil_session.c",
-                          "enil_identity.c", "enil_http.c", "enil_b64.c", "enil_line.c"]],
+                          "enil_identity.c", "enil_http.c", "enil_b64.c", "enil_line.c", "enil_chrome_gateway.c"]],
                         "-Wl,--gc-sections", "-Wl,--wrap=curl_easy_perform", "-pthread",
                         *flags, "-o", cls.binary], check=True, timeout=60)
 

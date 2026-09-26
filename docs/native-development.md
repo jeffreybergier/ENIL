@@ -819,8 +819,12 @@ native Talk's optional fourth field is a byte session ID, not that timestamp.
 
 The Worker adds `/transport/legy/encode` and `/transport/legy/decode`. Deploy it
 before the native app. It performs crypto only; LINE requests remain in ENIL.
-`enil_sse.c` branches to native sync polling for Windows, then dispatches the same
-message/full-sync/partial-sync/error callbacks. Global and individual cursors are
+`enil_sse.c` owns the event-client lifecycle and routes `native-thrift` sessions
+to `enil_native_poll.c`; Chrome sessions stay on its SSE stream. Both deliver the
+same message/full-sync/partial-sync/error callbacks. `enil_line.c` similarly
+routes API calls to the Chrome signed-JSON implementation in
+`enil_chrome_gateway.c` or the native Compact Thrift implementation in
+`enil_native.c`. Global and individual cursors are
 saved only after successful handling. Event callbacks report persistence errors
 to the poller; message or cursor write failures retain the last saved revision
 and stop delivery of later operations in that response. Message inserts and
