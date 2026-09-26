@@ -435,6 +435,8 @@ static cJSON *fetch_chats_batch(const char *const *mids, int start, int end,
 
 /* ============================================================================
  * TalkService.getChats — fetches typed metadata for each chat mid in batches.
+ * An empty chats array is a successful lookup with no accessible matches.
+ * Failed or malformed batches must not masquerade as missing chats.
  * ==========================================================================*/
 int talk_get_chats(const char *access_token,
                    const char *const *chat_mids, int count,
@@ -451,25 +453,34 @@ int talk_get_chats(const char *access_token,
     cJSON *data = fetch_chats_batch(chat_mids, i, end, access_token);
     cJSON *chats_arr;
     int j, m;
-    if (!cJSON_IsObject(data)) { cJSON_Delete(data); continue; }
+    if (!cJSON_IsObject(data)) { cJSON_Delete(data); goto failed; }
     chats_arr = cJSON_GetObjectItem(data, "chats");
-    m = cJSON_IsArray(chats_arr) ? cJSON_GetArraySize(chats_arr) : 0;
+    if (!cJSON_IsArray(chats_arr)) { cJSON_Delete(data); goto failed; }
+    m = cJSON_GetArraySize(chats_arr);
     for (j = 0; j < m; j++) {
       cJSON *entry = cJSON_GetArrayItem(chats_arr, j);
       if (n == cap) {
         void *tmp = grow_array(arr, &cap, n, sizeof(*arr), 16);
-        if (!tmp) { cJSON_Delete(data); goto done; }
+        if (!tmp) { cJSON_Delete(data); goto failed; }
         arr = tmp;
       }
-      if (parse_chat_entry(entry, &arr[n]) == 0) n++;
+      if (parse_chat_entry(entry, &arr[n]) != 0) {
+        talk_chat_free(&arr[n]);
+        cJSON_Delete(data);
+        goto failed;
+      }
+      n++;
     }
     cJSON_Delete(data);
   }
 
-done:
   *out = arr; *out_count = n;
   ENIL_LOG("TalkService.getChats", "%d chats", n);
   return 0;
+failed:
+  for (i = 0; i < n; i++) talk_chat_free(&arr[i]);
+  free(arr);
+  return -1;
 }
 
 /* ============================================================================
@@ -538,7 +549,7 @@ int talk_get_message_boxes(const char *access_token,
                            talk_message_box_t **out, int *out_count) {
   talk_message_box_t *arr = NULL;
   char  *min_chat_id = NULL;
-  int    cap = 0, n = 0, has_next = 1;
+  int    cap = 0, n = 0, has_next = 1, failed = 0;
 
   if (!access_token || !out || !out_count) return -1;
   *out = NULL; *out_count = 0;
@@ -552,7 +563,7 @@ int talk_get_message_boxes(const char *access_token,
     params = build_message_boxes_body(min_chat_id);
     body   = cJSON_PrintUnformatted(params);
     cJSON_Delete(params);
-    if (!body) break;
+    if (!body) { failed = 1; break; }
 
     r = enil_line_post(
       "/api/talk/thrift/Talk/TalkService/getMessageBoxes",
@@ -560,22 +571,36 @@ int talk_get_message_boxes(const char *access_token,
     free(body);
     data = parse_ok(&r, "getMessageBoxes");
     enil_line_response_free(&r);
-    if (!data) break;
+    if (!data) { failed = 1; break; }
 
     boxes    = cJSON_GetObjectItem(data, "messageBoxes");
     has_next = cJSON_IsTrue(cJSON_GetObjectItem(data, "hasNext"));
+    if (!cJSON_IsArray(boxes)) {
+      cJSON_Delete(data);
+      failed = 1;
+      break;
+    }
     m        = cJSON_IsArray(boxes) ? cJSON_GetArraySize(boxes) : 0;
 
     for (j = 0; j < m; j++) {
       cJSON *entry = cJSON_GetArrayItem(boxes, j);
       if (n == cap) {
         void *tmp = grow_array(arr, &cap, n, sizeof(*arr), 32);
-        if (!tmp) { cJSON_Delete(data); has_next = 0; break; }
+        if (!tmp) { failed = 1; break; }
         arr = tmp;
       }
-      if (parse_message_box_entry(entry, &arr[n]) == 0) n++;
+      if (parse_message_box_entry(entry, &arr[n]) != 0) { failed = 1; break; }
+      n++;
     }
 
+    if (failed) { cJSON_Delete(data); break; }
+    /* A partial list must not masquerade as a complete current chat list. */
+    if (has_next && (m == 0 ||
+        (min_chat_id && !strcmp(min_chat_id, arr[n - 1].id)))) {
+      cJSON_Delete(data);
+      failed = 1;
+      break;
+    }
     free(min_chat_id);
     min_chat_id = NULL;
     if (has_next && m > 0) {
@@ -583,11 +608,19 @@ int talk_get_message_boxes(const char *access_token,
       last_id = cJSON_GetObjectItem(last, "id");
       if (cJSON_IsString(last_id) && last_id->valuestring)
         min_chat_id = strdup(last_id->valuestring);
-      if (!min_chat_id) has_next = 0;
+      if (!min_chat_id) failed = 1;
     }
     cJSON_Delete(data);
+    if (failed) break;
   }
   free(min_chat_id);
+
+  if (failed) {
+    int i;
+    for (i = 0; i < n; i++) talk_message_box_free(&arr[i]);
+    free(arr);
+    return -1;
+  }
 
   *out = arr; *out_count = n;
   ENIL_LOG("TalkService.getMessageBoxes", "%d boxes", n);
@@ -810,7 +843,8 @@ static cJSON *fetch_owned_product_list(const char *access_token, const char *sho
 
   if (!access_token || !shop) return NULL;
   snprintf(body, sizeof(body),
-           "[\"%s\",0,1000,{\"language\":\"en\",\"country\":\"JP\"}]", shop);
+           "[\"%s\",0,1000,{\"language\":\"%s\",\"country\":\"JP\"}]",
+           shop, enil_line_language());
 
   r = enil_line_post(path, body, access_token);
   if (r.status != 200) {

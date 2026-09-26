@@ -11,12 +11,14 @@ typedef struct {
   const char *data; /* raw JSON string, may be empty */
 } ENILSSEEvent;
 
-typedef void (*ENILSSEEventFn)(const ENILSSEEvent *ev, void *ctx);
+/* Return 1 once the event's changes are saved (including intentional no-ops),
+ * or 0 to retry from the last saved revision. */
+typedef int (*ENILSSEEventFn)(const ENILSSEEvent *ev, void *ctx);
 
 /* access_token/session_path are copied; local_rev seeds the localRev query
  * param. db (not owned — must outlive the client) is where advancing localRev
- * values are persisted; session_path now only feeds the lastPartialFullSyncs
- * query param. health is the owning account's health object (not owned/copied —
+ * values are persisted; session_path supplies the client identity and
+ * lastPartialFullSyncs query param. health is the owning account's health object (not owned/copied —
  * must outlive the client); the SSE thread binds it so its reconnect gate and
  * any LINE work it drives are scoped to that account. May be NULL. */
 ENILSSEClient *enil_sse_create(const char *access_token, long long local_rev,

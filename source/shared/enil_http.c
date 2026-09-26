@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <pthread.h>
 #include "enil_http.h"
+#include "enil_identity.h"
 #include "enil_cocoa_log.h"
 
 static char *s_cainfo = NULL;
@@ -92,6 +93,8 @@ char *enil_curl_get(const char *url) {
   if (!url) return NULL;
   curl = enil_curl_new(&buf);
   if (!curl) { ENIL_LOG("Http.get", "curl init failed: %s", url); return NULL; }
+  if (enil_identity_current())
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, enil_identity_current()->user_agent);
   curl_easy_setopt(curl, CURLOPT_URL, url);
   curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
   rc = curl_easy_perform(curl);
@@ -133,6 +136,8 @@ int enil_curl_download_file(const char *url, const char *dest_path) {
     fclose(f);
     return -1;
   }
+  if (enil_identity_current())
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, enil_identity_current()->user_agent);
   curl_easy_setopt(curl, CURLOPT_URL, url);
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, NULL); /* default fwrite */
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, f);

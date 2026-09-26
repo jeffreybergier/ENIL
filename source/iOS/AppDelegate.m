@@ -48,18 +48,16 @@
   return YES;
 }
 
-// Local notifications for incoming messages. Ask permission only when it has
-// never been decided (NotDetermined) so we don't re-prompt an Authorized or
-// Denied user on every launch. Then observe SSE events app-wide (object:nil
-// covers every account); the account decides what's notifiable, we only post.
+// Register the desired notification types each launch. iOS shows its permission
+// prompt only for the first request and remembers the answer. On iOS 8, empty
+// current settings cannot distinguish an unasked user from a denied request,
+// so they must not gate registration. The wrapper is a no-op before iOS 8.
 - (void)setupNotifications
 {
   XPUserNotificationCenter *center = [XPUserNotificationCenter defaultCenter];
   XPNotificationAuthStatus status = [center authorizationStatus];
   ENILLog(@"AppDelegate.setupNotifications", @"authorization status: %d", (int)status);
-  if (status == XPNotificationAuthStatusNotDetermined) {
-    [center requestAuthorization];
-  }
+  [center requestAuthorization];
   [[NSNotificationCenter defaultCenter] addObserver:self
                                            selector:@selector(sseEvent:)
                                                name:ENILSSEEventNotification

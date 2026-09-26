@@ -707,7 +707,7 @@
   NSFileManager *fm = [NSFileManager defaultManager];
   NSString *stagingSession =
     [stagingDir stringByAppendingPathComponent:@"session.json"];
-  NSString *midStr, *target, *targetSession, *expectedMid;
+  NSString *midStr, *target, *expectedMid;
 
   midStr = [ENILAccount validatedMidForSessionAtPath:stagingSession];
   if (!midStr) {
@@ -758,18 +758,12 @@
   }
 
   target        = [[self enilRootPath] stringByAppendingPathComponent:midStr];
-  targetSession = [target stringByAppendingPathComponent:@"session.json"];
 
   /* Drop the live engine for this mid (its token is now dead) before the
      file changes underneath it. */
   [self tearDownChatIfOpenForPath:target];
 
-  [fm XP_createDirectoryAtPath:target
-   withIntermediateDirectories:YES
-                    attributes:nil
-                         error:NULL];
-  [fm XP_removeItemAtPath:targetSession error:NULL]; /* ok if absent */
-  if (![fm XP_copyItemAtPath:stagingSession toPath:targetSession error:NULL]) {
+  if (![ENILAccount activateQRLoginAtPath:stagingDir accountPath:target]) {
     ENILLog(@"AppDelegate.qrLoginDidFinish", @"FAILED to place session.json at %@ "
           @"— staging kept for recovery: %@", target, stagingDir);
     return NO;

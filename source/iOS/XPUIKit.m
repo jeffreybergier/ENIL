@@ -5,6 +5,60 @@
 
 #import "XPUIKit.h"
 #import "XPFoundation.h"   /* ENILLog */
+#import "UIViewController+ENILModal.h"
+
+@implementation UIDevice (XPUIKit)
+
+- (BOOL)XP_isOperatingSystemAtLeastMajorVersion:(NSInteger)majorVersion
+{
+  NSString *systemVersion = [self systemVersion];
+  return ([systemVersion integerValue] >= majorVersion) ? YES : NO;
+}
+
+@end
+
+@implementation UIViewController (XPUIKit)
+
+- (void)XP_showAlertWithTitle:(NSString *)title
+                      message:(NSString *)message
+                 dismissTitle:(NSString *)dismissTitle
+{
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunguarded-availability"
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+  if (NSClassFromString(@"UIAlertController")) {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+      message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:dismissTitle
+      style:UIAlertActionStyleCancel handler:nil]];
+    [self enil_presentModalViewController:alert];
+  } else {
+    UIAlertView *alert = [[UIAlertView alloc] initWithTitle:title message:message
+      delegate:nil cancelButtonTitle:dismissTitle otherButtonTitles:nil];
+    [alert show];
+  }
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+}
+
+- (void)XP_layoutBelowBars
+{
+  if (![self respondsToSelector:@selector(setEdgesForExtendedLayout:)]) return;
+  /* The runtime guard keeps this iOS-7-only setter off the iOS 6 path. */
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunguarded-availability"
+#endif
+  self.edgesForExtendedLayout = UIRectEdgeNone;
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+}
+
+@end
 
 static id XPUIKitInvokeObjectGetter(id target, SEL selector)
 {
@@ -184,7 +238,10 @@ static id XPUIKitCreateNotificationSettings(Class settingsClass,
     if (![app respondsToSelector:reg]) return;            /* iOS < 8 */
     Class cls = NSClassFromString(@"UIUserNotificationSettings");
     id settings = XPUIKitCreateNotificationSettings(cls, (NSUInteger)7);
-    if (settings != nil) XPUIKitInvokeObjectSetter(app, reg, settings);
+    if (settings != nil) {
+      ENILLog(@"XPUserNotificationCenter.requestAuthorization", @"registering alerts, sounds and badges");
+      XPUIKitInvokeObjectSetter(app, reg, settings);
+    }
   } @catch (NSException *e) {
     ENILLog(@"XPUserNotificationCenter.requestAuthorization", @"failed: %@", e);
   }
@@ -239,11 +296,19 @@ static id XPUIKitCreateNotificationSettings(Class settingsClass,
  * UNUserNotificationCenter -setBadgeCount: supersedes it. */
 - (void)setBadgeCount:(int)count;
 {
+  UIApplication *app = [UIApplication sharedApplication];
+  SEL current = @selector(currentUserNotificationSettings);
+  if ([app respondsToSelector:current]) {
+    id settings = XPUIKitInvokeObjectGetter(app, current);
+    /* Badge=1. Skip writes while permission is pending or badges are disabled,
+     * even if the user allowed alerts or sounds. Pre-iOS-8 needs no permission. */
+    if (!(XPUIKitInvokeUnsignedIntegerGetter(settings, @selector(types)) & (NSUInteger)1)) return;
+  }
 #ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #endif
-  [UIApplication sharedApplication].applicationIconBadgeNumber = (count > 0) ? count : 0;
+  app.applicationIconBadgeNumber = (count > 0) ? count : 0;
 #ifdef __clang__
 #pragma clang diagnostic pop
 #endif

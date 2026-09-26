@@ -118,7 +118,9 @@ static NSMutableDictionary *chatRowFromSummary(NSDictionary *chat) {
   if (avatar) {
     NSGraphicsContext *ctx = [NSGraphicsContext currentContext];
     [ctx saveGraphicsState];
-    [[NSBezierPath bezierPathWithOvalInRect:avatarRect] setClip];
+    /* Preserve AppKit's visible/dirty clip when rounding the avatar. Replacing
+     * it lets partially visible rows paint over the toolbars on Tiger/Leopard. */
+    [[NSBezierPath bezierPathWithOvalInRect:avatarRect] addClip];
     [avatar XP_drawInRect:avatarRect respectingFlippedView:[view isFlipped]];
     [ctx restoreGraphicsState];
   } else {

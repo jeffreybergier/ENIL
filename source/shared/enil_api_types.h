@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include "cJSON.h"
+#include "enil_identity.h"
 
 /* ============================================================================
  * Generic field descriptor — lets ObjC wrap a C struct as an NSDictionary
@@ -695,8 +696,11 @@ extern const size_t       sticon_row_fields_count;
  * map, login meta) stay as cJSON — owned by the session_t and freed in
  * enil_session_free. */
 typedef struct {
+  enil_identity_t clientIdentity;
+  cJSON *snapshot; /* complete original session, including native recovery data */
   char      *accessToken;
   char      *refreshToken;
+  char      *refreshJournalId; /* last refresh committed with its tokens */
   char      *mid;
   char      *displayName;
   char      *regionCode;

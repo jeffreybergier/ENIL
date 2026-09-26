@@ -20,6 +20,8 @@ int    talk_get_contact_by_mid(const char     *access_token,
 int    talk_get_all_chat_mids(const char                          *access_token,
                               const talk_get_all_chat_mids_req_t  *req,
                               talk_get_all_chat_mids_t            *out);
+/* Returns 0 for a complete successful lookup (including an empty result),
+ * -1 for failed/malformed batches, leaving *out NULL and *out_count zero. */
 int    talk_get_chats(const char *access_token,
                       const char *const *chat_mids, int count,
                       talk_chat_t **out, int *out_count);

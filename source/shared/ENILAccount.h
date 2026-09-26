@@ -62,6 +62,7 @@ typedef enum {
   int                  sseEnabled_;   /* desired SSE state; persisted in session.json */
   enil_health_t       *health_;       /* per-account LINE failure gate */
   ENILSyncState        syncState_;
+  BOOL                 syncRunning_; /* main-thread gate; only this account's completion clears it */
   int                  miniSyncDepth_;
   NSMutableDictionary *pendingSends_; /* real_message_id -> temp_id; guarded by @synchronized */
   NSMutableDictionary *pendingSendOrderByChat_; /* chat_id -> NSMutableArray<temp_id> */
@@ -79,6 +80,11 @@ typedef enum {
  * bad input / encode failure. *outSize (may be NULL) = modules per side,
  * excluding the quiet zone (a render-side concern). */
 + (NSData *)qrModulesForString:(NSString *)string size:(int *)outSize;
+/* Prepare fresh staging before requesting a QR. profile is chrome/desktopwin/android
+ * for Add Account. Reauthentication copies the existing MID's exact identity. */
++ (BOOL)prepareQRLoginAtPath:(NSString *)accountDir
+               clientProfile:(NSString *)profile
+         reauthenticatingMid:(NSString *)mid;
 /* Runs the blocking LINE QR-login handshake for the account at `accountDir`,
  * writing <accountDir>/session.json on success. This BLOCKS on long-polls for
  * tens of seconds — call it on a background thread, never the main runloop.
@@ -88,6 +94,11 @@ typedef enum {
 + (BOOL)runQRLoginAtPath:(NSString *)accountDir
                 observer:(id <ENILQRLoginObserver>)observer
               cancelFlag:(const volatile int *)cancelFlag;
+/* Local recovery choices; restart retains the failed attempt for diagnosis. */
++ (BOOL)canRestartQRLoginAtPath:(NSString *)accountDir;
++ (BOOL)restartQRLoginAtPath:(NSString *)accountDir;
+/* Caller stops the account engine before atomically installing the session. */
++ (BOOL)activateQRLoginAtPath:(NSString *)stagingDir accountPath:(NSString *)accountDir;
 /* Process-global network-health gate (see enil_health.h). These are sticky
  * failure flags shared across every account and network funnel, so they are
  * class-level — they read no per-instance state. */

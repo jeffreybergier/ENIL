@@ -13,6 +13,9 @@
 #include "enil_session.h"
 #include "enil_worker.h"
 #include "enil_qrlogin.h"
+#include "enil_native_login.h"
+#include "enil_login_store.h"
+#include "enil_health.h"
 #include "enil_cocoa_log.h"
 
 #define SVC    "/api/talk/thrift/LoginQrCode"
@@ -397,10 +400,10 @@ static int unwrap_and_store(cJSON *s, cJSON *meta, const char *fn) {
   /* e2eeKeys: worker returns exactly [{keyId,exportedKey}] — store as-is. */
   set_obj(s, "e2eeKeys", cJSON_Duplicate(u.keys, 1));
   set_num(s, "e2eeLatestKeyId", (double)atoi(kid));
-  store_login_meta(s, meta);
   set_str(s, "e2eeLoginPublicKey", pub);
   set_str(s, "e2eeVersion", jstr_def(meta, "e2eeVersion", "1"));
   set_str(s, "e2eeHashKeyChain", jstr_def(meta, "hashKeyChain", ""));
+  store_login_meta(s, meta);
   set_obj(s, "workerRestoreState", cJSON_Parse(u.worker_restore_state));
   cJSON_DeleteItemFromObject(s, "e2eeKeyCaptureError"); /* recovered/clean */
   enil_worker_unwrap_keychain_free(&u);
@@ -477,13 +480,16 @@ static int finalize_login(cJSON *s) {
   cJSON *data, *issue;
   const char *access, *refresh, *cert;
   int captured = 0;
+  const enil_identity_t *identity = enil_identity_current();
+
+  if (!identity) return 0;
 
   {
     char *body;
     cJSON *req = cJSON_CreateArray();
     cJSON *o = cJSON_CreateObject();
-    cJSON_AddStringToObject(o, "systemName", "CHROMEOS");
-    cJSON_AddStringToObject(o, "modelName", "CHROME");
+    cJSON_AddStringToObject(o, "systemName", identity->system_name);
+    cJSON_AddStringToObject(o, "modelName", identity->model_name);
     cJSON_AddBoolToObject(o, "autoLoginIsRequired", 0);
     cJSON_AddStringToObject(o, "authSessionId", jstr_def(s, "authSessionId", ""));
     cJSON_AddItemToArray(req, o);
@@ -568,6 +574,47 @@ static int post_login_handshake(cJSON *s, const char *token) {
 
 /* ---- public entry point -------------------------------------------------- */
 
+int enil_qrlogin_run_user_attempt(const char *staging_dir,
+                                  const enil_qrlogin_callbacks_t *cb) {
+  char path[1024];
+  char *durable = NULL;
+  int native, ok = 0;
+  if (!staging_dir || cancelled(cb) ||
+      !session_path_of(staging_dir, path, sizeof(path)))
+    return 0;
+  if (!enil_session_bind_identity(path)) {
+    emit_status(cb, "Invalid client identity");
+    return 0;
+  }
+  native = !strcmp(enil_identity_current()->transport, "native-thrift");
+  if (native) {
+    durable = enil_login_store_select(staging_dir);
+    if (!durable) {
+      emit_status(cb, "Could not save login recovery");
+      goto done;
+    }
+  }
+  if (cancelled(cb))
+    goto done;
+  /* Only an explicit login action reopens the gate. A failure during this
+   * attempt sets it again, including before the follow-up key recovery. */
+  enil_health_clear_failure(ENIL_ERR_WORKER);
+  if (native) {
+    if (!enil_native_login_run(durable, cb) || cancelled(cb)) goto done;
+    if (!enil_qrlogin_recover_e2ee(durable)) {
+      emit_status(cb, "Could not recover message encryption keys. Retry the saved login.");
+      goto done;
+    }
+    ok = enil_login_store_stage(staging_dir, durable);
+    if (!ok) emit_status(cb, "Could not save login recovery");
+  } else
+    ok = enil_qrlogin_run(staging_dir, cb);
+done:
+  free(durable);
+  enil_identity_bind(NULL);
+  return ok;
+}
+
 int enil_qrlogin_run(const char *account_dir,
                      const enil_qrlogin_callbacks_t *cb) {
   char path[1024];
@@ -575,6 +622,7 @@ int enil_qrlogin_run(const char *account_dir,
   char *qr_url = NULL;
   const char *cb_url, *pubkey, *token;
   int rc = 0;
+  enil_identity_t identity;
 
   if (!account_dir) { LOG("run", "NULL account_dir"); return 0; }
   if (!session_path_of(account_dir, path, sizeof(path))) {
@@ -582,12 +630,38 @@ int enil_qrlogin_run(const char *account_dir,
     return 0;
   }
 
+  if (!enil_identity_bind(NULL)) return 0;
   s = enil_session_read(path);
-  if (!s) s = cJSON_CreateObject();
-  if (!s) return 0;
+  /* Selection must have been persisted by prepare_login. Never start as
+   * Chrome because the selected Windows staging file became unreadable. */
+  if (!cJSON_IsObject(s) || !cJSON_GetObjectItemCaseSensitive(s, "clientIdentity")) {
+    cJSON_Delete(s);
+    emit_status(cb, "Invalid client identity");
+    return 0;
+  }
+  if (!enil_identity_parse(cJSON_GetObjectItemCaseSensitive(s, "clientIdentity"),
+                           &identity) || !enil_identity_bind(&identity)) {
+    emit_status(cb, "Invalid client identity");
+    cJSON_Delete(s);
+    return 0;
+  }
+  if (!strcmp(identity.transport, "native-thrift")) {
+    cJSON_Delete(s);
+    rc = enil_native_login_run(account_dir, cb);
+    if (rc) rc = enil_qrlogin_recover_e2ee(account_dir);
+    enil_identity_bind(NULL);
+    return rc;
+  }
+  /* Persist the exact identity before the first LINE request. */
+  if (cancelled(cb) || !enil_session_write(path, s)) {
+    cJSON_Delete(s);
+    enil_identity_bind(NULL);
+    return 0;
+  }
 
   if (jstr(s, "accessToken")) {
     LOG("run", "already logged in");
+    enil_identity_bind(NULL);
     cJSON_Delete(s);
     return 1;
   }
@@ -600,7 +674,7 @@ int enil_qrlogin_run(const char *account_dir,
   emit_status(cb, "creating QR session");
   if (!ensure_qr_session(s)) goto done;
   if (!ensure_e2ee_key(s))   goto done;
-  enil_session_write(path, s); /* persist QR + key state before the long poll */
+  if (!enil_session_write(path, s)) goto done; /* QR + key state before poll */
 
   cb_url = jstr(s, "callbackUrl");
   pubkey = jstr(s, "e2eePublicKey");
@@ -630,7 +704,7 @@ int enil_qrlogin_run(const char *account_dir,
   emit_status(cb, "running post-login handshake");
   if (!post_login_handshake(s, token)) goto done;
 
-  enil_session_write(path, s);
+  if (!enil_session_write(path, s)) goto done;
   emit_status(cb, "logged in");
   LOG("run", "logged in successfully");
   rc = 1;
@@ -638,6 +712,7 @@ int enil_qrlogin_run(const char *account_dir,
 done:
   if (!rc) enil_session_write(path, s); /* keep resumable QR/key state */
   free(qr_url);
+  enil_identity_bind(NULL);
   cJSON_Delete(s);
   return rc;
 }
@@ -677,6 +752,11 @@ int enil_qrlogin_recover_e2ee(const char *account_dir) {
 
   meta = cJSON_GetObjectItem(s, "e2eeLoginMetaData");
   if (!meta) {
+    cJSON *native = cJSON_GetObjectItem(s, "nativeLoginResult");
+    meta = cJSON_GetObjectItem(native, "10");
+    if (meta) { meta = cJSON_Duplicate(meta, 1); cJSON_AddItemToObject(s, "e2eeLoginMetaData", meta); }
+  }
+  if (!meta) {
     LOG("recover_e2ee",
         "no e2eeKeys and no persisted metaData — full re-login required");
     cJSON_Delete(s);
@@ -688,9 +768,8 @@ int enil_qrlogin_recover_e2ee(const char *account_dir) {
   if (unwrap_and_store(s, meta, "recover_e2ee")) {
     /* Same teardown the success login path does once E2EE is captured. */
     clear_qr_state(s, 0);
-    enil_session_write(path, s);
-    LOG("recover_e2ee", "offline recovery succeeded - session.json updated");
-    rc = 1;
+    rc = enil_session_write(path, s);
+    LOG("recover_e2ee", rc ? "offline recovery saved" : "could not save recovered keys");
   } else {
     LOG("recover_e2ee", "offline recovery failed - full re-login required");
   }

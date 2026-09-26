@@ -6,6 +6,7 @@
 #import "SyncMiniBarView.h"
 #import <QuartzCore/QuartzCore.h>   /* CAGradientLayer / CABasicAnimation ping shimmer */
 #import "ENILSyncStatusQueue.h"
+#import "XPUIKit.h"
 
 /* The NSTextAlignment *type* is iOS 6.0+, so we never name it; the value is
  * ABI-stable at 1 and the .textAlignment setter converts the NSInteger
@@ -70,16 +71,11 @@ static const CGFloat kInkLiftFactorBar    = 0.8f;  /* label stacked above the pr
   _label.backgroundColor = [UIColor clearColor];
   _label.textAlignment = kENILTextAlignCenter;
   _label.font = [UIFont boldSystemFontOfSize:kBarFontPt];
-  _label.textColor = [UIColor whiteColor];
-  /* Engraved look matching the title-bar text: a subtle 1px dark shadow offset
-   * upward, so the white text reads as pressed into the toolbar chrome. */
-  _label.shadowColor = [UIColor colorWithWhite:0.0f alpha:0.5f];
-  _label.shadowOffset = CGSizeMake(0.0f, -1.0f);
   [self addSubview:_label];
 
   /* A light-gray copy of the label, painted on top and revealed only under the
-   * moving gradient mask — the visible ping shimmer. Gray (not white) so it
-   * reads against the white base text. Hidden between sweeps. */
+   * moving gradient mask — the visible ping shimmer. Gray contrasts with both
+   * the legacy white and modern dark base text. Hidden between sweeps. */
   _shineLabel = [[UILabel alloc] initWithFrame:CGRectZero];
   _shineLabel.backgroundColor = [UIColor clearColor];
   _shineLabel.textAlignment = kENILTextAlignCenter;
@@ -96,6 +92,24 @@ static const CGFloat kInkLiftFactorBar    = 0.8f;  /* label stacked above the pr
     initWithProgressViewStyle:UIProgressViewStyleDefault];
   _progress.hidden = YES;
   [self addSubview:_progress];
+  [self refreshAppearance];
+}
+
+/* Match StrappyPreferencesStatusToolbarView: flat dark text on iOS 7+,
+ * engraved white text on the older toolbar chrome. Reapply on every render
+ * so leaving an error restores the correct color for the running OS. */
+- (void)refreshAppearance
+{
+  BOOL usesIOS7Appearance = [[UIDevice currentDevice]
+    XP_isOperatingSystemAtLeastMajorVersion:7];
+  UIColor *textColor = usesIOS7Appearance
+    ? [UIColor darkTextColor] : [UIColor whiteColor];
+  self.label.textColor = [self.queue displayIsError]
+    ? [SyncMiniBarView errorColor] : textColor;
+  self.label.shadowColor = usesIOS7Appearance
+    ? nil : [UIColor colorWithWhite:0.0f alpha:0.5f];
+  self.label.shadowOffset = usesIOS7Appearance
+    ? CGSizeZero : CGSizeMake(0.0f, -1.0f);
 }
 
 /* Pull the queue's display snapshot onto the widgets — the iOS analogue of the
@@ -111,8 +125,7 @@ static const CGFloat kInkLiftFactorBar    = 0.8f;  /* label stacked above the pr
    * in-flight phase labels. */
   self.label.font = [UIFont boldSystemFontOfSize:
     active ? kBarFontPt : (kBarFontPt + kSteadyFontBump)];
-  self.label.textColor = [self.queue displayIsError]
-    ? [SyncMiniBarView errorColor] : [UIColor whiteColor];
+  [self refreshAppearance];
 
   self.progress.hidden = !active;
   if (active) {
@@ -204,7 +217,7 @@ static const CGFloat kInkLiftFactorBar    = 0.8f;  /* label stacked above the pr
  * (the queue gates it to idle-live with nothing transient up). A clear->white->
  * clear gradient masks the gray shine copy; animating the mask's `locations`
  * slides the opaque band across, so a soft gray highlight travels over the
- * white text. Runs on the render server, so it survives chat-list scrolling. */
+ * base text. Runs on the render server, so it survives chat-list scrolling. */
 - (void)playShimmer
 {
   UILabel *base = self.label;

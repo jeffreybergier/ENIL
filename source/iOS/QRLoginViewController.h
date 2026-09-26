@@ -21,13 +21,14 @@
 - (void)qrLoginViewControllerDidFail:(QRLoginViewController *)c;
 @end
 
-/* Presents the QR/PIN login UI and drives the QR-login handshake via
+/* Animated client, QR-scan and phone-verification pages, with native navigation-bar
+ * Back/Next controls and saved-login recovery. Drives the QR-login handshake via
  * +[ENILAccount runQRLoginAtPath:observer:cancelFlag:] on a background thread.
  * The blocking long-polls never touch the main runloop; ENILAccount marshals
  * the observer callbacks back to the main thread. Cancel (the nav-bar button)
  * flips the cancel flag, aborting the in-flight long-poll within ~1s. The iOS
  * peer of source/macOS/QRLoginWindowController. */
-@interface QRLoginViewController : UIViewController
+@interface QRLoginViewController : UITableViewController
 - (instancetype)initWithAccountDir:(NSString *)accountDir
                        expectedMid:(NSString *)expectedMid
                           delegate:(id <QRLoginViewControllerDelegate>)delegate;

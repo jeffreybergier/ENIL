@@ -1,6 +1,6 @@
 /* ============================================================================
- * Server-Sent Events client for /api/operation/receive — push delivery loop
- * that dispatches LINE operations and advances localRev.
+ * Event client lifecycle and Chrome SSE stream. Native operation polling
+ * lives in enil_native_poll.c and uses the same event callback and cursor.
  * ==========================================================================*/
 
 #include <stdio.h>
@@ -10,7 +10,8 @@
 #include <unistd.h>
 #include <time.h>
 #include <curl/curl.h>
-#include "enil_sse.h"
+#include "enil_sse_internal.h"
+#include "enil_line.h"
 #include "enil_http.h"
 #include "enil_session.h"
 #include "enil_db.h"
@@ -19,13 +20,7 @@
 #include "enil_health.h"
 #include "cJSON.h"
 
-#define SSE_HOST    "https://line-chrome-gw.line-apps.com"
-#define SSE_PATH    "/api/operation/receive"
-#define CHROME_VER  "3.7.2"
-#define LINE_ORIGIN "chrome-extension://ophjlpahpchlmihnnnihgmmeilfjmjjc"
-#define LINE_UA     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " \
-                    "AppleWebKit/537.36 (KHTML, like Gecko) " \
-                    "Chrome/145.0.0.0 Safari/537.36"
+#define SSE_PATH "/api/operation/receive"
 
 /* Idle watchdog. The gateway sends a `ping` event every ~20s, so any healthy
  * stream produces bytes well inside this window. If no byte arrives for this
@@ -36,35 +31,64 @@
  * down a connection that is merely between pings. */
 #define SSE_IDLE_TIMEOUT 45
 
-#define LOG(fn, msg) enil_log("Sse." fn, "%s", msg)
+/* Match the native Thrift reply bound. Grow on demand so ordinary pings do
+ * not reserve megabytes, and never silently truncate a message for parsing. */
+#define SSE_MAX_EVENT_SIZE (8U * 1024U * 1024U)
+#define SSE_MAX_LINE_SIZE (SSE_MAX_EVENT_SIZE + 7U) /* data: space, plus CR in CRLF */
 
-struct ENILSSEClient {
-  char          *access_token;
-  char          *session_path;  /* only for the lastPartialFullSyncs query param */
-  sqlite3       *db;            /* localRev persistence target; not owned */
-  enil_health_t *health;        /* owning account's health; not owned */
-  long long      local_rev;
-  volatile int   stop;
-  volatile int   reconnect; /* set inside write_cb (or enil_sse_kick) to trigger immediate reconnect */
-  volatile time_t last_activity; /* time() of last byte received; 0 before first connect */
-  ENILSSEEventFn fn;
-  void          *ctx;
-  pthread_t      thread;
-  int            thread_started;
-};
+#define LOG(fn, msg) enil_log("Sse." fn, "%s", msg)
 
 /* SSE parse state — lives on the stack of sse_thread */
 typedef struct {
   ENILSSEClient *client;
-  char           line_buf[2048];
-  size_t         line_len;
+  char          *line_buf;
+  size_t         line_len, line_cap;
   char           event_type[64];
-  char           data_buf[65536];
+  char          *data_buf;
+  size_t         data_len, data_cap;
+  int            has_data;
 } ENILSSEState;
 
 /* ------------------------------------------------------------------ */
 
-static long long parse_event_revision(const char *type, const char *data)
+static int append_sse(ENILSSEState *s, char **buf, size_t *len, size_t *cap,
+                       const char *text, size_t count, size_t limit)
+{
+  size_t needed, grown;
+  char *next;
+  const char *error = "SSE event exceeds the supported size.";
+  if (count > limit - *len) goto failed;
+  needed = *len + count + 1;
+  if (needed > *cap) {
+    grown = *cap ? *cap : 256;
+    while (grown < needed) grown *= 2;
+    if (grown > limit + 1) grown = limit + 1;
+    next = (char *)realloc(*buf, grown);
+    if (!next) {
+      error = "Cannot allocate SSE event buffer.";
+      goto failed;
+    }
+    *buf = next;
+    *cap = grown;
+  }
+  memcpy(*buf + *len, text, count);
+  *len += count;
+  (*buf)[*len] = '\0';
+  return 1;
+failed:
+  s->client->delivery_failed = 1;
+  /* Keep the cursor, but stop reconnecting to the same oversized event. */
+  enil_health_set_failure(ENIL_ERR_LINE, error);
+  return 0;
+}
+
+static void free_sse_state(ENILSSEState *s)
+{
+  free(s->line_buf);
+  free(s->data_buf);
+}
+
+long long enil_sse_event_revision(const char *type, const char *data)
 {
   cJSON *root, *item;
   long long rev;
@@ -79,14 +103,18 @@ static long long parse_event_revision(const char *type, const char *data)
   return rev > 0 ? rev : 0;
 }
 
-static void save_local_rev(ENILSSEClient *c, long long rev)
+int enil_sse_save_local_rev(ENILSSEClient *c, long long rev)
 {
-  if (!c || rev <= c->local_rev) return;
+  if (!c) return 0;
+  if (rev <= c->local_rev) return 1;
+  if (c->db && enil_db_set_local_rev(c->db, rev) != SQLITE_OK) {
+    LOG("localRev", "could not save event revision; retaining previous cursor");
+    return 0;
+  }
   ENIL_LOG("Sse.localRev",
            "updating localRev %lld -> %lld", c->local_rev, rev);
   c->local_rev = rev;
-  if (c->db)
-    enil_db_set_local_rev(c->db, rev);
+  return 1;
 }
 
 static void dispatch_event(ENILSSEState *s)
@@ -95,27 +123,35 @@ static void dispatch_event(ENILSSEState *s)
   ENILSSEClient *c = s->client;
   long long      rev;
 
-  if (!s->event_type[0] && !s->data_buf[0]) return;
+  if (!s->event_type[0] && !s->has_data) return;
 
   ev.type = s->event_type[0] ? s->event_type : "message";
-  ev.data = s->data_buf;
+  ev.data = s->data_buf ? s->data_buf : "";
 
-  ENIL_LOG("Sse.dispatchEvent", "%s (%d bytes)", ev.type, (int)strlen(s->data_buf));
+  ENIL_LOG("Sse.dispatchEvent", "%s (%lu bytes)", ev.type, (unsigned long)s->data_len);
 
-  if (c->fn) c->fn(&ev, c->ctx);
+  if ((c->fn && !c->fn(&ev, c->ctx)) || enil_health_any_failed() || c->stop) {
+    c->delivery_failed = 1;
+    return;
+  }
 
-  rev = parse_event_revision(ev.type, s->data_buf);
-  save_local_rev(c, rev);
+  if (strcmp(ev.type, "fullSync") == 0) {
+    /* The account schedules a data sync. Keep the old cursor until that
+     * succeeds, including when the app exits or the sync fails. */
+    c->stop = 1;
+  } else {
+    rev = enil_sse_event_revision(ev.type, ev.data);
+    if (!enil_sse_save_local_rev(c, rev)) c->delivery_failed = 1;
+  }
 
-  if (strcmp(ev.type, "fullSync") == 0 ||
-      strcmp(ev.type, "reconnect") == 0) {
-    /* fullSync: server has advanced localRev for us; reconnect with new value.
-     * reconnect: server is asking us to drop and re-establish the stream. */
+  if (strcmp(ev.type, "reconnect") == 0) {
     c->reconnect = 1;
   }
 
   s->event_type[0] = '\0';
-  s->data_buf[0]   = '\0';
+  if (s->data_buf) s->data_buf[0] = '\0';
+  s->data_len = 0;
+  s->has_data = 0;
 }
 
 static void process_line(ENILSSEState *s)
@@ -129,14 +165,23 @@ static void process_line(ENILSSEState *s)
 
   if (strncmp(s->line_buf, "event:", 6) == 0) {
     val = s->line_buf + 6;
-    while (*val == ' ') val++;
-    strncpy(s->event_type, val, sizeof(s->event_type) - 1);
-    s->event_type[sizeof(s->event_type) - 1] = '\0';
+    if (*val == ' ') val++;
+    if (strlen(val) >= sizeof(s->event_type)) {
+      s->client->delivery_failed = 1;
+      enil_health_set_failure(ENIL_ERR_LINE, "SSE event type exceeds the supported size.");
+      return;
+    }
+    strcpy(s->event_type, val);
   } else if (strncmp(s->line_buf, "data:", 5) == 0) {
     val = s->line_buf + 5;
-    while (*val == ' ') val++;
-    strncat(s->data_buf, val,
-            sizeof(s->data_buf) - strlen(s->data_buf) - 1);
+    if (*val == ' ') val++;
+    /* SSE joins consecutive data fields with a newline, including empty
+     * fields. Preserve whitespace within JSON instead of concatenating it. */
+    if (s->has_data && !append_sse(s, &s->data_buf, &s->data_len, &s->data_cap,
+                                   "\n", 1, SSE_MAX_EVENT_SIZE)) return;
+    if (!append_sse(s, &s->data_buf, &s->data_len, &s->data_cap,
+                    val, strlen(val), SSE_MAX_EVENT_SIZE)) return;
+    s->has_data = 1;
   }
   /* ignore id: and comment lines */
 }
@@ -157,11 +202,13 @@ static size_t write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
     if (c == '\n') {
       if (s->line_len > 0 && s->line_buf[s->line_len - 1] == '\r')
         s->line_len--;
-      s->line_buf[s->line_len] = '\0';
+      if (s->line_buf) s->line_buf[s->line_len] = '\0';
       process_line(s);
       s->line_len = 0;
-    } else if (s->line_len < sizeof(s->line_buf) - 1) {
-      s->line_buf[s->line_len++] = c;
+      if (s->client->stop || s->client->reconnect || s->client->delivery_failed) return 0;
+    } else if (!append_sse(s, &s->line_buf, &s->line_len, &s->line_cap,
+                            &c, 1, SSE_MAX_LINE_SIZE)) {
+      return 0;
     }
   }
 
@@ -209,10 +256,22 @@ static void *sse_thread(void *arg)
   ENILSSEState       state;
   size_t             n;
   CURLcode           rc;
+  enil_identity_t identity;
+  char application_header[192], version_header[64];
 
   /* Bind this account's health so the reconnect gate below and any LINE work
    * the event callback drives are scoped to this account, not the process. */
   enil_health_bind(c->health);
+  if (!enil_session_bind_identity(c->session_path)) {
+    enil_health_set_failure(ENIL_ERR_LINE, "Cannot load client identity");
+    return NULL;
+  }
+  identity = *enil_identity_current();
+  if (!strcmp(identity.transport, "native-thrift")) { enil_native_poll(c); return NULL; }
+  snprintf(application_header, sizeof(application_header), "X-Line-Application: %s",
+           identity.application);
+  snprintf(version_header, sizeof(version_header), "X-Line-Chrome-Version: %s",
+           identity.gateway_version);
 
   while (!c->stop) {
     /* Top-of-loop health gate. If a previous event handler (or any other
@@ -250,7 +309,7 @@ static void *sse_thread(void *arg)
                                          partials ? partials : "{}", 0);
       snprintf(url, sizeof(url),
                "%s%s?version=%s&localRev=%lld&lastPartialFullSyncs=%s",
-               SSE_HOST, SSE_PATH, CHROME_VER, c->local_rev,
+               ENIL_LINE_GATEWAY, SSE_PATH, identity.gateway_version, c->local_rev,
                encoded ? encoded : "%7B%7D");
       if (encoded) curl_free(encoded);
       free(partials);
@@ -269,10 +328,11 @@ static void *sse_thread(void *arg)
     hdrs = curl_slist_append(NULL, "Accept: text/event-stream");
     hdrs = curl_slist_append(hdrs,  "Cache-Control: no-cache");
     hdrs = curl_slist_append(hdrs,  "Pragma: no-cache");
-    hdrs = curl_slist_append(hdrs,  "X-Line-Chrome-Version: " CHROME_VER);
-    hdrs = curl_slist_append(hdrs,  "X-LAL: en_US");
-    hdrs = curl_slist_append(hdrs,  "Origin: " LINE_ORIGIN);
-    hdrs = curl_slist_append(hdrs,  "User-Agent: " LINE_UA);
+    hdrs = curl_slist_append(hdrs, version_header);
+    hdrs = curl_slist_append(hdrs, application_header);
+    hdrs = enil_line_language_headers(hdrs);
+    hdrs = curl_slist_append(hdrs,  "Origin: " ENIL_LINE_ORIGIN);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, identity.user_agent);
     if (access_hdr) hdrs = curl_slist_append(hdrs, access_hdr);
     if (cookie_hdr) hdrs = curl_slist_append(hdrs, cookie_hdr);
 
@@ -298,7 +358,9 @@ static void *sse_thread(void *arg)
 
     ENIL_LOG("Sse.thread", "connecting localRev=%lld", c->local_rev);
 
+    c->delivery_failed = 0;
     rc = curl_easy_perform(curl);
+    free_sse_state(&state);
 
     {
       long http_code = 0;
@@ -396,6 +458,7 @@ void enil_sse_kick(ENILSSEClient *c)
 {
   if (!c) return;
   c->reconnect = 1;
+  c->interrupt = 1;
 }
 
 /* ============================================================================
@@ -405,6 +468,7 @@ void enil_sse_free(ENILSSEClient *c)
 {
   if (!c) return;
   c->stop = 1;
+  c->interrupt = 1;
   if (c->thread_started) pthread_join(c->thread, NULL);
   free(c->access_token);
   free(c->session_path);

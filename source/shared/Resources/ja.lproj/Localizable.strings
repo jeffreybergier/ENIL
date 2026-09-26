@@ -89,6 +89,14 @@
 "You signed in as \"%@\", not \"%@\". \"%@\" will be left signed out. Add \"%@\" as a separate account instead?" = "「%2$@」ではなく「%1$@」としてサインインしました。「%3$@」はログアウトされたままになります。代わりに「%4$@」を別のアカウントとして追加しますか?";
 
 /* --- QR login window --- */
+"PIN Code" = "PINコード";
+"Recovery" = "復旧";
+"Verify on your phone" = "スマートフォンで認証";
+"Enter this code in LINE on your phone." = "スマートフォンのLINEにこのコードを入力してください。";
+"Waiting for confirmation…" = "認証を待っています…";
+"Next" = "次へ";
+"Back" = "戻る";
+"Stopping login…" = "ログインを停止中…";
 "Starting…"                               = "開始しています…";
 "Scan with LINE on your phone"            = "スマートフォンの LINE で読み取ってください";
 "Couldn't finish adding the account"      = "アカウントの追加を完了できませんでした";
@@ -162,6 +170,8 @@
 "Message boxes fetch failed"              = "メッセージボックスの取得に失敗しました";
 "Message boxes write failed"              = "メッセージボックスの書き込みに失敗しました";
 "Could not enable SSE"                    = "SSE を有効にできませんでした";
+"Could not load pending sync requests"    = "未完了の同期リクエストを読み込めませんでした";
+"Could not save partial sync completion"  = "部分同期の完了状態を保存できませんでした";
 
 /* --- C-side transient send/SSE statuses (from ENILAccount.m) --- */
 "Sending message"                         = "メッセージを送信中";
@@ -192,3 +202,39 @@
 "Link Off"                                = "接続オフ";
 "Sticker"                                 = "スタンプ";
 "New message"                             = "新着メッセージ";
+
+/* QR client identity selection */
+"Web (Chrome)" = "ウェブ (Chrome)";
+"Desktop (Windows)" = "デスクトップ (Windows)";
+"Tablet (Android)" = "タブレット (Android)";
+"Choose a client identity" = "クライアントの種類を選択";
+"Could not save client identity" = "クライアント情報を保存できませんでした";
+"Windows login test" = "Windowsログインテスト";
+"Windows session saved. Check LINE's logged-in devices on your phone." = "Windowsセッションを保存しました。スマートフォンのLINEでログイン中の端末を確認してください。";
+"Preparing login key" = "ログインの鍵を準備中";
+"Creating QR session" = "QRコードを作成中";
+"Enter the PIN in LINE on your phone" = "スマートフォンのLINEに認証番号を入力してください";
+"Completing login" = "ログインを完了中";
+"Login succeeded. Session saved." = "LINEへのログインが完了しました。メッセージ暗号化を準備中…";
+"Login session already saved. No new login requested." = "保存済みのLINEログイン情報を使って処理を再開中…";
+"Login stopped. Session state saved; see log for details." = "ログインを停止しました。状態は保存済みです。詳細はログをご確認ください。";
+
+"Windows desktop" = "Windows デスクトップ";
+
+/* Native login recovery (macOS and iOS) */
+"Sign-in needs recovery" = "ログインの設定を完了できませんでした";
+"Retry saved login" = "再試行して続ける";
+"Start new QR" = "新しいQRでログイン";
+"Could not save login recovery" = "ログインの進行状況を保存できませんでした。空き容量を確認して、再試行してください。";
+
+/* Login sections and actions */
+"Could not recover message encryption keys. Retry the saved login." = "LINEへのログインは成功しましたが、メッセージ暗号化の準備に失敗しました。「再試行して続ける」を選んでください。";
+"Client" = "クライアント";
+"QR Code" = "QRコード";
+"Start Login" = "ログイン開始";
+"Restart Login" = "新しいQRコードでログイン";
+"Retry resumes the saved login. Restart creates a new QR code." = "まず「再試行して続ける」を選んでください。保存済みの進行状況から再開します。「新しいQRコードでログイン」は最初からやり直すため、QRコードの読み取りが再度必要です。";
+
+/* macOS login sections */
+"Login" = "ログイン";
+"This account's saved client identity will be used." = "このアカウントに保存されたクライアント情報を使用します。";

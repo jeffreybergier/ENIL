@@ -1,6 +1,7 @@
 /* ============================================================================
- * LINE auth & request plumbing — tokenRefresh, X-Line-Access/X-Hmac headers,
- * and the low-level ENILLineRequest/Response transport used by TalkService.
+ * Shared LINE request routing, token refresh, and media/message operations.
+ * Transport-specific HTTP requests live in enil_chrome_gateway.c and
+ * enil_native.c.
  * ==========================================================================*/
 
 #include <stdio.h>
@@ -8,11 +9,16 @@
 #include <string.h>
 #include <ctype.h>
 #include <time.h>
+#include <unistd.h>
+#include <errno.h>
+#include <pthread.h>
 #include "cJSON.h"
 #include "enil_b64.h"
 #include "enil_http.h"
 #include "enil_worker.h"
 #include "enil_line.h"
+#include "enil_native.h"
+#include "enil_chrome_gateway.h"
 #include "enil_session.h"
 #include "enil_obs.h"
 #include "enil_api_json.h"
@@ -21,39 +27,30 @@
 #include "enil_cocoa_log.h"
 #include "enil_health.h"
 
-#define LINE_GW    "https://line-chrome-gw.line-apps.com"
-#define CHROME_VER "3.7.2"
-#define LINE_ORIGIN "chrome-extension://ophjlpahpchlmihnnnihgmmeilfjmjjc"
-#define LINE_UA    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " \
-                   "AppleWebKit/537.36 (KHTML, like Gecko) " \
-                   "Chrome/145.0.0.0 Safari/537.36"
-#define X_LINE_APP "CHROMEOS\t3.7.2\tChrome_OS"
-
 /* Thin wrapper: routes fixed-string call sites through NSLog with a
  * "Line.<fn>" tag. Formatted sites should call ENIL_LOG directly. */
 #define LOG(fn, msg) enil_log("Line." fn, "%s", msg)
 
-/* Pre-formatted language headers — written once by enil_line_set_language()
- * from AppDelegate at launch, read by every request. Defaults match the
- * original hard-coded values so the C side still works if no one ever calls
- * the setter (e.g. from a non-Cocoa client). */
-static char accept_lang_hdr[64] = "Accept-Language: en-US";
-static char x_lal_hdr[32]       = "X-LAL: en_US";
+/* Set before network threads start; all transports share these values. */
+static const char *line_language = "en";
+static const char *accept_lang_hdr = "Accept-Language: en-US";
+static const char *x_lal_hdr = "X-LAL: en_US";
 
-void enil_line_set_language(const char *accept_lang, const char *x_lal) {
-  if (accept_lang && *accept_lang)
-    snprintf(accept_lang_hdr, sizeof(accept_lang_hdr),
-             "Accept-Language: %s", accept_lang);
-  if (x_lal && *x_lal)
-    snprintf(x_lal_hdr, sizeof(x_lal_hdr), "X-LAL: %s", x_lal);
+void enil_line_set_language(const char *language) {
+  int japanese;
+  if (!language || !*language) return;
+  japanese = strcmp(language, "ja") == 0;
+  line_language = japanese ? "ja" : "en";
+  accept_lang_hdr = japanese ? "Accept-Language: ja-JP" : "Accept-Language: en-US";
+  x_lal_hdr = japanese ? "X-LAL: ja_JP" : "X-LAL: en_US";
   ENIL_LOG("Line.set_language", "%s | %s", accept_lang_hdr, x_lal_hdr);
 }
 
-static char *make_header(const char *name, const char *value) {
-  size_t len = strlen(name) + 2 + strlen(value) + 1;
-  char *h = malloc(len);
-  if (h) snprintf(h, len, "%s: %s", name, value);
-  return h;
+const char *enil_line_language(void) { return line_language; }
+
+struct curl_slist *enil_line_language_headers(struct curl_slist *headers) {
+  headers = curl_slist_append(headers, accept_lang_hdr);
+  return curl_slist_append(headers, x_lal_hdr);
 }
 
 /* ============================================================================
@@ -66,30 +63,13 @@ void enil_line_response_free(ENILLineResponse *r) {
   r->status = 0;
 }
 
-/* ============================================================================
- * Signed POST against the LINE chrome gateway — requests an HMAC from the
- * worker, attaches X-Line-Access/X-Hmac, and returns the raw response.
- * ==========================================================================*/
+/* Route each account's request using the transport saved with its identity. */
 ENILLineResponse enil_line_post(
   const char *path,
   const char *body,
   const char *access_token)
 {
   return enil_line_post_ex(path, body, access_token, NULL, 0, 0, NULL);
-}
-
-/* libcurl transfer-info callback: returning non-zero aborts the transfer with
- * CURLE_ABORTED_BY_CALLBACK. libcurl invokes this roughly once per second even
- * while a long-poll sits idle waiting on the server, so a cancel flipped by the
- * UI (closed QR window) tears the connection down within ~1s. clientp is the
- * caller's cancel flag. */
-static int cancel_xferinfo(void *clientp,
-                           curl_off_t dltotal, curl_off_t dlnow,
-                           curl_off_t ultotal, curl_off_t ulnow)
-{
-  const volatile int *cancel = (const volatile int *)clientp;
-  (void)dltotal; (void)dlnow; (void)ultotal; (void)ulnow;
-  return (cancel && *cancel) ? 1 : 0;
 }
 
 ENILLineResponse enil_line_post_ex(
@@ -102,156 +82,21 @@ ENILLineResponse enil_line_post_ex(
   const volatile int *cancel)
 {
   ENILLineResponse result = {0, NULL};
-  char url[512];
-  char *hmac, *hmac_hdr, *access_hdr, *cookie_hdr = NULL;
-  ENILBuf buf = {NULL, 0};
-  CURL *curl;
-  struct curl_slist *hdrs = NULL;
-  CURLcode rc;
-  int i;
+  const enil_identity_t *identity = enil_identity_current();
 
+  if (!identity) { LOG("post", "no client identity bound"); return result; }
   if (!path || !body || !access_token) { LOG("post", "NULL argument"); return result; }
-
-  /* Sticky-failure gate, scoped to the calling thread's bound account (see
-   * enil_health.h). Once this account's LINE gateway has rejected us (auth,
-   * transport, or 5xx), its subsequent LINE calls short-circuit — without
-   * affecting any other account. A thread with no account bound (the QR-login
-   * flow) is inert here: is_failed returns 0, so the call proceeds, and the
-   * failure branches below likewise no-op. The gate clears when the user
-   * re-logs in via QR (which rebuilds the account's health). This protects
-   * against pinging LINE for hours with broken auth. */
   if (enil_health_is_failed(ENIL_ERR_LINE)) {
-    ENIL_LOG("Line.post",
-             "skipping %s — LINE is in failed state", path);
+    ENIL_LOG("Line.post", "skipping %s — LINE is in failed state", path);
     return result;
   }
-
-  hmac = enil_worker_sign(path, body, access_token);
-  if (!hmac) { LOG("post", "sign failed"); return result; }
-
-  snprintf(url, sizeof(url), "%s%s", LINE_GW, path);
-  curl = enil_curl_new(&buf);
-  if (!curl) { free(hmac); LOG("post", "enil_curl_new failed"); return result; }
-
-  hdrs = curl_slist_append(hdrs, "Accept: application/json, text/plain, */*");
-  hdrs = curl_slist_append(hdrs, accept_lang_hdr);
-  hdrs = curl_slist_append(hdrs, "Content-Type: application/json");
-  hdrs = curl_slist_append(hdrs, "X-Line-Chrome-Version: " CHROME_VER);
-  hdrs = curl_slist_append(hdrs, "X-Line-Application: " X_LINE_APP);
-  hdrs = curl_slist_append(hdrs, x_lal_hdr);
-  hdrs = curl_slist_append(hdrs, "Origin: " LINE_ORIGIN);
-  hdrs = curl_slist_append(hdrs, "User-Agent: " LINE_UA);
-
-  hmac_hdr   = make_header("X-Hmac", hmac);
-  access_hdr = access_token[0] ? make_header("X-Line-Access", access_token) : NULL;
-  free(hmac);
-
-  if (access_token[0]) {
-    size_t n = strlen("Cookie: lct=") + strlen(access_token) + 1;
-    cookie_hdr = (char *)malloc(n);
-    if (cookie_hdr) snprintf(cookie_hdr, n, "Cookie: lct=%s", access_token);
-  }
-
-  if (hmac_hdr)   hdrs = curl_slist_append(hdrs, hmac_hdr);
-  if (access_hdr) hdrs = curl_slist_append(hdrs, access_hdr);
-  if (cookie_hdr) hdrs = curl_slist_append(hdrs, cookie_hdr);
-
-  for (i = 0; i < extra_header_count; i++) {
-    if (extra_headers && extra_headers[i])
-      hdrs = curl_slist_append(hdrs, extra_headers[i]);
-  }
-
-  curl_easy_setopt(curl, CURLOPT_URL, url);
-  curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
-  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
-  if (timeout_ms > 0)
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, timeout_ms);
-  if (cancel) {
-    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
-    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, cancel_xferinfo);
-    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, (void *)cancel);
-  }
-
-  ENIL_LOG("Line.post", "POST %s (%lu bytes)",
-           path, (unsigned long)strlen(body));
-
-  rc = curl_easy_perform(curl);
-  if (rc == CURLE_OK)
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &result.status);
-  curl_slist_free_all(hdrs);
-  curl_easy_cleanup(curl);
-  free(hmac_hdr);
-  free(access_hdr);
-  free(cookie_hdr);
-
-  /* User-initiated cancel (e.g. the QR login window was closed mid long-poll):
-   * the transfer-info callback returned non-zero. This is not a fault, so it
-   * must NOT trip the sticky LINE health gate — doing so would short-circuit
-   * the next login attempt's first call. Return an empty result quietly. */
-  if (rc == CURLE_ABORTED_BY_CALLBACK) {
-    ENIL_LOG("Line.post", "aborted by cancel: %s", path);
-    enil_buf_free(&buf);
-    return result;
-  }
-
-  if (rc != CURLE_OK) {
-    char msg[160];
-    ENIL_LOG("Line.post", "transport error %s: %s",
-             curl_easy_strerror(rc), path);
-    snprintf(msg, sizeof(msg),
-             "cannot reach LINE (%s). Restart the app or sign in again to retry.",
-             curl_easy_strerror(rc));
-    enil_health_set_failure(ENIL_ERR_LINE, msg);
-    enil_buf_free(&buf);
-    return result;
-  }
-
-  ENIL_LOG("Line.post", "-> HTTP %ld: %s", result.status, path);
-
-  /* Categorise the HTTP outcome. Account/auth and gateway failures set the
-   * sticky LINE gate — the account-lockout risk from repeated bad-auth pings
-   * outweighs the UX cost of a manual reconnect. The one message-local
-   * exception (an unavailable historical E2EE public key) is handled below.
-   * The /api/auth/tokenRefresh call uses the same plumbing, so an expired
-   * refresh-token shows up here as a 401 too. */
-  if (result.status == 401 || result.status == 403) {
-    enil_health_set_failure(ENIL_ERR_LINE,
-      "rejected access token. Sign in again via QR to recover.");
-    free(buf.data);
-    return result;
-  }
-  if (result.status >= 500 && result.status < 600) {
-    char msg[128];
-    snprintf(msg, sizeof(msg),
-             "server error (HTTP %ld). Restart the app or sign in again to retry.",
-             result.status);
-    enil_health_set_failure(ENIL_ERR_LINE, msg);
-    free(buf.data);
-    return result;
-  }
-  /* A public-key lookup can legitimately fail for one historical message
-   * after its peer has rotated that key out of LINE's lookup service.  This is
-   * message-local, not evidence that the account or gateway is unhealthy.
-   * Return the 400 to the decrypt caller (which leaves that row failed and
-   * advances to the next message) without poisoning later LINE requests. */
-  if (result.status == 400 &&
-      strcmp(path,
-             "/api/talk/thrift/Talk/TalkService/getE2EEPublicKey") == 0) {
-    ENIL_LOG("Line.post",
-             "public key unavailable (HTTP 400); continuing sync");
-    free(buf.data);
-    return result;
-  }
-  if (result.status != 0 && (result.status < 200 || result.status >= 300)) {
-    char msg[128];
-    snprintf(msg, sizeof(msg),
-             "unexpected HTTP %ld. Restart the app or sign in again to retry.",
-             result.status);
-    enil_health_set_failure(ENIL_ERR_LINE, msg);
-    free(buf.data);
-    return result;
-  }
-  result.body = buf.data;
+  if (strcmp(identity->transport, "native-thrift") == 0)
+    return enil_native_post(path, body, access_token, timeout_ms, cancel);
+  if (strcmp(identity->transport, "chrome-gateway") == 0)
+    return enil_chrome_gateway_post(identity, path, body, access_token,
+                                    extra_headers, extra_header_count,
+                                    timeout_ms, cancel);
+  LOG("post", "unsupported client transport");
   return result;
 }
 
@@ -281,96 +126,188 @@ static void session_apply_token_v3(session_t *session, const talk_token_v3_issue
 }
 
 /* Serialize a session_t and write it back to session_path. */
-static void session_persist(const char *path, const session_t *session) {
-  cJSON *root = enil_session_to_json(session);
-  if (!root) return;
-  enil_session_write(path, root);
-  cJSON_Delete(root);
+static int session_persist(const char *path, const session_t *session) {
+  return enil_session_save(path, session);
 }
 
 /* ============================================================================
  * Refresh the LINE access token via /api/auth/tokenRefresh and persist the
  * new credentials back to session.json. Returns malloc'd new access token.
  * ==========================================================================*/
-char *enil_line_token_refresh(const char *session_path, int *out_line_code) {
+static const char *refresh_string(cJSON *root, const char *name) {
+  cJSON *item = cJSON_GetObjectItemCaseSensitive(root, name);
+  return cJSON_IsString(item) ? item->valuestring : NULL;
+}
+
+/* -1: keep the journal and stop, 0: make a fresh request, 1: replay the reply,
+ * 2: the reply was already committed. Login IDs reject superseded journals;
+ * refresh IDs also detect a committed reply after inline access-token rotation. */
+static int recover_refresh(const char *path, const session_t *session, char **body,
+                           char **refresh_id) {
+  cJSON *pending = NULL, *reply = NULL, *tokens;
+  const char *owner, *current, *previous, *raw, *id, *issued_access, *issued_refresh;
+  int result = -1;
+  if (access(path, F_OK) != 0)
+    return errno == ENOENT ? 0 : -1;
+  pending = enil_session_read(path);
+  owner = refresh_string(pending, "loginId");
+  current = refresh_string(session->snapshot, "loginId");
+  if (owner && current && strcmp(owner, current)) {
+    result = enil_session_retire_file(path) ? 0 : -1;
+    goto done;
+  }
+  id = refresh_string(pending, "refreshId");
+  if (id && session->refreshJournalId && !strcmp(id, session->refreshJournalId)) {
+    result = enil_session_retire_file(path) ? 2 : -1;
+    goto done;
+  }
+  previous = refresh_string(pending, "previousRefreshToken");
+  raw = refresh_string(pending, "responseBody");
+  if (!previous || !raw)
+    goto done;
+  if (!strcmp(previous, session->refreshToken)) {
+    *body = strdup(raw);
+    *refresh_id = id ? strdup(id) : enil_session_new_id();
+    if (*body && *refresh_id)
+      result = 1;
+    goto done;
+  }
+  /* Legacy journals have no generation/commit ID. A changed refresh token
+   * proves the old request must not be replayed. Preserve the evidence and
+   * distinguish an already committed response from a superseded login. */
+  reply = cJSON_Parse(raw);
+  tokens = cJSON_GetObjectItemCaseSensitive(reply, "data");
+  if (cJSON_HasObjectItem(tokens, "tokenV3IssueResult"))
+    tokens = cJSON_GetObjectItemCaseSensitive(tokens, "tokenV3IssueResult");
+  issued_access = refresh_string(tokens, "accessToken");
+  issued_refresh = refresh_string(tokens, "refreshToken");
+  if (enil_session_retire_file(path))
+    result = ((issued_access && !strcmp(issued_access, session->accessToken)) ||
+              (issued_refresh && !strcmp(issued_refresh, session->refreshToken)))
+                 ? 2
+                 : 0;
+done:
+  cJSON_Delete(reply);
+  cJSON_Delete(pending);
+  return result;
+}
+
+static char *token_refresh_locked(const char *session_path, int *out_line_code) {
   session_t session;
-  cJSON *req, *resp_root, *data, *issued;
-  char *body, *new_access = NULL;
-  ENILLineResponse resp;
+  cJSON *req = NULL, *root = NULL, *issued, *pending = NULL;
+  char *body = NULL, *new_access = NULL, *login_id = NULL, *refresh_id = NULL;
+  ENILLineResponse resp = {0, NULL};
   talk_token_v3_issue_result_t parsed;
-
-  if (out_line_code) *out_line_code = 0;
-  if (!session_path) { LOG("token_refresh", "NULL session_path"); return NULL; }
-
+  char pending_path[4096];
+  int recovery, parsed_ok = 0;
   memset(&session, 0, sizeof(session));
-  if (!enil_session_load(session_path, &session)) {
-    LOG("token_refresh", "cannot read session.json");
+  memset(&parsed, 0, sizeof(parsed));
+  if (out_line_code)
+    *out_line_code = 0;
+  if (!session_path)
     return NULL;
+  login_id = enil_session_login_id(session_path);
+  if (!login_id || !enil_session_bind_identity(session_path) ||
+      !enil_session_load(session_path, &session) || !session.accessToken ||
+      !session.refreshToken)
+    goto done;
+  /* Activation can run between the ID migration and the load. Associate the
+   * journal with the same snapshot as the credentials used for this request. */
+  {
+    const char *loaded_id = refresh_string(session.snapshot, "loginId");
+    if (!loaded_id || !*loaded_id)
+      goto done;
+    free(login_id);
+    login_id = strdup(loaded_id);
+    if (!login_id)
+      goto done;
   }
-  if (!session.accessToken || !session.refreshToken) {
-    LOG("token_refresh", "missing accessToken or refreshToken");
-    enil_session_free(&session);
-    return NULL;
+  if (snprintf(pending_path, sizeof(pending_path), "%s.refresh-pending", session_path) >=
+      (int)sizeof(pending_path))
+    goto done;
+
+  recovery = recover_refresh(pending_path, &session, &resp.body, &refresh_id);
+  if (recovery < 0)
+    goto done;
+  if (recovery == 2) {
+    new_access = strdup(session.accessToken);
+    goto done;
   }
-
-  req = cJSON_CreateObject();
-  cJSON_AddStringToObject(req, "refreshToken", session.refreshToken);
-  body = cJSON_PrintUnformatted(req);
-  cJSON_Delete(req);
-  if (!body) { enil_session_free(&session); return NULL; }
-
-  resp = enil_line_post("/api/auth/tokenRefresh", body, session.accessToken);
-  free(body);
-
-  if (!resp.body || resp.status != 200) {
-    ENIL_LOG("Line.token_refresh",
-             "LINE API request failed: HTTP %ld body: %.512s",
-             resp.status, resp.body ? resp.body : "(null)");
-    if (out_line_code && resp.body) {
-      cJSON *err = cJSON_Parse(resp.body);
-      if (err) {
-        cJSON *code = cJSON_GetObjectItemCaseSensitive(err, "code");
-        if (cJSON_IsNumber(code)) *out_line_code = code->valueint;
-        cJSON_Delete(err);
+  if (!recovery) {
+    refresh_id = enil_session_new_id();
+    req = cJSON_CreateObject();
+    if (!refresh_id || !req || !cJSON_AddStringToObject(req, "refreshToken", session.refreshToken))
+      goto done;
+    body = cJSON_PrintUnformatted(req);
+    if (!body)
+      goto done;
+    resp = enil_line_post("/api/auth/tokenRefresh", body, session.accessToken);
+    if (!resp.body || resp.status != 200) {
+      ENIL_LOG("Line.token_refresh", "LINE API request failed: HTTP %ld", resp.status);
+      root = resp.body ? cJSON_Parse(resp.body) : NULL;
+      if (out_line_code) {
+        cJSON *code = cJSON_GetObjectItemCaseSensitive(root, "code");
+        if (cJSON_IsNumber(code))
+          *out_line_code = code->valueint;
       }
+      goto done;
     }
-    enil_line_response_free(&resp);
-    enil_session_free(&session);
-    return NULL;
   }
-
-  resp_root = cJSON_Parse(resp.body);
-  enil_line_response_free(&resp);
-  if (!resp_root) {
-    LOG("token_refresh", "invalid JSON response");
-    enil_session_free(&session);
-    return NULL;
+  /* Upgrade legacy recovery journals too: the refresh ID is durable before
+   * committing it with the tokens, so a subsequent replay is idempotent. */
+  pending = cJSON_CreateObject();
+  if (!pending || !cJSON_AddStringToObject(pending, "loginId", login_id) ||
+      !cJSON_AddStringToObject(pending, "refreshId", refresh_id) ||
+      !cJSON_AddStringToObject(pending, "previousRefreshToken", session.refreshToken) ||
+      !cJSON_AddStringToObject(pending, "responseBody", resp.body) ||
+      !enil_session_write(pending_path, pending)) {
+    enil_health_set_failure(ENIL_ERR_LINE,
+                            "Cannot save rotated credentials; stop before another refresh.");
+    goto done;
   }
-
-  data   = cJSON_GetObjectItem(resp_root, "data");
-  issued = cJSON_GetObjectItem(data, "tokenV3IssueResult");
-  if (!issued) issued = data;
-
+  root = cJSON_Parse(resp.body);
+  issued = cJSON_GetObjectItemCaseSensitive(root, "data");
+  if (cJSON_HasObjectItem(issued, "tokenV3IssueResult"))
+    issued = cJSON_GetObjectItemCaseSensitive(issued, "tokenV3IssueResult");
   if (talk_token_v3_issue_result_parse(issued, &parsed) < 0) {
-    char *dump = cJSON_PrintUnformatted(resp_root);
-    ENIL_LOG("Line.token_refresh",
-             "response missing accessToken: %.512s",
-             dump ? dump : "(null)");
-    free(dump);
-    cJSON_Delete(resp_root);
-    enil_session_free(&session);
-    return NULL;
+    LOG("token_refresh", "response missing accessToken; saved reply retained");
+    goto done;
   }
-
-  new_access = strdup(parsed.accessToken);
+  parsed_ok = 1;
   session_apply_token_v3(&session, &parsed);
-  session_persist(session_path, &session);
-
-  talk_token_v3_issue_result_free(&parsed);
-  cJSON_Delete(resp_root);
-  enil_session_free(&session);
+  free(session.refreshJournalId);
+  session.refreshJournalId = strdup(refresh_id);
+  if (!session.refreshJournalId || !session_persist(session_path, &session)) {
+    enil_health_set_failure(ENIL_ERR_LINE,
+                            "Could not persist rotated credentials; recover the saved session.");
+    goto done;
+  }
+  new_access = strdup(parsed.accessToken);
+  if (new_access)
+    unlink(pending_path);
   LOG("token_refresh", "access token refreshed");
+done:
+  if (parsed_ok)
+    talk_token_v3_issue_result_free(&parsed);
+  enil_session_free(&session);
+  enil_line_response_free(&resp);
+  cJSON_Delete(req);
+  cJSON_Delete(root);
+  cJSON_Delete(pending);
+  free(body);
+  free(login_id);
+  free(refresh_id);
   return new_access;
+}
+
+/* Serialize refreshes while preserving ordinary API concurrency. */
+char *enil_line_token_refresh(const char *session_path, int *out_line_code) {
+  static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+  char *token;
+  pthread_mutex_lock(&mutex);
+  token = token_refresh_locked(session_path, out_line_code);
+  pthread_mutex_unlock(&mutex);
+  return token;
 }
 
 /* ============================================================================
@@ -389,6 +326,8 @@ char *enil_line_acquire_obs_token(const char *session_path,
     LOG("acquire_obs_token", "NULL argument");
     return NULL;
   }
+
+  if (!enil_session_continue_identity(session_path)) return NULL;
 
   /* Body is a JSON array [scope]; scope 2 = OBS general */
   resp = enil_line_post(

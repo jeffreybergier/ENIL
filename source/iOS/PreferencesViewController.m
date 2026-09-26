@@ -8,6 +8,7 @@
 #import "UIViewController+ENILModal.h"
 #import "ENILKeychain.h"
 #import "XPFoundation.h"
+#import "XPUIKit.h"
 #import <AltivecCore/AltivecCore.h>
 #include <stdlib.h>
 
@@ -352,10 +353,16 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
   /* Persist any just-typed credentials first, so the gate below reads them
    * (the QR flow needs the worker before its first call). */
-  if (![self commitWorkerCredentialsIfNeeded]) return;
-  if (![[ENILKeychain sharedKeychain] hasCredentials]) {
+  BOOL ready = [self commitWorkerCredentialsIfNeeded];
+  if (ready && ![[ENILKeychain sharedKeychain] hasCredentials]) {
     [self setStatusMessageAndReload:NSLocalizedString(
       @"Set the Worker URL and shared secret first.", nil)];
+    ready = NO;
+  }
+  if (!ready) {
+    [self XP_showAlertWithTitle:NSLocalizedString(@"Couldn't Add Account", nil)
+                       message:self.statusMessage
+                  dismissTitle:NSLocalizedString(@"OK", nil)];
     return;
   }
   [self.coordinator presentAddAccountFromViewController:self];

@@ -10,6 +10,22 @@
  * -Wunguarded-availability against the iOS 8.4 SDK / 4.3 deployment floor, the
  * same way XPAppKit's XP_* category methods hide -Wdeprecated-declarations. */
 
+@interface UIViewController (XPUIKit)
+/* Keep fixed-frame content below navigation/status bars on iOS 7+.
+ * Earlier iOS versions already lay out this way; leave them unchanged. */
+- (void)XP_layoutBelowBars;
+/* Informational alert; dismissing it leaves the presenting controller open.
+ * Uses UIAlertController on iOS 8+ and UIAlertView on earlier versions. */
+- (void)XP_showAlertWithTitle:(NSString *)title
+                      message:(NSString *)message
+                 dismissTitle:(NSString *)dismissTitle;
+@end
+
+@interface UIDevice (XPUIKit)
+/* Runtime version check using APIs available at the iOS 4.3 floor. */
+- (BOOL)XP_isOperatingSystemAtLeastMajorVersion:(NSInteger)majorVersion;
+@end
+
 @interface UIColor (XPUIKit)
 /* The shared chat-surface background: RGB(220, 226, 236), a soft blue-grey.
  * Used behind the (now transparent) message and sticker-picker web views so the
@@ -76,14 +92,16 @@ typedef enum {
 
 @interface XPUserNotificationCenter : NSObject
 + (XPUserNotificationCenter *)defaultCenter;
+/* Call each launch; iOS prompts on the first request and remembers the answer. */
 - (void)requestAuthorization;
+/* On iOS 8+, empty settings include both unrequested and denied permission;
+ * this status must not be used to decide whether to register at launch. */
 - (XPNotificationAuthStatus)authorizationStatus;
 - (void)postNotificationWithTitle:(NSString *)title body:(NSString *)body;
 /* Set the app-icon badge to `count` (0 clears it). Separate from the
  * notification post: on iOS the badge is an app-level property
  * (-[UIApplication applicationIconBadgeNumber]), not something the
  * UILocalNotification has to carry — and the clear-on-foreground path needs it
- * with no notification in hand anyway. Available since iOS 2.0, so no floor
- * guard is needed. */
+ * with no notification in hand anyway. On iOS 8+ writes require badge permission. */
 - (void)setBadgeCount:(int)count;
 @end

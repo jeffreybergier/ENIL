@@ -20,14 +20,16 @@ typedef enum {
 } ENIL_SYNC_PHASE;
 
 /* Progress is reported via enil_progress_post() → ENILSyncStatusNotification. */
-void enil_sync_all(sqlite3    *db,
+/* Returns 1 only after the data sync and revision commit succeed. */
+int enil_sync_all(sqlite3    *db,
                    const char *access_token,
                    const char *my_mid,
                    const char *session_path);
 
 /* out_handled (nullable): set to 1 if the dispatcher acted on the op,
  * 0 if it fell through to the unhandled default. Only meaningful for
- * "message" events. */
+ * "message" events. Returns SQLITE_OK on success, otherwise a SQLite error;
+ * callers must preserve the event cursor on failure. */
 int enil_sync_process_sse_event(sqlite3    *db,
                                 const char *access_token,
                                 const char *my_mid,

@@ -20,7 +20,6 @@
 #include "enil_cocoa_log.h"
 
 #define OBS_BASE      "https://obs.line-apps.com"
-#define X_LINE_APP    "CHROMEOS\t3.7.2\tChrome_OS"
 /* Thin wrapper: routes fixed-string call sites through NSLog with a
  * "Obs.<fn>" tag. Formatted sites should call ENIL_LOG directly. */
 #define LOG(fn, msg)  enil_log("Obs." fn, "%s", msg)
@@ -113,7 +112,9 @@ static int obs_get(const char *label, const char *url,
   static const int kBackoff[] = { 5, 10, 30, 60 };
   const int kRetries = (int)(sizeof(kBackoff) / sizeof(kBackoff[0]));
   int attempt;
+  const enil_identity_t *identity = enil_identity_current();
 
+  if (!identity) return -1;
   if (!label || !url || !access_hdr || !app_hdr || !buf) return -1;
   if (content_type_buf && content_type_len > 0) content_type_buf[0] = '\0';
 
@@ -145,6 +146,7 @@ static int obs_get(const char *label, const char *url,
     hdrs = curl_slist_append(hdrs, access_hdr);
     if (meta_hdr) hdrs = curl_slist_append(hdrs, meta_hdr);
     hdrs = curl_slist_append(hdrs, app_hdr);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, identity->user_agent);
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
 
@@ -401,7 +403,9 @@ static int obs_post(const char *label, const char *url,
   char *captured_oid = NULL;
   int result = -1;
   char tag[64];
+  const enil_identity_t *identity = enil_identity_current();
 
+  if (!identity) return -1;
   snprintf(tag, sizeof(tag), "Obs.%s", label ? label : "?");
 
   if (!url || !obs_token || !obs_params_b64) {
@@ -412,7 +416,7 @@ static int obs_post(const char *label, const char *url,
   ENIL_LOG(tag, "POST %s (%lu bytes)", url, (unsigned long)len);
 
   access_hdr = make_header("X-Line-Access", obs_token);
-  app_hdr    = make_header("X-Line-Application", X_LINE_APP);
+  app_hdr    = make_header("X-Line-Application", identity->application);
   params_hdr = make_header("X-Obs-Params", obs_params_b64);
   if (!access_hdr || !app_hdr || !params_hdr) {
     ENIL_LOG(tag, "header alloc failed");
@@ -428,6 +432,7 @@ static int obs_post(const char *label, const char *url,
   hdrs = curl_slist_append(hdrs, "Content-Type: application/octet-stream");
   hdrs = curl_slist_append(hdrs, params_hdr);
 
+  curl_easy_setopt(curl, CURLOPT_USERAGENT, identity->user_agent);
   curl_easy_setopt(curl, CURLOPT_URL, url);
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
   curl_easy_setopt(curl, CURLOPT_POST, 1L);
@@ -487,6 +492,7 @@ int enil_obs_upload(const char           *session_path,
   }
   *out_oid = NULL;
 
+  if (!enil_session_continue_identity(session_path)) return -1;
   obs_token = load_obs_token(session_path);
   if (!obs_token) { LOG("upload", "no OBS token in session"); goto done; }
 
@@ -525,6 +531,7 @@ int enil_obs_upload_with_oid(const char          *session_path,
     LOG("upload_oid", "NULL argument"); return -1;
   }
 
+  if (!enil_session_continue_identity(session_path)) return -1;
   obs_token = load_obs_token(session_path);
   if (!obs_token) { LOG("upload_oid", "no OBS token in session"); goto done; }
 
@@ -592,6 +599,7 @@ int enil_obs_download_message(const char *session_path,
   cJSON *session, *enc_tokens, *token_item;
   char obs_token_buf[4096];
   char url[1024];
+  const enil_identity_t *identity;
   char content_type_buf[128];
   char *talk_meta = NULL;
   char *access_hdr = NULL;
@@ -609,6 +617,9 @@ int enil_obs_download_message(const char *session_path,
   if (!session_path || !message_id || !dest_path) {
     LOG("download", "NULL argument"); return -1;
   }
+
+  if (!enil_session_continue_identity(session_path)) return -1;
+  identity = enil_identity_current();
 
   /* Read OBS token from session.json */
   session = enil_session_read(session_path);
@@ -643,8 +654,8 @@ int enil_obs_download_message(const char *session_path,
       meta_hdr = (char *)malloc(n);
       if (meta_hdr) snprintf(meta_hdr, n, "X-Talk-Meta: %s", talk_meta);
     }
-    n = strlen("X-Line-Application: ") + strlen(X_LINE_APP) + 1;
-    app_hdr    = (char *)malloc(n); if (app_hdr)    snprintf(app_hdr,    n, "X-Line-Application: %s", X_LINE_APP);
+    n = strlen("X-Line-Application: ") + strlen(identity->application) + 1;
+    app_hdr    = (char *)malloc(n); if (app_hdr)    snprintf(app_hdr,    n, "X-Line-Application: %s", identity->application);
   }
 
   if (!access_hdr || (talk_meta && !meta_hdr) || !app_hdr) {
