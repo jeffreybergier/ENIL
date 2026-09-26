@@ -43,6 +43,9 @@ class NativeSyncRecoveryTests(unittest.TestCase):
     def test_replayed_messages_preserve_synced_unread_count_but_new_events_update_it(self):
         self.run_recovery("replay-synced")
 
+    def test_chat_pages_and_single_chat_status_on_existing_database(self):
+        self.run_recovery("chat-page")
+
     def test_failed_message_write_redelivers_before_advancing_cursors(self):
         self.run_recovery("message")
 

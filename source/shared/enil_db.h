@@ -181,6 +181,10 @@ char  *enil_db_message_box_last_seen(sqlite3 *db, const char *chat_mid);
  * shared "caught up?" signal behind both the blue dot and the "Seen" marker. */
 int    enil_db_message_box_unread_count(sqlite3 *db, const char *chat_mid);
 
+/* Last delivered timestamp for a chat (0 = absent, NULL, or non-positive). */
+long long enil_db_message_box_last_delivered_time(sqlite3 *db,
+                                                   const char *chat_mid);
+
 /* Delete chats_v2 + message_boxes_v2 + messages_v2 (and children) for a chat. */
 int    enil_db_chat_delete(sqlite3 *db, const char *chat_mid);
 

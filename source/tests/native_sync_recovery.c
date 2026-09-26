@@ -581,6 +581,52 @@ static void replay_synced_messages(void) {
   }
 }
 
+static void chat_page_and_status_queries(void) {
+  message_row_t *rows = NULL;
+  sqlite3_stmt *stmt = NULL;
+  int count = 0, more = 0, i;
+  const char *sql =
+    "INSERT INTO messages_v2 (id, chat_id, createdTime, text) VALUES"
+    " ('a10','chat-a',10,'a10'),('a20','chat-a',20,'a20'),"
+    " ('a30','chat-a',30,'a30'),('a40','chat-a',40,'a40'),"
+    " ('b50','chat-b',50,'b50')";
+
+  /* A populated existing database gets the new index on startup. */
+  assert(sqlite3_exec(db, sql, NULL, NULL, NULL) == SQLITE_OK);
+  assert(sqlite3_exec(db, "DROP INDEX idx_messages_chat_time", NULL, NULL, NULL) == SQLITE_OK);
+  assert(enil_db_create_tables(db) == SQLITE_OK);
+  assert(sqlite3_prepare_v2(db,
+    "SELECT count(*) FROM sqlite_master WHERE type='index'"
+    " AND name='idx_messages_chat_time'", -1, &stmt, NULL) == SQLITE_OK);
+  assert(sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_int(stmt, 0) == 1);
+  sqlite3_finalize(stmt);
+
+  assert(enil_db_message_rows_get_page(db, "chat-a", "self", 0, 2,
+                                       &rows, &count, &more) == SQLITE_OK);
+  assert(count == 2 && more == 1);
+  assert(!strcmp(rows[0].message_id, "a30") && !strcmp(rows[1].message_id, "a40"));
+  for (i = 0; i < count; i++) message_row_free(&rows[i]);
+  free(rows);
+
+  rows = NULL;
+  assert(enil_db_message_rows_get_page(db, "chat-a", "self", 30, 2,
+                                       &rows, &count, &more) == SQLITE_OK);
+  assert(count == 2 && more == 0);
+  assert(!strcmp(rows[0].message_id, "a10") && !strcmp(rows[1].message_id, "a20"));
+  for (i = 0; i < count; i++) message_row_free(&rows[i]);
+  free(rows);
+
+  assert(sqlite3_exec(db,
+    "INSERT INTO message_boxes_v2 (id, unreadCount, lastDeliveredTime)"
+    " VALUES ('chat-a',3,40),('chat-b',NULL,NULL)",
+    NULL, NULL, NULL) == SQLITE_OK);
+  assert(enil_db_message_box_unread_count(db, "chat-a") == 3);
+  assert(enil_db_message_box_last_delivered_time(db, "chat-a") == 40);
+  assert(enil_db_message_box_unread_count(db, "chat-b") == 0);
+  assert(enil_db_message_box_last_delivered_time(db, "chat-b") == 0);
+  assert(enil_db_message_box_last_delivered_time(db, "missing") == 0);
+}
+
 int main(int argc, char **argv) {
   enil_identity_t identity;
   cJSON *root;
@@ -600,7 +646,8 @@ int main(int argc, char **argv) {
   assert(enil_session_write(session_path, root));
   cJSON_Delete(root);
   if (argc == 4) {
-    if (!strcmp(argv[3], "replay-synced")) replay_synced_messages();
+    if (!strcmp(argv[3], "chat-page")) chat_page_and_status_queries();
+    else if (!strcmp(argv[3], "replay-synced")) replay_synced_messages();
     else if (!strcmp(argv[3], "idle-reset")) polling_failure_streak(0);
     else if (!strncmp(argv[3], "chat-update-", 12)) chat_update_recovery(atoi(argv[3] + 12));
     else if (!strcmp(argv[3], "consecutive-failures")) polling_failure_streak(1);

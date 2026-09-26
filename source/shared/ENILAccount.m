@@ -465,11 +465,13 @@ static void qr_status_trampoline(const char *msg, void *ctx)
     talk_contact_t *heap = (talk_contact_t *)malloc(sizeof(talk_contact_t));
     if (!heap) { talk_contact_free(&rows[i]); continue; }
     *heap = rows[i]; /* transfer string ownership to heap */
-    [result addObject:[[[ENILDictionary alloc]
-                        initWithBase:heap
-                              fields:talk_contact_fields
-                               count:talk_contact_fields_count
-                              freeFn:(enil_struct_free_fn)talk_contact_free] autorelease]];
+    ENILDictionary *item = [[ENILDictionary alloc]
+                            initWithBase:heap
+                                  fields:talk_contact_fields
+                                   count:talk_contact_fields_count
+                                  freeFn:(enil_struct_free_fn)talk_contact_free];
+    [result addObject:item];
+    [item release];
   }
   free(rows); /* strings owned by ENILDictionary instances; only free the array */
   return result;
@@ -487,11 +489,13 @@ static void qr_status_trampoline(const char *msg, void *ctx)
     chat_summary_t *heap = (chat_summary_t *)malloc(sizeof(chat_summary_t));
     if (!heap) { chat_summary_free(&rows[i]); continue; }
     *heap = rows[i]; /* transfer string ownership to heap */
-    [result addObject:[[[ENILDictionary alloc]
-                        initWithBase:heap
-                              fields:chat_summary_fields
-                               count:chat_summary_fields_count
-                              freeFn:(enil_struct_free_fn)chat_summary_free] autorelease]];
+    ENILDictionary *item = [[ENILDictionary alloc]
+                            initWithBase:heap
+                                  fields:chat_summary_fields
+                                   count:chat_summary_fields_count
+                                  freeFn:(enil_struct_free_fn)chat_summary_free];
+    [result addObject:item];
+    [item release];
   }
   free(rows);
   return result;
@@ -532,11 +536,13 @@ static void qr_status_trampoline(const char *msg, void *ctx)
     sticker_row_t *heap = (sticker_row_t *)malloc(sizeof(sticker_row_t));
     if (!heap) { sticker_row_free(&rows[i]); continue; }
     *heap = rows[i];
-    [result addObject:[[[ENILDictionary alloc]
-                        initWithBase:heap
-                              fields:sticker_row_fields
-                               count:sticker_row_fields_count
-                              freeFn:(enil_struct_free_fn)sticker_row_free] autorelease]];
+    ENILDictionary *item = [[ENILDictionary alloc]
+                            initWithBase:heap
+                                  fields:sticker_row_fields
+                                   count:sticker_row_fields_count
+                                  freeFn:(enil_struct_free_fn)sticker_row_free];
+    [result addObject:item];
+    [item release];
   }
   free(rows);
   return result;
@@ -554,11 +560,13 @@ static void qr_status_trampoline(const char *msg, void *ctx)
     sticon_row_t *heap = (sticon_row_t *)malloc(sizeof(sticon_row_t));
     if (!heap) { sticon_row_free(&rows[i]); continue; }
     *heap = rows[i];
-    [result addObject:[[[ENILDictionary alloc]
-                        initWithBase:heap
-                              fields:sticon_row_fields
-                               count:sticon_row_fields_count
-                              freeFn:(enil_struct_free_fn)sticon_row_free] autorelease]];
+    ENILDictionary *item = [[ENILDictionary alloc]
+                            initWithBase:heap
+                                  fields:sticon_row_fields
+                                   count:sticon_row_fields_count
+                                  freeFn:(enil_struct_free_fn)sticon_row_free];
+    [result addObject:item];
+    [item release];
   }
   free(rows);
   return result;
@@ -1261,18 +1269,8 @@ static int enil_sticon_arrays(NSArray *resources, const char ***pkg,
 - (int)unreadCountForChatId:(NSString *)chatId;
 {
   if (![chatId isKindOfClass:[NSString class]] || ![chatId length]) return 0;
-  /* Single source of truth: the same chat-summary rows that drive the
-     unread dot in the chat list cell (mb.unreadCount via kSQL_GetChatSummaries). */
-  NSArray *summaries = [self chats];
-  NSUInteger i;
-  for (i = 0; i < [summaries count]; i++) {
-    NSDictionary *s = [summaries objectAtIndex:i];
-    if ([chatId isEqualToString:[s objectForKey:@"chatMid"]]) {
-      int n = [[s objectForKey:@"unreadCount"] intValue];
-      return n > 0 ? n : 0;
-    }
-  }
-  return 0;
+  /* Same message-box column as the chat-summary unread dot; one row only. */
+  return enil_db_message_box_unread_count(db_, [chatId UTF8String]);
 }
 
 - (int)totalUnreadCount;
@@ -1292,18 +1290,8 @@ static int enil_sticon_arrays(NSArray *resources, const char ***pkg,
 - (long long)lastDeliveredTimeForChatId:(NSString *)chatId;
 {
   if (![chatId isKindOfClass:[NSString class]] || ![chatId length]) return 0;
-  /* Same chat-summary join (kSQL_GetChatSummaries already selects
-     mb.lastDeliveredTime); reusing it keeps one query path. */
-  NSArray *summaries = [self chats];
-  NSUInteger i;
-  for (i = 0; i < [summaries count]; i++) {
-    NSDictionary *s = [summaries objectAtIndex:i];
-    if ([chatId isEqualToString:[s objectForKey:@"chatMid"]]) {
-      long long t = [[s objectForKey:@"lastDeliveredTime"] longLongValue];
-      return t > 0 ? t : 0;
-    }
-  }
-  return 0;
+  /* Same message-box column as the chat summary; avoid a roster query. */
+  return enil_db_message_box_last_delivered_time(db_, [chatId UTF8String]);
 }
 
 - (BOOL)removeChat:(NSString *)chatId

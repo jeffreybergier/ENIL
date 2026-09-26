@@ -838,14 +838,18 @@ void enil_db_close(sqlite3 *db) {
  *    the total and the alt_text-IS-NULL count read from the index, no scan.
  *  - stickers_v2(image_path) seeks the not-yet-downloaded rows in the full
  *    sync sweep instead of scanning every sticker.
- *  - messages_v2(contentType) seeks image rows in the full sync media sweep. */
+ *  - messages_v2(contentType) seeks image rows in the full sync media sweep.
+ *  - messages_v2(chat_id, createdTime) serves newest/older chat pages in
+ *    timestamp order without scanning and sorting the full message table. */
 static const char * const kSQL_CreateIndexes =
   "CREATE INDEX IF NOT EXISTS idx_sticons_package"
   " ON sticons_v2 (package_id, alt_text);"
   "CREATE INDEX IF NOT EXISTS idx_stickers_image_path"
   " ON stickers_v2 (image_path);"
   "CREATE INDEX IF NOT EXISTS idx_messages_contenttype"
-  " ON messages_v2 (contentType);";
+  " ON messages_v2 (contentType);"
+  "CREATE INDEX IF NOT EXISTS idx_messages_chat_time"
+  " ON messages_v2 (chat_id, createdTime);";
 
 /* ============================================================================
  * Apply every CREATE TABLE statement to the database. Idempotent.
@@ -2054,34 +2058,43 @@ const enil_field_t message_row_fields[] = {
 const size_t message_row_fields_count =
   sizeof(message_row_fields) / sizeof(message_row_fields[0]);
 
-/* Newest-first page of a chat's messages older than `before` (0 = newest).
- * Bind: 1=chat_id, 2=before, 3=limit. Reversed to ascending by the caller. */
-static const char * const kSQL_GetMessagesPage =
-  "SELECT m.id,"
-  "  COALESCE(c.displayNameOverridden, c.displayName, m.\"from\", '') AS sender_name,"
-  "  m.createdTime,"
-  "  COALESCE(m.text, '') AS text,"
-  "  m.contentType,"
-  "  COALESCE(m.media_path, '') AS media_path,"
-  "  COALESCE(m.\"from\", '') AS from_mid,"
-  "  m.orig_width,"
-  "  m.orig_height,"
-  "  COALESCE(m.thumb_path, '') AS thumb_path,"
-  "  m.thumb_width,"
-  "  m.thumb_height,"
-  "  COALESCE(m.sticker_id, '') AS sticker_id,"
-  "  COALESCE(m.sticker_pkg_id, '') AS sticker_pkg_id,"
-  "  m.reactions_json,"
-  "  m.is_deleted,"
-  "  m.decrypt_status"
-  " FROM messages_v2 m"
+/* Shared projection for the two page queries. The older-page range must be a
+ * direct comparison so SQLite can seek (chat_id, createdTime) in the index. */
+#define SQL_MESSAGE_PAGE_SELECT \
+  "SELECT m.id," \
+  "  COALESCE(c.displayNameOverridden, c.displayName, m.\"from\", '') AS sender_name," \
+  "  m.createdTime," \
+  "  COALESCE(m.text, '') AS text," \
+  "  m.contentType," \
+  "  COALESCE(m.media_path, '') AS media_path," \
+  "  COALESCE(m.\"from\", '') AS from_mid," \
+  "  m.orig_width," \
+  "  m.orig_height," \
+  "  COALESCE(m.thumb_path, '') AS thumb_path," \
+  "  m.thumb_width," \
+  "  m.thumb_height," \
+  "  COALESCE(m.sticker_id, '') AS sticker_id," \
+  "  COALESCE(m.sticker_pkg_id, '') AS sticker_pkg_id," \
+  "  m.reactions_json," \
+  "  m.is_deleted," \
+  "  m.decrypt_status" \
+  " FROM messages_v2 m" \
   " LEFT JOIN contacts_v2 c ON m.\"from\" = c.mid"
-  " WHERE m.chat_id = ? AND (?2 = 0 OR m.createdTime < ?2)"
+
+static const char * const kSQL_GetNewestMessagesPage =
+  SQL_MESSAGE_PAGE_SELECT
+  " WHERE m.chat_id = ?1"
+  " ORDER BY m.createdTime DESC"
+  " LIMIT ?2";
+
+static const char * const kSQL_GetOlderMessagesPage =
+  SQL_MESSAGE_PAGE_SELECT
+  " WHERE m.chat_id = ?1 AND m.createdTime < ?2"
   " ORDER BY m.createdTime DESC"
   " LIMIT ?3";
+#undef SQL_MESSAGE_PAGE_SELECT
 
-/* Populate one message_row_t from the current stmt row (kSQL_GetMessagesPage
- * column order). */
+/* Populate one message_row_t from the current page query's column order. */
 static void fill_message_row(sqlite3 *db, sqlite3_stmt *stmt,
                              const char *my_mid, message_row_t *m) {
   char stk_path_buf[512];
@@ -2167,15 +2180,17 @@ int enil_db_message_rows_get_page(sqlite3 *db, const char *chat_id,
   if (out_has_more) *out_has_more = 0;
   if (!db || !chat_id || limit <= 0 || !out || !out_count) return SQLITE_MISUSE;
 
-  rc = sqlite3_prepare_v2(db, kSQL_GetMessagesPage, -1, &stmt, NULL);
+  rc = sqlite3_prepare_v2(db, before == 0 ? kSQL_GetNewestMessagesPage
+                                         : kSQL_GetOlderMessagesPage,
+                          -1, &stmt, NULL);
   if (rc != SQLITE_OK) {
     ENIL_LOG("Db.message_rows_get_page", "%s", sqlite3_errmsg(db));
     return rc;
   }
   sqlite3_bind_text(stmt, 1, chat_id, -1, SQLITE_TRANSIENT);
-  sqlite3_bind_int64(stmt, 2, before);
+  if (before != 0) sqlite3_bind_int64(stmt, 2, before);
   /* Fetch one extra row to detect whether more history exists. */
-  sqlite3_bind_int(stmt, 3, limit + 1);
+  sqlite3_bind_int(stmt, before == 0 ? 2 : 3, limit + 1);
 
   /* Newest-first; allocate limit+1, keep at most `limit`. */
   rows = (message_row_t *)malloc((size_t)(limit + 1) * sizeof(*rows));
@@ -2878,6 +2893,17 @@ int enil_db_message_box_unread_count(sqlite3 *db, const char *chat_mid) {
     "SELECT unreadCount FROM message_boxes_v2 WHERE id = ?",
     chat_mid, 0, "Db.message_box_unread_count");
   return n < 0 ? 0 : (int)n;
+}
+
+/* Single primary-key seek for the chat window subtitle. The chat-summary
+ * projection exposes this same column, but loading every summary here would
+ * turn toolbar/title refreshes into full-roster work. */
+long long enil_db_message_box_last_delivered_time(sqlite3 *db,
+                                                   const char *chat_mid) {
+  long long t = db_scalar_i64(db,
+    "SELECT lastDeliveredTime FROM message_boxes_v2 WHERE id = ?",
+    chat_mid, 0, "Db.message_box_last_delivered_time");
+  return t > 0 ? t : 0;
 }
 
 /* ============================================================================
