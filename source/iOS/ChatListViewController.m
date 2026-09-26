@@ -59,7 +59,7 @@ enum {
   if ((self = [super initWithStyle:UITableViewStylePlain])) {
     _account = account;
     _coordinator = coordinator;
-    self.navigationItem.title = NSLocalizedString(@"ENIL", nil);
+    [[self navigationItem] setTitle:NSLocalizedString(@"ENIL", nil)];
   }
   return self;
 }
@@ -70,40 +70,36 @@ enum {
   /* Sync: macOS's SyncMini glyph, white and bordered. -syncStateChanged:
    * toggles enabled (native on a real bar item). */
   UIImage *syncImage = [self whiteBarIconForIcon:AIFAArrowRotateRight];
-  self.syncButton =
-    [[UIBarButtonItem alloc] initWithImage:syncImage
+  [self setSyncButton:[[UIBarButtonItem alloc] initWithImage:syncImage
                                      style:UIBarButtonItemStyleBordered
                                     target:self
-                                    action:@selector(syncAction)];
-  self.syncButton.accessibilityLabel = NSLocalizedString(@"Sync", nil);
+                                    action:@selector(syncAction)]];
+  [[self syncButton] setAccessibilityLabel:NSLocalizedString(@"Sync", nil)];
   /* The sync button rides at the right of the bottom toolbar (installed in
    * -installSyncBar), mirroring the macOS SyncMiniViewController which pins its
    * sync button to the bar's right edge. Not in the navigation bar. */
   /* SSE on/off toggle — rides at the LEFT of the bottom toolbar. The glyph is
    * link / link-slash, refreshed from the account's persisted desired state in
    * -updateLinkButtonIcon. */
-  self.linkButton =
-    [[UIBarButtonItem alloc] initWithImage:[self whiteBarIconForIcon:AIFALink]
+  [self setLinkButton:[[UIBarButtonItem alloc] initWithImage:[self whiteBarIconForIcon:AIFALink]
                                      style:UIBarButtonItemStyleBordered
                                     target:self
-                                    action:@selector(toggleSSEAction)];
+                                    action:@selector(toggleSSEAction)]];
   [self updateLinkButtonIcon];
   /* Settings / account switcher: white gear, bordered style. */
   UIImage *settingsImage = [self whiteBarIconForIcon:AIFAGear];
-  self.navigationItem.leftBarButtonItem =
-    [[UIBarButtonItem alloc] initWithImage:settingsImage
+  [[self navigationItem] setLeftBarButtonItem:[[UIBarButtonItem alloc] initWithImage:settingsImage
                                      style:UIBarButtonItemStyleBordered
                                     target:self
-                                    action:@selector(accountsAction)];
-  self.navigationItem.leftBarButtonItem.accessibilityLabel =
-    NSLocalizedString(@"Accounts", nil);
+                                    action:@selector(accountsAction)]];
+  [[[self navigationItem] leftBarButtonItem] setAccessibilityLabel:NSLocalizedString(@"Accounts", nil)];
   [self installSyncBar];
   [self observeSyncNotifications];
   /* The coordinator starts SSE (-> Live) before this controller exists, so the
    * state notification fired before our bar's queue and our own observer were
    * listening. Re-announce now that both are wired, so the bar shows "Syncing
    * Live" rather than a stale "Sync Required". */
-  [self.account announceSyncState];
+  [[self account] announceSyncState];
   [self reloadData];
 }
 
@@ -118,8 +114,8 @@ enum {
  * per-event plumbing here: placement is the whole job. */
 - (void)installSyncBar
 {
-  self.syncBar = [[SyncMiniBarView alloc] initWithFrame:CGRectZero
-                                                account:self.account];
+  [self setSyncBar:[[SyncMiniBarView alloc] initWithFrame:CGRectZero
+                                                account:[self account]]];
   UIBarButtonItem *flexLeft = [[UIBarButtonItem alloc]
     initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace
                          target:nil action:NULL];
@@ -127,10 +123,9 @@ enum {
     initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace
                          target:nil action:NULL];
   UIBarButtonItem *item =
-    [[UIBarButtonItem alloc] initWithCustomView:self.syncBar];
-  self.toolbarItems =
-    [NSArray arrayWithObjects:self.linkButton, flexLeft, item, flexRight,
-                              self.syncButton, nil];
+    [[UIBarButtonItem alloc] initWithCustomView:[self syncBar]];
+  [self setToolbarItems:[NSArray arrayWithObjects:[self linkButton], flexLeft, item, flexRight,
+                              [self syncButton], nil]];
 }
 
 /* The bottom toolbar is per-navigation-controller, shared across pushes, so we
@@ -139,13 +134,13 @@ enum {
 - (void)viewWillAppear:(BOOL)animated
 {
   [super viewWillAppear:animated];
-  [self.navigationController setToolbarHidden:NO animated:animated];
+  [[self navigationController] setToolbarHidden:NO animated:animated];
 }
 
 - (void)viewWillDisappear:(BOOL)animated
 {
   [super viewWillDisappear:animated];
-  [self.navigationController setToolbarHidden:YES animated:animated];
+  [[self navigationController] setToolbarHidden:YES animated:animated];
 }
 
 /* Tight `color` glyph (iconSize == canvasSize). AIFontAwesome bakes the tint in
@@ -185,8 +180,8 @@ enum {
 - (void)accountsAction
 {
   PreferencesViewController *prefs = [[PreferencesViewController alloc] init];
-  prefs.coordinator = self.coordinator;
-  prefs.dismissesOnDone = YES;   /* modal: Done closes back to the chat list */
+  [prefs setCoordinator:[self coordinator]];
+  [prefs setDismissesOnDone:YES];   /* modal: Done closes back to the chat list */
   UINavigationController *nav =
     [[UINavigationController alloc] initWithRootViewController:prefs];
   [self enil_presentModalViewController:nav];
@@ -219,16 +214,16 @@ enum {
 - (void)reloadData
 {
   @try {
-    self.profile  = [self.account profile];
-    self.chats    = [self.account chats];
-    self.contacts = [self.account contacts];
+    [self setProfile:[[self account] profile]];
+    [self setChats:[[self account] chats]];
+    [self setContacts:[[self account] contacts]];
   } @catch (NSException *exception) {
     ENILLog(@"ChatListViewController.reloadData", @"exception: %@", exception);
-    self.profile  = nil;
-    self.chats    = [NSArray array];
-    self.contacts = [NSArray array];
+    [self setProfile:nil];
+    [self setChats:[NSArray array]];
+    [self setContacts:[NSArray array]];
   }
-  [self.tableView reloadData];
+  [[self tableView] reloadData];
 }
 
 #pragma mark - Sync
@@ -236,7 +231,7 @@ enum {
 - (void)syncAction
 {
   @try {
-    [self.account startSync];   /* bar reflects progress from the queue */
+    [[self account] startSync];   /* bar reflects progress from the queue */
   } @catch (NSException *exception) {
     ENILLog(@"ChatListViewController.syncAction", @"exception: %@", exception);
   }
@@ -248,7 +243,7 @@ enum {
 - (void)toggleSSEAction
 {
   @try {
-    [self.account setSSEEnabled:![self.account isSSEEnabled]];
+    [[self account] setSSEEnabled:![[self account] isSSEEnabled]];
   } @catch (NSException *exception) {
     ENILLog(@"ChatListViewController.toggleSSEAction", @"exception: %@", exception);
   }
@@ -259,12 +254,11 @@ enum {
  * Error/Syncing phase still shows "link" (enabled, just not connected now). */
 - (void)updateLinkButtonIcon
 {
-  BOOL enabled = [self.account isSSEEnabled];
-  self.linkButton.image =
-    [self whiteBarIconForIcon:(enabled ? AIFALink : AIFALinkSlash)];
-  self.linkButton.accessibilityLabel = enabled
+  BOOL enabled = [[self account] isSSEEnabled];
+  [[self linkButton] setImage:[self whiteBarIconForIcon:(enabled ? AIFALink : AIFALinkSlash)]];
+  [[self linkButton] setAccessibilityLabel:enabled
     ? NSLocalizedString(@"Disconnect", nil)
-    : NSLocalizedString(@"Connect", nil);
+    : NSLocalizedString(@"Connect", nil)];
 }
 
 - (void)syncDidFinish:(NSNotification *)note
@@ -281,7 +275,7 @@ enum {
 - (void)syncStateChanged:(NSNotification *)note
 {
   int state = [[[note userInfo] objectForKey:@"state"] intValue];
-  self.syncButton.enabled = (state != ENILSyncStateSyncing);
+  [[self syncButton] setEnabled:(state != ENILSyncStateSyncing)];
   [self updateLinkButtonIcon];
 }
 
@@ -331,7 +325,7 @@ enum {
 
   if (![chatId isKindOfClass:[NSString class]] || ![chatId length]) return;
 
-  mut = [NSMutableArray arrayWithArray:self.chats];
+  mut = [NSMutableArray arrayWithArray:[self chats]];
 
   /* Drop the chat's existing row, if any (chatMid is unique within Chats). */
   for (i = 0; i < [mut count]; i++) {
@@ -342,7 +336,7 @@ enum {
   }
 
   @try {
-    summary = [self.account chatSummaryForId:chatId];
+    summary = [[self account] chatSummaryForId:chatId];
   } @catch (NSException *exception) {
     ENILLog(@"ChatListViewController.updateChatId", @"exception: %@", exception);
     [self reloadData];
@@ -363,8 +357,8 @@ enum {
     [mut insertObject:summary atIndex:insertAt];
   }
 
-  self.chats = mut; /* copy -> immutable snapshot, matching -reloadData */
-  [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:kSectionChats]
+  [self setChats:mut]; /* copy -> immutable snapshot, matching -reloadData */
+  [[self tableView] reloadSections:[NSIndexSet indexSetWithIndex:kSectionChats]
                 withRowAnimation:UITableViewRowAnimationNone];
 }
 
@@ -373,13 +367,13 @@ enum {
 - (NSDictionary *)chatAtRow:(NSInteger)row
 {
   NSUInteger r = (NSUInteger)row;
-  return r < [self.chats count] ? [self.chats objectAtIndex:r] : nil;
+  return r < [[self chats] count] ? [[self chats] objectAtIndex:r] : nil;
 }
 
 - (NSDictionary *)contactAtRow:(NSInteger)row
 {
   NSUInteger r = (NSUInteger)row;
-  return r < [self.contacts count] ? [self.contacts objectAtIndex:r] : nil;
+  return r < [[self contacts] count] ? [[self contacts] objectAtIndex:r] : nil;
 }
 
 - (NSString *)displayNameForChat:(NSDictionary *)chat
@@ -431,7 +425,7 @@ enum {
 {
   if (![mid length]) return nil;
   NSString *path = [NSString stringWithFormat:@"%@/avatars/%@.jpg",
-                    [self.account enilDir], mid];
+                    [[self account] enilDir], mid];
   UIImage *raw = [UIImage imageWithContentsOfFile:path];
   if (raw == nil) return nil;
   CGRect rect = CGRectMake(0.0f, 0.0f, kAvatarSize, kAvatarSize);
@@ -450,11 +444,11 @@ enum {
 - (UIImage *)cachedAvatarForMid:(NSString *)mid
 {
   if (![mid isKindOfClass:[NSString class]] || ![mid length]) return nil;
-  if (self.avatarCache == nil) self.avatarCache = [NSMutableDictionary dictionary];
-  id cached = [self.avatarCache objectForKey:mid];
+  if ([self avatarCache] == nil) [self setAvatarCache:[NSMutableDictionary dictionary]];
+  id cached = [[self avatarCache] objectForKey:mid];
   if (cached != nil) return (cached == [NSNull null]) ? nil : (UIImage *)cached;
   UIImage *img = [self avatarImageForMid:mid];
-  [self.avatarCache setObject:(img ? (id)img : (id)[NSNull null]) forKey:mid];
+  [[self avatarCache] setObject:(img ? (id)img : (id)[NSNull null]) forKey:mid];
   return img;
 }
 
@@ -464,7 +458,7 @@ enum {
  * warm there. */
 - (void)flushAvatarCache
 {
-  [self.avatarCache removeAllObjects];
+  [[self avatarCache] removeAllObjects];
 }
 
 /* Neutral grey circle for rows without an avatar file (groups/rooms, or a 1:1
@@ -507,9 +501,9 @@ enum {
 {
   (void)tableView;
   switch (section) {
-    case kSectionAccount: return self.profile ? 1 : 0;
-    case kSectionChats:   return (NSInteger)[self.chats count];
-    case kSectionFriends: return (NSInteger)[self.contacts count];
+    case kSectionAccount: return [self profile] ? 1 : 0;
+    case kSectionChats:   return (NSInteger)[[self chats] count];
+    case kSectionFriends: return (NSInteger)[[self contacts] count];
   }
   return 0;
 }
@@ -538,10 +532,10 @@ titleForHeaderInSection:(NSInteger)section
   /* Cells recycle across all three sections, so every branch must set the full
    * mutable set (text, detail, image, accessory, selection) or a reused cell
    * keeps the previous row's state. */
-  switch (indexPath.section) {
+  switch ([indexPath section]) {
     case kSectionAccount: [self configureAccountCell:cell]; break;
-    case kSectionChats:   [self configureChatCell:cell atRow:indexPath.row]; break;
-    case kSectionFriends: [self configureContactCell:cell atRow:indexPath.row]; break;
+    case kSectionChats:   [self configureChatCell:cell atRow:[indexPath row]]; break;
+    case kSectionFriends: [self configureContactCell:cell atRow:[indexPath row]]; break;
   }
   return cell;
 }
@@ -550,14 +544,14 @@ titleForHeaderInSection:(NSInteger)section
  * (matches macOS, where -selectableMid returns nil for the account row). */
 - (void)configureAccountCell:(UITableViewCell *)cell
 {
-  NSString *mid  = [self.profile objectForKey:@"mid"];
-  NSString *name = [self.profile objectForKey:@"displayName"];
-  cell.textLabel.text = [name length] ? name : NSLocalizedString(@"(unknown)", nil);
-  cell.detailTextLabel.text = [self statusMessageOf:self.profile];
+  NSString *mid  = [[self profile] objectForKey:@"mid"];
+  NSString *name = [[self profile] objectForKey:@"displayName"];
+  [[cell textLabel] setText:[name length] ? name : NSLocalizedString(@"(unknown)", nil)];
+  [[cell detailTextLabel] setText:[self statusMessageOf:[self profile]]];
   UIImage *avatar = [self cachedAvatarForMid:mid];
-  cell.imageView.image = avatar ? avatar : [self placeholderAvatar];
-  cell.accessoryView = nil;
-  cell.selectionStyle = UITableViewCellSelectionStyleNone;
+  [[cell imageView] setImage:avatar ? avatar : [self placeholderAvatar]];
+  [cell setAccessoryView:nil];
+  [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
 }
 
 /* Existing chat: avatar + name + last-activity time + unread dot. The avatar is
@@ -568,13 +562,13 @@ titleForHeaderInSection:(NSInteger)section
 - (void)configureChatCell:(UITableViewCell *)cell atRow:(NSInteger)row
 {
   NSDictionary *chat = [self chatAtRow:row];
-  cell.textLabel.text = [self displayNameForChat:chat];
-  cell.detailTextLabel.text = [self subtitleForChat:chat];
+  [[cell textLabel] setText:[self displayNameForChat:chat]];
+  [[cell detailTextLabel] setText:[self subtitleForChat:chat]];
   NSString *chatMid = [chat objectForKey:@"chatMid"];
   UIImage *avatar = [self cachedAvatarForMid:chatMid];
-  cell.imageView.image = avatar ? avatar : [self placeholderAvatar];
-  cell.accessoryView = [self unseenAccessoryForChat:chat];
-  cell.selectionStyle = UITableViewCellSelectionStyleBlue;
+  [[cell imageView] setImage:avatar ? avatar : [self placeholderAvatar]];
+  [cell setAccessoryView:[self unseenAccessoryForChat:chat]];
+  [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
 }
 
 /* Friend (implicit 1:1): avatar + name + status message. Tapping confirms via a
@@ -582,12 +576,12 @@ titleForHeaderInSection:(NSInteger)section
 - (void)configureContactCell:(UITableViewCell *)cell atRow:(NSInteger)row
 {
   NSDictionary *contact = [self contactAtRow:row];
-  cell.textLabel.text = [self displayNameForContact:contact];
-  cell.detailTextLabel.text = [self statusMessageOf:contact];
+  [[cell textLabel] setText:[self displayNameForContact:contact]];
+  [[cell detailTextLabel] setText:[self statusMessageOf:contact]];
   UIImage *avatar = [self cachedAvatarForMid:[contact objectForKey:@"mid"]];
-  cell.imageView.image = avatar ? avatar : [self placeholderAvatar];
-  cell.accessoryView = nil;
-  cell.selectionStyle = UITableViewCellSelectionStyleBlue;
+  [[cell imageView] setImage:avatar ? avatar : [self placeholderAvatar]];
+  [cell setAccessoryView:nil];
+  [cell setSelectionStyle:UITableViewCellSelectionStyleBlue];
 }
 
 #pragma mark - UITableViewDelegate
@@ -598,7 +592,7 @@ titleForHeaderInSection:(NSInteger)section
   willSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
   (void)tableView;
-  return indexPath.section == kSectionAccount ? nil : indexPath;
+  return [indexPath section] == kSectionAccount ? nil : indexPath;
 }
 
 - (void)tableView:(UITableView *)tableView
@@ -608,9 +602,9 @@ titleForHeaderInSection:(NSInteger)section
   /* Chats open directly; Friends are gated behind a confirmation sheet, exactly
    * as the macOS list routes Friends-section clicks through -enil_confirmOpenChatId:
    * (a 1:1 chat may not exist yet) while Chats-section clicks open immediately. */
-  switch (indexPath.section) {
-    case kSectionChats:   [self openChatRow:indexPath.row]; break;
-    case kSectionFriends: [self confirmOpenContactRow:indexPath.row]; break;
+  switch ([indexPath section]) {
+    case kSectionChats:   [self openChatRow:[indexPath row]]; break;
+    case kSectionFriends: [self confirmOpenContactRow:[indexPath row]]; break;
     default: break;
   }
 }
@@ -626,11 +620,11 @@ titleForHeaderInSection:(NSInteger)section
 {
   if (![chatId length]) return;
   MessageListViewController *thread =
-    [[MessageListViewController alloc] initWithAccount:self.account
+    [[MessageListViewController alloc] initWithAccount:[self account]
                                                 chatId:chatId
                                            displayName:name
-                                         stickerPicker:[self.coordinator sharedStickerPicker]];
-  [self.navigationController pushViewController:thread animated:YES];
+                                         stickerPicker:[[self coordinator] sharedStickerPicker]];
+  [[self navigationController] pushViewController:thread animated:YES];
 }
 
 #pragma mark - Friend-tap confirmation (UIActionSheet)
@@ -646,10 +640,10 @@ titleForHeaderInSection:(NSInteger)section
   NSString *chatId = [contact objectForKey:@"mid"];
   if (![chatId length]) return;
   NSString *name = [self displayNameForContact:contact];
-  BOOL exists = [self.account chatExistsForMid:chatId];
+  BOOL exists = [[self account] chatExistsForMid:chatId];
 
-  self.pendingChatId = chatId;
-  self.pendingDisplayName = name;
+  [self setPendingChatId:chatId];
+  [self setPendingDisplayName:name];
 
   /* UIActionSheet has only a title (no separate informative-text field like
    * NSAlert), so the "will be created on first message" line folds into a second
@@ -679,22 +673,22 @@ titleForHeaderInSection:(NSInteger)section
  * full view. */
 - (void)presentActionSheet:(UIActionSheet *)sheet
 {
-  UIToolbar *toolbar = self.navigationController.toolbar;
-  if (toolbar != nil && !toolbar.hidden) {
+  UIToolbar *toolbar = [[self navigationController] toolbar];
+  if (toolbar != nil && ![toolbar isHidden]) {
     [sheet showFromToolbar:toolbar];
   } else {
-    [sheet showInView:self.view];
+    [sheet showInView:[self view]];
   }
 }
 
 - (void)actionSheet:(UIActionSheet *)actionSheet
 clickedButtonAtIndex:(NSInteger)buttonIndex
 {
-  NSString *chatId = self.pendingChatId;
-  NSString *name   = self.pendingDisplayName;
-  self.pendingChatId = nil;
-  self.pendingDisplayName = nil;
-  if (buttonIndex == actionSheet.cancelButtonIndex) return;
+  NSString *chatId = [self pendingChatId];
+  NSString *name   = [self pendingDisplayName];
+  [self setPendingChatId:nil];
+  [self setPendingDisplayName:nil];
+  if (buttonIndex == [actionSheet cancelButtonIndex]) return;
   [self openChatId:chatId displayName:name];
 }
 

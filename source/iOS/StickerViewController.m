@@ -75,14 +75,14 @@ static const CGFloat kTabCanvasPt = 30.0;
      * for stickers, a grinning face for sticons (macOS's "Emoji" tab). */
     NSString *title = sticonMode ? NSLocalizedString(@"Emoji", nil)
                                  : NSLocalizedString(@"Stickers", nil);
-    self.title = title;
+    [self setTitle:title];
     AIFontAwesomeIcon icon = sticonMode ? AIFAFaceGrin : AIFACertificate;
     AIFontAwesomeStyle style = sticonMode
       ? AIFontAwesomeStyleRegular : AIFontAwesomeStyleSolid;
-    self.tabBarItem = [[UITabBarItem alloc]
+    [self setTabBarItem:[[UITabBarItem alloc]
       initWithTitle:title
               image:[self tabImageForIcon:icon style:style]
-                tag:(sticonMode ? 1 : 0)];
+                tag:(sticonMode ? 1 : 0)]];
   }
   return self;
 }
@@ -90,14 +90,13 @@ static const CGFloat kTabCanvasPt = 30.0;
 - (void)viewDidLoad
 {
   [super viewDidLoad];
-  self.view.backgroundColor = [UIColor messagesBackgroundColor];
+  [[self view] setBackgroundColor:[UIColor messagesBackgroundColor]];
 
   /* UIBarButtonSystemItemDone is 2.0-era — safe on the 4.3 floor. There is
    * nothing to discard, so it routes back through the cancel delegate. */
-  self.navigationItem.rightBarButtonItem =
-    [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
+  [[self navigationItem] setRightBarButtonItem:[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
                                                   target:self
-                                                  action:@selector(doneTapped)];
+                                                  action:@selector(doneTapped)]];
 
   [self buildWebView];
   [self reloadContent];  /* once: viewDidLoad fires the first time this tab is shown */
@@ -109,17 +108,16 @@ static const CGFloat kTabCanvasPt = 30.0;
  * paths under media/purchases resolve directly. */
 - (void)buildWebView
 {
-  UIWebView *web = [[UIWebView alloc] initWithFrame:self.view.bounds];
-  web.autoresizingMask =
-    UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-  web.delegate = self;
+  UIWebView *web = [[UIWebView alloc] initWithFrame:[[self view] bounds]];
+  [web setAutoresizingMask:UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight];
+  [web setDelegate:self];
   /* Coast like a UITableView (iOS 5+; no-op on the 4.3 floor — nil scrollView). */
-  [web XP_scrollView].decelerationRate = UIScrollViewDecelerationRateNormal;
+  [[web XP_scrollView] setDecelerationRate:UIScrollViewDecelerationRateNormal];
   /* Composite through to the host view (drawsBackground equivalent) so the
    * overscroll bounce shows the picker's background, not UIWebView's white. */
   [web XP_setBackgroundTransparent];
-  [self.view addSubview:web];
-  self.webView = web;
+  [[self view] addSubview:web];
+  [self setWebView:web];
 }
 
 /* Black-on-transparent FA glyph at the tab-bar size; UIKit tints it for the
@@ -140,17 +138,17 @@ static const CGFloat kTabCanvasPt = 30.0;
 - (void)reloadContent
 {
   @try {
-    NSInteger cell  = self.sticonMode ? kSticonCell  : kStickerCell;
-    NSInteger thumb = self.sticonMode ? kSticonThumb : kStickerThumb;
+    NSInteger cell  = [self sticonMode] ? kSticonCell  : kStickerCell;
+    NSInteger thumb = [self sticonMode] ? kSticonThumb : kStickerThumb;
     NSString *css = [ENILUserDefaults pickerCSSWithItemSize:cell];
-    NSURL *url = [self.engine writeStickerPickerHTMLForSticonMode:self.sticonMode
+    NSURL *url = [[self engine] writeStickerPickerHTMLForSticonMode:[self sticonMode]
                                                               css:css
                                                         thumbSize:(int)thumb];
     if (url == nil) {
       ENILLog(@"StickerWebViewController.reloadContent", @"nil picker URL");
       return;
     }
-    [self.webView loadRequest:[NSURLRequest requestWithURL:url]];
+    [[self webView] loadRequest:[NSURLRequest requestWithURL:url]];
   } @catch (NSException *exception) {
     ENILLog(@"StickerWebViewController.reloadContent", @"exception: %@", exception);
   }
@@ -158,7 +156,7 @@ static const CGFloat kTabCanvasPt = 30.0;
 
 - (void)doneTapped
 {
-  [self.webDelegate stickerWebDidTapDone:self];
+  [[self webDelegate] stickerWebDidTapDone:self];
 }
 
 /* Parse package_id / sticker_id / alt_text out of an enil-sticker:// or
@@ -191,7 +189,7 @@ static void parseQuery(NSString *query, NSString **packageId, NSString **sticker
   NSString *query = [url query];
   if (query) parseQuery(query, &packageId, &stickerId, &altText);
   if (![packageId length] || ![stickerId length]) return;
-  [self.webDelegate stickerWeb:self
+  [[self webDelegate] stickerWeb:self
               didPickPackageId:packageId
                      stickerId:stickerId
                        altText:altText
@@ -222,12 +220,12 @@ static void parseQuery(NSString *query, NSString **packageId, NSString **sticker
 - (void)webViewDidFinishLoad:(UIWebView *)webView
 {
   (void)webView;
-  [[self.webView XP_scrollView] XP_removeShadow];
+  [[[self webView] XP_scrollView] XP_removeShadow];
 }
 
 - (void)dealloc
 {
-  _webView.delegate = nil;
+  [_webView setDelegate:nil];
 }
 
 @end
@@ -265,25 +263,24 @@ static void parseQuery(NSString *query, NSString **packageId, NSString **sticker
 - (void)buildTabs
 {
   StickerWebViewController *stickers =
-    [[StickerWebViewController alloc] initWithEngine:self.engine sticonMode:NO];
-  stickers.webDelegate = self;
+    [[StickerWebViewController alloc] initWithEngine:[self engine] sticonMode:NO];
+  [stickers setWebDelegate:self];
   StickerWebViewController *sticons =
-    [[StickerWebViewController alloc] initWithEngine:self.engine sticonMode:YES];
-  sticons.webDelegate = self;
+    [[StickerWebViewController alloc] initWithEngine:[self engine] sticonMode:YES];
+  [sticons setWebDelegate:self];
   /* Held so -setNeedsReload can re-render them; the tab bar's own retain via
    * viewControllers is on the wrapping nav controllers, not the leaves. */
-  self.stickersLeaf = stickers;
-  self.sticonsLeaf  = sticons;
+  [self setStickersLeaf:stickers];
+  [self setSticonsLeaf:sticons];
 
   UINavigationController *stickersNav =
     [[UINavigationController alloc] initWithRootViewController:stickers];
-  stickersNav.tabBarItem = stickers.tabBarItem;
+  [stickersNav setTabBarItem:[stickers tabBarItem]];
   UINavigationController *sticonsNav =
     [[UINavigationController alloc] initWithRootViewController:sticons];
-  sticonsNav.tabBarItem = sticons.tabBarItem;
+  [sticonsNav setTabBarItem:[sticons tabBarItem]];
 
-  self.viewControllers =
-    [NSArray arrayWithObjects:stickersNav, sticonsNav, nil];
+  [self setViewControllers:[NSArray arrayWithObjects:stickersNav, sticonsNav, nil]];
 }
 
 #pragma mark Reload
@@ -294,21 +291,21 @@ static void parseQuery(NSString *query, NSString **packageId, NSString **sticker
  * wasted work — and would message a nil web view. */
 - (void)reloadLoadedLeaves
 {
-  if ([self.stickersLeaf isViewLoaded]) [self.stickersLeaf reloadContent];
-  if ([self.sticonsLeaf  isViewLoaded]) [self.sticonsLeaf  reloadContent];
+  if ([[self stickersLeaf] isViewLoaded]) [[self stickersLeaf] reloadContent];
+  if ([[self sticonsLeaf]  isViewLoaded]) [[self sticonsLeaf]  reloadContent];
 }
 
 - (void)setNeedsReload
 {
-  if ([self isViewLoaded] && self.view.window) [self reloadLoadedLeaves];
-  else self.needsReload = YES;
+  if ([self isViewLoaded] && [[self view] window]) [self reloadLoadedLeaves];
+  else [self setNeedsReload:YES];
 }
 
 - (void)viewWillAppear:(BOOL)animated
 {
   [super viewWillAppear:animated];
-  if (self.needsReload) {
-    self.needsReload = NO;
+  if ([self needsReload]) {
+    [self setNeedsReload:NO];
     [self reloadLoadedLeaves];
   }
 }
@@ -326,12 +323,12 @@ static void parseQuery(NSString *query, NSString **packageId, NSString **sticker
 {
   (void)web;
   if (isSticon)
-    [self.pickerDelegate stickerPicker:self
+    [[self pickerDelegate] stickerPicker:self
                 didPickSticonPackageId:packageId
                               sticonId:stickerId
                                altText:altText];
   else
-    [self.pickerDelegate stickerPicker:self
+    [[self pickerDelegate] stickerPicker:self
                       didPickPackageId:packageId
                              stickerId:stickerId];
 }
@@ -339,7 +336,7 @@ static void parseQuery(NSString *query, NSString **packageId, NSString **sticker
 - (void)stickerWebDidTapDone:(StickerWebViewController *)web
 {
   (void)web;
-  [self.pickerDelegate stickerPickerDidCancel:self];
+  [[self pickerDelegate] stickerPickerDidCancel:self];
 }
 
 @end

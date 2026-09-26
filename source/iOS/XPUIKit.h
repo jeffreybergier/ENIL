@@ -56,8 +56,8 @@
 /* -[UIWebView scrollView] is iOS 5.0+; naming it against the 4.3 floor trips
  * -Wunguarded-availability. Mirrors the original getter and runtime-gates: on
  * the floor the selector is absent and this returns nil,
- * so the canonical `[web XP_scrollView].decelerationRate = …Normal` is a silent
- * no-op there (a message to nil does nothing). Used to give the scroller the
+ * so `[[web XP_scrollView] setDecelerationRate:UIScrollViewDecelerationRateNormal]`
+ * is a silent no-op there (a message to nil does nothing). Used to give the scroller the
  * same coast as a UITableView — WebKit shipped UIWebView's scroller with the
  * high-friction "fast" rate (0.99) through iOS 10, so an identical flick stops
  * ~5x sooner than a native table (which uses "normal", 0.998): the source of

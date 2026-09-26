@@ -38,7 +38,7 @@ static NSString * const kENILLastActiveAccountKey = @"ENILLastActiveAccountMid";
   }
   if ((self = [super init])) {
     _nav = [[UINavigationController alloc] init];
-    window.rootViewController = _nav;
+    [window setRootViewController:_nav];
   }
   return self;
 }
@@ -93,7 +93,7 @@ static NSString * const kENILLastActiveAccountKey = @"ENILLastActiveAccountMid";
 {
   (void)note;
   [ENILAccount syncWorkerCredentialsFromKeychain];
-  if (self.activeAccount == nil &&
+  if ([self activeAccount] == nil &&
       [[ENILKeychain sharedKeychain] hasCredentials]) {
     [self continueAfterCredentials];
   }
@@ -223,8 +223,8 @@ static NSString * const kENILLastActiveAccountKey = @"ENILLastActiveAccountMid";
             @"start failed: %@ (%@)", [error localizedDescription], path);
     return NO;
   }
-  self.activeAccount = engine;
-  self.activeAccountPath = path;
+  [self setActiveAccount:engine];
+  [self setActiveAccountPath:path];
 
   /* Mirror macOS ChatWindowController: bring up SSE as soon as the account is
    * active. -startSSE self-gates on enil_db_has_local_rev, so an already-synced
@@ -234,7 +234,7 @@ static NSString * const kENILLastActiveAccountKey = @"ENILLastActiveAccountMid";
 
   ChatListViewController *list =
     [[ChatListViewController alloc] initWithAccount:engine coordinator:self];
-  [self.nav setViewControllers:[NSArray arrayWithObject:list] animated:NO];
+  [[self nav] setViewControllers:[NSArray arrayWithObject:list] animated:NO];
   ENILLog(@"ENILRootCoordinator.activateAccountAtPath", @"active account %@",
           [path lastPathComponent]);
   return YES;
@@ -248,8 +248,8 @@ static NSString * const kENILLastActiveAccountKey = @"ENILLastActiveAccountMid";
 - (void)showSettings
 {
   PreferencesViewController *settings = [[PreferencesViewController alloc] init];
-  settings.coordinator = self;
-  [self.nav setViewControllers:[NSArray arrayWithObject:settings] animated:NO];
+  [settings setCoordinator:self];
+  [[self nav] setViewControllers:[NSArray arrayWithObject:settings] animated:NO];
 }
 
 #pragma mark - Account management
@@ -264,7 +264,7 @@ static NSString * const kENILLastActiveAccountKey = @"ENILLastActiveAccountMid";
     NSString *sess = [path stringByAppendingPathComponent:@"session.json"];
     NSString *name = [ENILAccount displayNameForSessionAtPath:sess];
     if (![name length]) name = [path lastPathComponent];
-    BOOL active = [path isEqualToString:self.activeAccountPath];
+    BOOL active = [path isEqualToString:[self activeAccountPath]];
     [out addObject:[NSDictionary dictionaryWithObjectsAndKeys:
       path, @"path",
       name, @"displayName",
@@ -279,51 +279,50 @@ static NSString * const kENILLastActiveAccountKey = @"ENILLastActiveAccountMid";
  * already torn the network thread down so the overlap is inert. */
 - (void)teardownActiveEngine
 {
-  if (self.activeAccount == nil) return;
-  [self.activeAccount stopSSE];
-  self.activeAccount = nil;
-  self.activeAccountPath = nil;
+  if ([self activeAccount] == nil) return;
+  [[self activeAccount] stopSSE];
+  [self setActiveAccount:nil];
+  [self setActiveAccountPath:nil];
   /* Drop the cached picker so the next account builds its own against the new
    * engine — the old one still holds the torn-down account's ENILAccount. */
-  self.stickerPicker = nil;
+  [self setStickerPicker:nil];
 }
 
 #pragma mark - Shared per-account UI
 
 - (StickerViewController *)sharedStickerPicker
 {
-  if (self.activeAccount == nil) return nil;
-  if (self.stickerPicker == nil) {
-    self.stickerPicker =
-      [[StickerViewController alloc] initWithEngine:self.activeAccount];
+  if ([self activeAccount] == nil) return nil;
+  if ([self stickerPicker] == nil) {
+    [self setStickerPicker:[[StickerViewController alloc] initWithEngine:[self activeAccount]]];
   }
-  return self.stickerPicker;
+  return [self stickerPicker];
 }
 
 - (void)syncDidFinishReloadPicker:(NSNotification *)note
 {
   (void)note;
-  [self.stickerPicker setNeedsReload];  /* no-op when never built */
+  [[self stickerPicker] setNeedsReload];  /* no-op when never built */
 }
 
 /* YES when the active account wants the live SSE link (persisted sseEnabled);
  * NO when no account is active. AppDelegate gates its bg assertion on this. */
 - (BOOL)wantsSSELink
 {
-  return [self.activeAccount isSSEEnabled];
+  return [[self activeAccount] isSSEEnabled];
 }
 
 - (int)activeUnreadCount
 {
-  return [self.activeAccount totalUnreadCount];
+  return [[self activeAccount] totalUnreadCount];
 }
 
 - (BOOL)switchToAccountAtPath:(NSString *)path
 {
   if (![path length]) return NO;
-  if ([path isEqualToString:self.activeAccountPath]) {
+  if ([path isEqualToString:[self activeAccountPath]]) {
     [self setLastActiveAccountMid:[path lastPathComponent]];
-    [self.nav enil_dismissModalViewController];
+    [[self nav] enil_dismissModalViewController];
     return YES;
   }
   [self teardownActiveEngine];
@@ -334,14 +333,14 @@ static NSString * const kENILLastActiveAccountKey = @"ENILLastActiveAccountMid";
     return NO;
   }
   [self setLastActiveAccountMid:[path lastPathComponent]];
-  [self.nav enil_dismissModalViewController];
+  [[self nav] enil_dismissModalViewController];
   return YES;
 }
 
 - (BOOL)logOutAccountAtPath:(NSString *)path
 {
   if (![path length]) return NO;
-  BOOL wasActive = [path isEqualToString:self.activeAccountPath];
+  BOOL wasActive = [path isEqualToString:[self activeAccountPath]];
   if (wasActive) [self teardownActiveEngine];
 
   if (![[NSFileManager defaultManager] XP_trashItemAtPath:path error:NULL]) {
@@ -354,7 +353,7 @@ static NSString * const kENILLastActiveAccountKey = @"ENILLastActiveAccountMid";
    * settings root (its Accounts section offers Add Account). Either way the
    * Preferences modal that triggered this is dismissed to reveal the new root. */
   if (![self activateFirstAccount]) [self showSettings];
-  [self.nav enil_dismissModalViewController];
+  [[self nav] enil_dismissModalViewController];
   return YES;
 }
 
@@ -366,7 +365,7 @@ static NSString * const kENILLastActiveAccountKey = @"ENILLastActiveAccountMid";
 - (void)beginQRLoginExpectingMid:(NSString *)expectedMid
               fromViewController:(UIViewController *)presenter
 {
-  if (self.qrLogin) return;   /* one at a time */
+  if ([self qrLogin]) return;   /* one at a time */
   NSString *staging = [[self enilRootPath] stringByAppendingPathComponent:
     [NSString stringWithFormat:@".staging-%.0f",
       [NSDate timeIntervalSinceReferenceDate]]];
@@ -384,7 +383,7 @@ static NSString * const kENILLastActiveAccountKey = @"ENILLastActiveAccountMid";
   }
   QRLoginViewController *qr = [[QRLoginViewController alloc]
     initWithAccountDir:staging expectedMid:expectedMid delegate:self];
-  self.qrLogin = qr;
+  [self setQrLogin:qr];
   UINavigationController *wrap =
     [[UINavigationController alloc] initWithRootViewController:qr];
   [presenter enil_presentModalViewController:wrap];
@@ -399,7 +398,7 @@ static NSString * const kENILLastActiveAccountKey = @"ENILLastActiveAccountMid";
  * the expected one, so a mismatched scan can be detected. */
 - (void)presentReauthFromViewController:(UIViewController *)presenter
 {
-  [self beginQRLoginExpectingMid:[self.activeAccountPath lastPathComponent]
+  [self beginQRLoginExpectingMid:[[self activeAccountPath] lastPathComponent]
               fromViewController:presenter];
 }
 
@@ -440,7 +439,7 @@ static NSString * const kENILLastActiveAccountKey = @"ENILLastActiveAccountMid";
 
   /* If that mid is the live account, drop its engine before the file changes
    * underneath it (its token is now dead). */
-  if ([target isEqualToString:self.activeAccountPath]) {
+  if ([target isEqualToString:[self activeAccountPath]]) {
     [self teardownActiveEngine];
   }
 
@@ -466,8 +465,8 @@ static NSString * const kENILLastActiveAccountKey = @"ENILLastActiveAccountMid";
 - (void)qrLoginViewControllerDidComplete:(QRLoginViewController *)c
 {
   (void)c;
-  self.qrLogin = nil;
-  [self.nav enil_dismissModalViewController];
+  [self setQrLogin:nil];
+  [[self nav] enil_dismissModalViewController];
 }
 
 /* Cancel or post-success local failure: discard the staging dir (only ever
@@ -479,7 +478,7 @@ static NSString * const kENILLastActiveAccountKey = @"ENILLastActiveAccountMid";
   if ([staging length]) {
     [[NSFileManager defaultManager] XP_removeItemAtPath:staging error:NULL];
   }
-  self.qrLogin = nil;
+  [self setQrLogin:nil];
   [c enil_dismissModalViewController];
 }
 

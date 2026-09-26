@@ -30,53 +30,50 @@
 - (void)viewDidLoad
 {
   [super viewDidLoad];
-  self.view.backgroundColor = [UIColor blackColor];
-  self.navigationItem.title = [self.imagePath lastPathComponent];
+  [[self view] setBackgroundColor:[UIColor blackColor]];
+  [[self navigationItem] setTitle:[[self imagePath] lastPathComponent]];
   [self buildScrollView];
   [self loadImage];
 }
 
 - (void)buildScrollView
 {
-  UIScrollView *sv = [[UIScrollView alloc] initWithFrame:self.view.bounds];
-  sv.autoresizingMask =
-    UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-  sv.delegate = self;
-  sv.minimumZoomScale = 1.0;
-  sv.maximumZoomScale = 4.0;
-  sv.backgroundColor = [UIColor blackColor];
-  [self.view addSubview:sv];
-  self.scrollView = sv;
+  UIScrollView *sv = [[UIScrollView alloc] initWithFrame:[[self view] bounds]];
+  [sv setAutoresizingMask:UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight];
+  [sv setDelegate:self];
+  [sv setMinimumZoomScale:1.0];
+  [sv setMaximumZoomScale:4.0];
+  [sv setBackgroundColor:[UIColor blackColor]];
+  [[self view] addSubview:sv];
+  [self setScrollView:sv];
 }
 
 - (void)loadImage
 {
-  UIImage *image = [UIImage imageWithContentsOfFile:self.imagePath];
+  UIImage *image = [UIImage imageWithContentsOfFile:[self imagePath]];
   if (image == nil) {
     [self showFailureLabel];
     return;
   }
   UIImageView *iv = [[UIImageView alloc] initWithImage:image];
-  iv.contentMode = UIViewContentModeScaleAspectFit;
-  iv.frame = self.scrollView.bounds;
-  iv.autoresizingMask =
-    UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-  [self.scrollView addSubview:iv];
-  self.imageView = iv;
+  [iv setContentMode:UIViewContentModeScaleAspectFit];
+  [iv setFrame:[[self scrollView] bounds]];
+  [iv setAutoresizingMask:UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight];
+  [[self scrollView] addSubview:iv];
+  [self setImageView:iv];
 }
 
 - (void)showFailureLabel
 {
   ENILLog(@"MediaViewerViewController.loadImage",
-          @"could not load %@", self.imagePath);
-  UILabel *label = [[UILabel alloc] initWithFrame:self.view.bounds];
-  label.autoresizingMask =
-    UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-  label.numberOfLines = 0;
-  label.textColor = [UIColor whiteColor];
-  label.backgroundColor = [UIColor blackColor];
-  label.text = NSLocalizedString(@"Image unavailable.", nil);
-  [self.view addSubview:label];
+          @"could not load %@", [self imagePath]);
+  UILabel *label = [[UILabel alloc] initWithFrame:[[self view] bounds]];
+  [label setAutoresizingMask:UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight];
+  [label setNumberOfLines:0];
+  [label setTextColor:[UIColor whiteColor]];
+  [label setBackgroundColor:[UIColor blackColor]];
+  [label setText:NSLocalizedString(@"Image unavailable.", nil)];
+  [[self view] addSubview:label];
 }
 
 #pragma mark - UIScrollViewDelegate
@@ -84,7 +81,7 @@
 - (UIView *)viewForZoomingInScrollView:(UIScrollView *)scrollView
 {
   (void)scrollView;
-  return self.imageView;
+  return [self imageView];
 }
 
 @end

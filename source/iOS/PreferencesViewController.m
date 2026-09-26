@@ -27,7 +27,7 @@
 - (instancetype)init
 {
   if ((self = [super initWithStyle:UITableViewStyleGrouped])) {
-    self.navigationItem.title = NSLocalizedString(@"Settings", nil);
+    [[self navigationItem] setTitle:NSLocalizedString(@"Settings", nil)];
   }
   return self;
 }
@@ -35,29 +35,27 @@
 - (void)viewDidLoad
 {
   [super viewDidLoad];
-  self.urlField = [self makeFieldSecure:NO
-                            placeholder:@"https://your-worker.workers.dev"];
-  self.secretField = [self makeFieldSecure:YES
+  [self setUrlField:[self makeFieldSecure:NO
+                            placeholder:@"https://your-worker.workers.dev"]];
+  [self setSecretField:[self makeFieldSecure:YES
                                placeholder:NSLocalizedString(@"Shared Secret",
-                                                             nil)];
+                                                             nil)]];
   ENILKeychain *kc = [ENILKeychain sharedKeychain];
-  self.urlField.text = [kc workerURL];
-  self.secretField.text = [kc workerSecret];
+  [[self urlField] setText:[kc workerURL]];
+  [[self secretField] setText:[kc workerSecret]];
 
   /* A single Done button: it commits any edited worker credentials, then (when
    * presented modally) closes. There is no separate Save — see -doneAction.
    * Disabled as the nav root (gate / empty-state): there is no active account to
    * return to, so Done has nothing to do until one exists. dismissesOnDone is
    * exactly that condition (modal <=> an account is active — see the header). */
-  self.navigationItem.rightBarButtonItem =
-    [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
+  [[self navigationItem] setRightBarButtonItem:[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
                                                   target:self
-                                                  action:@selector(doneAction)];
-  self.navigationItem.rightBarButtonItem.enabled = self.dismissesOnDone;
+                                                  action:@selector(doneAction)]];
+  [[[self navigationItem] rightBarButtonItem] setEnabled:[self dismissesOnDone]];
 
-  self.libraryVersions = [self linkedLibraryVersions];
-  self.sortedLibraryKeys =
-    [self.libraryVersions.allKeys sortedArrayUsingSelector:@selector(compare:)];
+  [self setLibraryVersions:[self linkedLibraryVersions]];
+  [self setSortedLibraryKeys:[[[self libraryVersions] allKeys] sortedArrayUsingSelector:@selector(compare:)]];
 }
 
 - (void)viewWillAppear:(BOOL)animated
@@ -69,13 +67,12 @@
 - (void)viewDidAppear:(BOOL)animated
 {
   [super viewDidAppear:animated];
-  if (![self.urlField.text length]) [self.urlField becomeFirstResponder];
+  if (![[[self urlField] text] length]) [[self urlField] becomeFirstResponder];
 }
 
 - (void)reloadAccounts
 {
-  self.accounts =
-    self.coordinator ? [self.coordinator accountSummaries] : [NSArray array];
+  [self setAccounts:[self coordinator] ? [[self coordinator] accountSummaries] : [NSArray array]];
 }
 
 #pragma mark - Section layout
@@ -83,18 +80,18 @@
 /* The Accounts section only exists with a coordinator to drive it; without one
  * (defensive) the table is worker-only. Section roles are resolved through
  * these so the row math reads the same in both shapes. */
-- (BOOL)showsAccounts { return self.coordinator != nil; }
-- (NSInteger)accountsSection { return self.showsAccounts ? 0 : -1; }
-- (NSInteger)workerSection   { return self.showsAccounts ? 1 : 0; }
+- (BOOL)showsAccounts { return [self coordinator] != nil; }
+- (NSInteger)accountsSection { return [self showsAccounts] ? 0 : -1; }
+- (NSInteger)workerSection   { return [self showsAccounts] ? 1 : 0; }
 /* Linked Libraries — read-only version list, always last. The iOS port of the
  * macOS AboutWindowController key/value table. */
-- (NSInteger)librariesSection { return self.workerSection + 1; }
+- (NSInteger)librariesSection { return [self workerSection] + 1; }
 
 - (BOOL)hasActiveAccount
 {
-  NSUInteger i, n = [self.accounts count];
+  NSUInteger i, n = [[self accounts] count];
   for (i = 0; i < n; i++) {
-    if ([[[self.accounts objectAtIndex:i] objectForKey:@"active"] boolValue]) {
+    if ([[[[self accounts] objectAtIndex:i] objectForKey:@"active"] boolValue]) {
       return YES;
     }
   }
@@ -106,12 +103,12 @@
  * Accounts section. Account rows occupy [0, accounts.count). */
 - (NSUInteger)reauthRow
 {
-  return self.hasActiveAccount ? [self.accounts count] : NSNotFound;
+  return [self hasActiveAccount] ? [[self accounts] count] : NSNotFound;
 }
 
 - (NSUInteger)addAccountRow
 {
-  return [self.accounts count] + (self.hasActiveAccount ? 1 : 0);
+  return [[self accounts] count] + ([self hasActiveAccount] ? 1 : 0);
 }
 
 #pragma mark - Field construction
@@ -119,15 +116,15 @@
 - (UITextField *)makeFieldSecure:(BOOL)secure placeholder:(NSString *)placeholder
 {
   UITextField *field = [[UITextField alloc] initWithFrame:CGRectZero];
-  field.placeholder = placeholder;
-  field.secureTextEntry = secure;
-  field.delegate = self;
-  field.autocorrectionType = UITextAutocorrectionTypeNo;
-  field.autocapitalizationType = UITextAutocapitalizationTypeNone;
-  field.clearButtonMode = UITextFieldViewModeWhileEditing;
-  field.contentVerticalAlignment = UIControlContentVerticalAlignmentCenter;
-  field.returnKeyType = secure ? UIReturnKeyDone : UIReturnKeyNext;
-  field.keyboardType = secure ? UIKeyboardTypeDefault : UIKeyboardTypeURL;
+  [field setPlaceholder:placeholder];
+  [field setSecureTextEntry:secure];
+  [field setDelegate:self];
+  [field setAutocorrectionType:UITextAutocorrectionTypeNo];
+  [field setAutocapitalizationType:UITextAutocapitalizationTypeNone];
+  [field setClearButtonMode:UITextFieldViewModeWhileEditing];
+  [field setContentVerticalAlignment:UIControlContentVerticalAlignmentCenter];
+  [field setReturnKeyType:secure ? UIReturnKeyDone : UIReturnKeyNext];
+  [field setKeyboardType:secure ? UIKeyboardTypeDefault : UIKeyboardTypeURL];
   [field addTarget:self
             action:@selector(fieldChanged:)
   forControlEvents:UIControlEventEditingChanged];
@@ -139,16 +136,16 @@
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
 {
   (void)tableView;
-  return (self.showsAccounts ? 2 : 1) + 1;  /* + the Linked Libraries section */
+  return ([self showsAccounts] ? 2 : 1) + 1;  /* + the Linked Libraries section */
 }
 
 - (NSInteger)tableView:(UITableView *)tableView
  numberOfRowsInSection:(NSInteger)section
 {
   (void)tableView;
-  if (section == self.workerSection) return 2;
-  if (section == self.librariesSection)
-    return (NSInteger)[self.sortedLibraryKeys count];
+  if (section == [self workerSection]) return 2;
+  if (section == [self librariesSection])
+    return (NSInteger)[[self sortedLibraryKeys] count];
   return (NSInteger)[self addAccountRow] + 1;  /* accounts + (reauth) + add */
 }
 
@@ -156,10 +153,10 @@
 titleForHeaderInSection:(NSInteger)section
 {
   (void)tableView;
-  if (section == self.workerSection) {
+  if (section == [self workerSection]) {
     return NSLocalizedString(@"Cloudflare Worker", nil);
   }
-  if (section == self.librariesSection) {
+  if (section == [self librariesSection]) {
     return NSLocalizedString(@"Linked Libraries", nil);
   }
   return NSLocalizedString(@"Accounts", nil);
@@ -172,14 +169,14 @@ titleForHeaderInSection:(NSInteger)section
 titleForFooterInSection:(NSInteger)section
 {
   (void)tableView;
-  if (section == self.accountsSection) {
-    return [self.accounts count]
+  if (section == [self accountsSection]) {
+    return [[self accounts] count]
       ? NSLocalizedString(@"Swipe an account to log out.", nil)
       : nil;
   }
   /* Only the worker section carries a footer below; Linked Libraries has none. */
-  if (section != self.workerSection) return nil;
-  if ([self.statusMessage length]) return self.statusMessage;
+  if (section != [self workerSection]) return nil;
+  if ([[self statusMessage] length]) return [self statusMessage];
   if ([self envOverrideActive]) {
     return NSLocalizedString(
       @"Environment variables override these settings while set.", nil);
@@ -192,13 +189,13 @@ titleForFooterInSection:(NSInteger)section
 - (UITableViewCell *)tableView:(UITableView *)tableView
          cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-  if (indexPath.section == self.workerSection) {
-    return [self workerCellForRow:indexPath.row inTableView:tableView];
+  if ([indexPath section] == [self workerSection]) {
+    return [self workerCellForRow:[indexPath row] inTableView:tableView];
   }
-  if (indexPath.section == self.librariesSection) {
-    return [self libraryCellForRow:indexPath.row inTableView:tableView];
+  if ([indexPath section] == [self librariesSection]) {
+    return [self libraryCellForRow:[indexPath row] inTableView:tableView];
   }
-  return [self accountCellForRow:(NSUInteger)indexPath.row inTableView:tableView];
+  return [self accountCellForRow:(NSUInteger)[indexPath row] inTableView:tableView];
 }
 
 - (UITableViewCell *)workerCellForRow:(NSInteger)row
@@ -208,12 +205,11 @@ titleForFooterInSection:(NSInteger)section
   UITableViewCell *cell =
     [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
                            reuseIdentifier:nil];
-  cell.selectionStyle = UITableViewCellSelectionStyleNone;
-  UITextField *field = (row == 0) ? self.urlField : self.secretField;
-  field.frame = CGRectInset(cell.contentView.bounds, 15.0, 0.0);
-  field.autoresizingMask =
-    UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-  [cell.contentView addSubview:field];
+  [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
+  UITextField *field = (row == 0) ? [self urlField] : [self secretField];
+  [field setFrame:CGRectInset([[cell contentView] bounds], 15.0, 0.0)];
+  [field setAutoresizingMask:UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight];
+  [[cell contentView] addSubview:field];
   return cell;
 }
 
@@ -226,23 +222,21 @@ titleForFooterInSection:(NSInteger)section
     cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
                                   reuseIdentifier:cellId];
   }
-  cell.accessoryType = UITableViewCellAccessoryNone;
-  cell.textLabel.textColor = [UIColor blackColor];
+  [cell setAccessoryType:UITableViewCellAccessoryNone];
+  [[cell textLabel] setTextColor:[UIColor blackColor]];
 
-  if (row < [self.accounts count]) {
-    NSDictionary *acct = [self.accounts objectAtIndex:row];
-    cell.textLabel.text = [acct objectForKey:@"displayName"];
-    cell.accessoryType =
-      [[acct objectForKey:@"active"] boolValue]
+  if (row < [[self accounts] count]) {
+    NSDictionary *acct = [[self accounts] objectAtIndex:row];
+    [[cell textLabel] setText:[acct objectForKey:@"displayName"]];
+    [cell setAccessoryType:[[acct objectForKey:@"active"] boolValue]
         ? UITableViewCellAccessoryCheckmark
-        : UITableViewCellAccessoryNone;
+        : UITableViewCellAccessoryNone];
   } else if (row == [self reauthRow]) {
-    cell.textLabel.text =
-      NSLocalizedString(@"Reauthenticate", nil);
-    cell.textLabel.textColor = [UIColor blueColor];
+    [[cell textLabel] setText:NSLocalizedString(@"Reauthenticate", nil)];
+    [[cell textLabel] setTextColor:[UIColor blueColor]];
   } else {
-    cell.textLabel.text = NSLocalizedString(@"Add Account", nil);
-    cell.textLabel.textColor = [UIColor blueColor];
+    [[cell textLabel] setText:NSLocalizedString(@"Add Account", nil)];
+    [[cell textLabel] setTextColor:[UIColor blueColor]];
   }
   return cell;
 }
@@ -274,10 +268,10 @@ titleForFooterInSection:(NSInteger)section
     cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1
                                   reuseIdentifier:cellId];
   }
-  cell.selectionStyle = UITableViewCellSelectionStyleNone;
-  NSString *key = [self.sortedLibraryKeys objectAtIndex:(NSUInteger)row];
-  cell.textLabel.text = key;
-  cell.detailTextLabel.text = [self.libraryVersions objectForKey:key];
+  [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
+  NSString *key = [[self sortedLibraryKeys] objectAtIndex:(NSUInteger)row];
+  [[cell textLabel] setText:key];
+  [[cell detailTextLabel] setText:[[self libraryVersions] objectForKey:key]];
   return cell;
 }
 
@@ -287,8 +281,8 @@ titleForFooterInSection:(NSInteger)section
 canEditRowAtIndexPath:(NSIndexPath *)indexPath
 {
   (void)tableView;
-  return indexPath.section == self.accountsSection &&
-         (NSUInteger)indexPath.row < [self.accounts count];
+  return [indexPath section] == [self accountsSection] &&
+         (NSUInteger)[indexPath row] < [[self accounts] count];
 }
 
 - (UITableViewCellEditingStyle)tableView:(UITableView *)tableView
@@ -312,12 +306,12 @@ commitEditingStyle:(UITableViewCellEditingStyle)editingStyle
 forRowAtIndexPath:(NSIndexPath *)indexPath
 {
   if (editingStyle != UITableViewCellEditingStyleDelete) return;
-  NSString *path = [self pathForAccountRow:(NSUInteger)indexPath.row];
+  NSString *path = [self pathForAccountRow:(NSUInteger)[indexPath row]];
   if (![path length]) return;
   /* YES => the active account went away and the coordinator already reshaped the
    * root + dismissed this modal; nothing more to do. NO => a background account
    * was removed in place, so refresh the list. */
-  if (![self.coordinator logOutAccountAtPath:path]) {
+  if (![[self coordinator] logOutAccountAtPath:path]) {
     [self reloadAccounts];
     [tableView reloadData];
   }
@@ -329,13 +323,13 @@ forRowAtIndexPath:(NSIndexPath *)indexPath
 didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
   [tableView deselectRowAtIndexPath:indexPath animated:YES];
-  if (indexPath.section != self.accountsSection) return;
+  if ([indexPath section] != [self accountsSection]) return;
 
-  NSUInteger row = (NSUInteger)indexPath.row;
-  if (row < [self.accounts count]) {
+  NSUInteger row = (NSUInteger)[indexPath row];
+  if (row < [[self accounts] count]) {
     [self switchToAccountRow:row];
   } else if (row == [self reauthRow]) {
-    [self.coordinator presentReauthFromViewController:self];
+    [[self coordinator] presentReauthFromViewController:self];
   } else {
     [self addAccount];
   }
@@ -343,10 +337,10 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 
 - (void)switchToAccountRow:(NSUInteger)row
 {
-  NSDictionary *acct = [self.accounts objectAtIndex:row];
+  NSDictionary *acct = [[self accounts] objectAtIndex:row];
   if ([[acct objectForKey:@"active"] boolValue]) return;  /* already active */
   /* On success the coordinator activates the engine and dismisses this modal. */
-  [self.coordinator switchToAccountAtPath:[acct objectForKey:@"path"]];
+  [[self coordinator] switchToAccountAtPath:[acct objectForKey:@"path"]];
 }
 
 - (void)addAccount
@@ -361,25 +355,25 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   }
   if (!ready) {
     [self XP_showAlertWithTitle:NSLocalizedString(@"Couldn't Add Account", nil)
-                       message:self.statusMessage
+                       message:[self statusMessage]
                   dismissTitle:NSLocalizedString(@"OK", nil)];
     return;
   }
-  [self.coordinator presentAddAccountFromViewController:self];
+  [[self coordinator] presentAddAccountFromViewController:self];
 }
 
 - (NSString *)pathForAccountRow:(NSUInteger)row
 {
-  if (row >= [self.accounts count]) return nil;
-  return [[self.accounts objectAtIndex:row] objectForKey:@"path"];
+  if (row >= [[self accounts] count]) return nil;
+  return [[[self accounts] objectAtIndex:row] objectForKey:@"path"];
 }
 
 #pragma mark - UITextFieldDelegate
 
 - (BOOL)textFieldShouldReturn:(UITextField *)textField
 {
-  if (textField == self.urlField) {
-    [self.secretField becomeFirstResponder];
+  if (textField == [self urlField]) {
+    [[self secretField] becomeFirstResponder];
     return NO;
   }
   [textField resignFirstResponder];
@@ -394,7 +388,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 - (void)fieldChanged:(id)sender
 {
   (void)sender;
-  self.workerDirty = YES;  /* programmatic prefill doesn't fire this, only typing */
+  [self setWorkerDirty:YES];  /* programmatic prefill doesn't fire this, only typing */
 }
 
 /* The single Done verb: commit any pending worker-credential edit, then close
@@ -404,9 +398,9 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
  * already surfaced it in the footer, so we stay put. */
 - (void)doneAction
 {
-  [self.view endEditing:YES];
+  [[self view] endEditing:YES];
   if (![self commitWorkerCredentialsIfNeeded]) return;
-  if (self.dismissesOnDone) [self enil_dismissModalViewController];
+  if ([self dismissesOnDone]) [self enil_dismissModalViewController];
 }
 
 /* Returns YES when it is safe to proceed (saved, or nothing changed); NO when a
@@ -415,9 +409,9 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
  * observes to continue a launch gated on missing credentials. */
 - (BOOL)commitWorkerCredentialsIfNeeded
 {
-  if (!self.workerDirty) return YES;
-  NSString *url = [self trimmed:self.urlField.text];
-  NSString *secret = [self trimmed:self.secretField.text];
+  if (![self workerDirty]) return YES;
+  NSString *url = [self trimmed:[[self urlField] text]];
+  NSString *secret = [self trimmed:[[self secretField] text]];
   if (![url length] || ![secret length]) {
     [self setStatusMessageAndReload:
       NSLocalizedString(@"Both fields are required", nil)];
@@ -431,7 +425,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   }
   ENILLog(@"PreferencesViewController.commit",
           @"saved worker credentials (url=%@)", url);
-  self.workerDirty = NO;
+  [self setWorkerDirty:NO];
   return YES;
 }
 
@@ -445,8 +439,8 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 
 - (void)setStatusMessageAndReload:(NSString *)message
 {
-  self.statusMessage = message;
-  [self.tableView reloadData];
+  [self setStatusMessage:message];
+  [[self tableView] reloadData];
 }
 
 - (BOOL)envOverrideActive
@@ -458,8 +452,8 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 
 - (void)dealloc
 {
-  _urlField.delegate = nil;
-  _secretField.delegate = nil;
+  [_urlField setDelegate:nil];
+  [_secretField setDelegate:nil];
 }
 
 @end

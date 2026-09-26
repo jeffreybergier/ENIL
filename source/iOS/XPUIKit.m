@@ -52,7 +52,7 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunguarded-availability"
 #endif
-  self.edgesForExtendedLayout = UIRectEdgeNone;
+  [self setEdgesForExtendedLayout:UIRectEdgeNone];
 #ifdef __clang__
 #pragma clang diagnostic pop
 #endif
@@ -148,15 +148,15 @@ static id XPUIKitCreateNotificationSettings(Class settingsClass,
 - (UIScrollView *)XP_scrollView
 {
   /* iOS 4.3 floor: -scrollView doesn't exist yet. Return nil rather than throw;
-   * the caller's `.decelerationRate = …` then no-ops on nil. The pragma silences
-   * -Wunguarded-availability for naming the iOS-5 accessor against that floor
+   * the caller's `setDecelerationRate:` message then no-ops on nil. The pragma
+   * silences -Wunguarded-availability for naming the iOS-5 accessor against that floor
    * (the respondsToSelector: gate is what keeps it safe at runtime). */
   if (![self respondsToSelector:@selector(scrollView)]) return nil;
 #ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunguarded-availability"
 #endif
-  return self.scrollView;
+  return [self scrollView];
 #ifdef __clang__
 #pragma clang diagnostic pop
 #endif
@@ -182,8 +182,8 @@ static id XPUIKitCreateNotificationSettings(Class settingsClass,
 
 - (void)XP_setBackgroundTransparent
 {
-  self.opaque = NO;
-  self.backgroundColor = [UIColor clearColor];
+  [self setOpaque:NO];
+  [self setBackgroundColor:[UIColor clearColor]];
 }
 
 - (void)XP_removeShadow
@@ -192,7 +192,7 @@ static id XPUIKitCreateNotificationSettings(Class settingsClass,
   UIView *v;
   while ((v = [e nextObject])) {
     if (![v isKindOfClass:[UIImageView class]]) break;  /* hit the content view */
-    v.hidden = YES;
+    [v setHidden:YES];
   }
 }
 
@@ -275,14 +275,14 @@ static id XPUIKitCreateNotificationSettings(Class settingsClass,
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"   /* UILocalNotification: iOS 10+ SDK */
 #endif
   UILocalNotification *n = [[UILocalNotification alloc] init];
-  n.soundName = UILocalNotificationDefaultSoundName;
+  [n setSoundName:UILocalNotificationDefaultSoundName];
   /* alertTitle is iOS 8.2+; KVC dodges availability. Where it exists keep the
    * title separate; pre-8.2 fold it into the body so the sender still shows. */
   if ([title length] && [n respondsToSelector:@selector(setAlertTitle:)]) {
-    n.alertBody = body;
+    [n setAlertBody:body];
     [n setValue:title forKey:@"alertTitle"];
   } else {
-    n.alertBody = [title length] ? [NSString stringWithFormat:@"%@: %@", title, body] : body;
+    [n setAlertBody:[title length] ? [NSString stringWithFormat:@"%@: %@", title, body] : body];
   }
   [[UIApplication sharedApplication] presentLocalNotificationNow:n];
 #ifdef __clang__
@@ -308,7 +308,7 @@ static id XPUIKitCreateNotificationSettings(Class settingsClass,
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #endif
-  app.applicationIconBadgeNumber = (count > 0) ? count : 0;
+  [app setApplicationIconBadgeNumber:(count > 0) ? count : 0];
 #ifdef __clang__
 #pragma clang diagnostic pop
 #endif

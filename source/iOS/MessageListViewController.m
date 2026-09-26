@@ -62,40 +62,38 @@ static const CGFloat kComposeBarHeight = 44.0;
 - (void)viewDidLoad
 {
   [super viewDidLoad];
-  self.navigationItem.title =
-    [self.displayName length] ? self.displayName : self.chatId;
-  self.navigationItem.rightBarButtonItem = [self makeMarkSeenBarButton];
-  self.view.backgroundColor = [UIColor messagesBackgroundColor];
+  [[self navigationItem] setTitle:[[self displayName] length] ? [self displayName] : [self chatId]];
+  [[self navigationItem] setRightBarButtonItem:[self makeMarkSeenBarButton]];
+  [[self view] setBackgroundColor:[UIColor messagesBackgroundColor]];
 
   /* Springs-and-struts split: the web view fills everything above the bar; the
    * bar is a bottom-docked strip. Both frames are recomputed on keyboard
    * show/hide and on bar height changes (see -relayoutComposeBarAnimated:…). */
-  CGRect b = self.view.bounds;
+  CGRect b = [[self view] bounds];
   CGFloat barTop = b.size.height - kComposeBarHeight;
 
   UIWebView *web =
     [[UIWebView alloc] initWithFrame:CGRectMake(0, 0, b.size.width, barTop)];
-  web.autoresizingMask =
-    UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-  web.delegate = self;
+  [web setAutoresizingMask:UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight];
+  [web setDelegate:self];
   /* Coast like a UITableView (iOS 5+; no-op on the 4.3 floor — nil scrollView). */
-  [web XP_scrollView].decelerationRate = UIScrollViewDecelerationRateNormal;
+  [[web XP_scrollView] setDecelerationRate:UIScrollViewDecelerationRateNormal];
   /* Composite through to the host view (the macOS WKWebView's drawsBackground
    * equivalent); UIWebView ships opaque + white otherwise. */
   [web XP_setBackgroundTransparent];
-  [self.view addSubview:web];
-  self.webView = web;
+  [[self view] addSubview:web];
+  [self setWebView:web];
 
   MessageSendViewController *bar = [[MessageSendViewController alloc]
     initWithFrame:CGRectMake(0, barTop, b.size.width, kComposeBarHeight)];
-  bar.delegate = self;
-  [self.view addSubview:bar];
-  self.sendBar = bar;
+  [bar setDelegate:self];
+  [[self view] addSubview:bar];
+  [self setSendBar:bar];
 
   /* Bar rests at the view bottom, keyboard down, until the first keyboard
    * notification flips composing on and re-docks it above the keyboard. */
-  self.composeBarBottomY = b.size.height;
-  self.composing = NO;
+  [self setComposeBarBottomY:b.size.height];
+  [self setComposing:NO];
 
   [self observeEngineNotifications];
   [self observeKeyboard];
@@ -106,7 +104,7 @@ static const CGFloat kComposeBarHeight = 44.0;
 - (void)viewWillDisappear:(BOOL)animated
 {
   [super viewWillDisappear:animated];
-  [self.view endEditing:YES];  /* drop the keyboard before the pop */
+  [[self view] endEditing:YES];  /* drop the keyboard before the pop */
 }
 
 - (void)observeEngineNotifications
@@ -154,22 +152,22 @@ static const CGFloat kComposeBarHeight = 44.0;
                              curve:(UIViewAnimationCurve)curve
                           duration:(NSTimeInterval)dur
 {
-  CGFloat w = self.view.bounds.size.width;
+  CGFloat w = [[self view] bounds].size.width;
   /* Set composing first — it only records state + marks layout dirty, so
    * -preferredHeight below already reflects it and the bar collapses the moment
    * composing ends. The fade + frame changes are applied by -layoutIfNeeded
    * inside the animation block, so they ride the keyboard's own timing. */
-  [self.sendBar setComposing:self.composing];
-  CGFloat h = [self.sendBar preferredHeight];
-  CGFloat barTop = self.composeBarBottomY - h;
+  [[self sendBar] setComposing:[self composing]];
+  CGFloat h = [[self sendBar] preferredHeight];
+  CGFloat barTop = [self composeBarBottomY] - h;
   if (animated && dur > 0.0) {
     [UIView beginAnimations:nil context:NULL];
     [UIView setAnimationDuration:dur];
     [UIView setAnimationCurve:curve];
   }
-  self.sendBar.frame = CGRectMake(0, barTop, w, h);
-  self.webView.frame = CGRectMake(0, 0, w, barTop);
-  [self.sendBar layoutIfNeeded];
+  [[self sendBar] setFrame:CGRectMake(0, barTop, w, h)];
+  [[self webView] setFrame:CGRectMake(0, 0, w, barTop)];
+  [[self sendBar] layoutIfNeeded];
   if (animated && dur > 0.0) [UIView commitAnimations];
 }
 
@@ -193,12 +191,12 @@ static const CGFloat kComposeBarHeight = 44.0;
   /* Convert the screen-space keyboard rect into view coords so the math stays
    * correct across rotation. */
   CGRect end = [[info objectForKey:UIKeyboardFrameEndUserInfoKey] CGRectValue];
-  CGRect kb = [self.view convertRect:end fromView:nil];
+  CGRect kb = [[self view] convertRect:end fromView:nil];
   CGFloat bottom = kb.origin.y;
-  CGFloat maxBottom = self.view.bounds.size.height;
+  CGFloat maxBottom = [[self view] bounds].size.height;
   if (bottom > maxBottom) bottom = maxBottom;
-  self.composeBarBottomY = bottom;
-  self.composing = YES;
+  [self setComposeBarBottomY:bottom];
+  [self setComposing:YES];
   [self relayoutComposeBarAnimated:YES
                              curve:[self keyboardCurve:info]
                           duration:[self keyboardDuration:info]];
@@ -208,8 +206,8 @@ static const CGFloat kComposeBarHeight = 44.0;
 - (void)keyboardWillHide:(NSNotification *)note
 {
   NSDictionary *info = [note userInfo];
-  self.composeBarBottomY = self.view.bounds.size.height;
-  self.composing = NO;
+  [self setComposeBarBottomY:[[self view] bounds].size.height];
+  [self setComposing:NO];
   [self relayoutComposeBarAnimated:YES
                              curve:[self keyboardCurve:info]
                           duration:[self keyboardDuration:info]];
@@ -217,7 +215,7 @@ static const CGFloat kComposeBarHeight = 44.0;
 
 - (void)scrollWebViewToBottom
 {
-  [self.webView stringByEvaluatingJavaScriptFromString:
+  [[self webView] stringByEvaluatingJavaScriptFromString:
     @"window.scrollTo(0, document.body.scrollHeight);"];
 }
 
@@ -231,17 +229,17 @@ static const CGFloat kComposeBarHeight = 44.0;
   @try {
     long long oldest = 0;
     BOOL more = NO;
-    NSURL *url = [self.account writeChatPageHTMLForChatId:self.chatId
+    NSURL *url = [[self account] writeChatPageHTMLForChatId:[self chatId]
                                                outOldest:&oldest
                                               outHasMore:&more];
     if (url == nil) {
       ENILLog(@"MessageListViewController.reloadContent",
-              @"nil URL for chat %@", self.chatId);
+              @"nil URL for chat %@", [self chatId]);
       return;
     }
-    self.oldestTime = oldest;
-    self.hasMore = more;
-    [self.webView loadRequest:[NSURLRequest requestWithURL:url]];
+    [self setOldestTime:oldest];
+    [self setHasMore:more];
+    [[self webView] loadRequest:[NSURLRequest requestWithURL:url]];
   } @catch (NSException *exception) {
     ENILLog(@"MessageListViewController.reloadContent",
             @"exception: %@", exception);
@@ -252,18 +250,18 @@ static const CGFloat kComposeBarHeight = 44.0;
  * advancing the pagination cursor. Mirrors macOS -loadMoreMessages. */
 - (void)loadMoreMessages
 {
-  if (!self.hasMore || ![self.chatId length]) return;
+  if (![self hasMore] || ![[self chatId] length]) return;
   @try {
     BOOL more = NO;
-    long long newOldest = self.oldestTime;
-    NSString *js = [self.account prependMessagesJSForChatId:self.chatId
-                                                 beforeTime:self.oldestTime
+    long long newOldest = [self oldestTime];
+    NSString *js = [[self account] prependMessagesJSForChatId:[self chatId]
+                                                 beforeTime:[self oldestTime]
                                                     hasMore:&more
                                               newOldestTime:&newOldest];
-    if (![js length]) { self.hasMore = NO; return; }
-    [self.webView stringByEvaluatingJavaScriptFromString:js];
-    self.oldestTime = newOldest;
-    self.hasMore = more;
+    if (![js length]) { [self setHasMore:NO]; return; }
+    [[self webView] stringByEvaluatingJavaScriptFromString:js];
+    [self setOldestTime:newOldest];
+    [self setHasMore:more];
   } @catch (NSException *exception) {
     ENILLog(@"MessageListViewController.loadMoreMessages",
             @"exception: %@", exception);
@@ -275,10 +273,10 @@ static const CGFloat kComposeBarHeight = 44.0;
 - (void)presentMediaAtRelativePath:(NSString *)rel
 {
   if (![rel length]) return;
-  NSString *full = [[self.account enilDir] stringByAppendingPathComponent:rel];
+  NSString *full = [[[self account] enilDir] stringByAppendingPathComponent:rel];
   MediaViewerViewController *viewer =
     [[MediaViewerViewController alloc] initWithImagePath:full];
-  [self.navigationController pushViewController:viewer animated:YES];
+  [[self navigationController] pushViewController:viewer animated:YES];
 }
 
 #pragma mark - Notifications
@@ -288,8 +286,8 @@ static const CGFloat kComposeBarHeight = 44.0;
   NSDictionary *info = [note userInfo];
   NSString *chatId = [info objectForKey:@"chat_id"];
   NSString *js = [info objectForKey:@"js"];
-  if (![chatId isEqualToString:self.chatId] || ![js length]) return;
-  [self.webView stringByEvaluatingJavaScriptFromString:js];
+  if (![chatId isEqualToString:[self chatId]] || ![js length]) return;
+  [[self webView] stringByEvaluatingJavaScriptFromString:js];
   [self updateMarkSeenEnabled];
 }
 
@@ -332,8 +330,8 @@ static const CGFloat kComposeBarHeight = 44.0;
                                      style:UIBarButtonItemStyleBordered
                                     target:self
                                     action:@selector(markChatSeenTapped)];
-  item.accessibilityLabel = NSLocalizedString(@"Mark as Seen", nil);
-  self.markSeenButton = item;
+  [item setAccessibilityLabel:NSLocalizedString(@"Mark as Seen", nil)];
+  [self setMarkSeenButton:item];
   return item;
 }
 
@@ -341,17 +339,17 @@ static const CGFloat kComposeBarHeight = 44.0;
  * advance the seen marker to the server head and refresh the button. */
 - (void)markChatSeenTapped
 {
-  if ([self.chatId length] == 0) return;
+  if ([[self chatId] length] == 0) return;
   @try {
-    if ([self.account unreadCountForChatId:self.chatId] <= 0) return;
-    [self.account markChatSeenAtServerHead:self.chatId];
+    if ([[self account] unreadCountForChatId:[self chatId]] <= 0) return;
+    [[self account] markChatSeenAtServerHead:[self chatId]];
     /* Disable the button in memory until the SSE push confirms the seen
      * state.  We no longer write to the DB optimistically — that created a
      * split source of truth where the button read fresh DB (unreadCount==0)
      * but the chat list cached its rows and still showed the blue dot.
      * Now only the SSE path writes to the DB; this in-memory flag keeps the
      * button greyed until the confirmation arrives. */
-    self.pendingMarkSeenChatId = self.chatId;
+    [self setPendingMarkSeenChatId:[self chatId]];
     [self updateMarkSeenEnabled];
   } @catch (NSException *exception) {
     ENILLog(@"MessageListViewController.markChatSeenTapped",
@@ -365,21 +363,21 @@ static const CGFloat kComposeBarHeight = 44.0;
 {
   @try {
     BOOL canMarkSeen =
-      ([self.chatId length] > 0 &&
-       [self.account unreadCountForChatId:self.chatId] > 0);
+      ([[self chatId] length] > 0 &&
+       [[self account] unreadCountForChatId:[self chatId]] > 0);
     /* If the DB now says nothing is unread, the SSE confirmation has landed —
      * clear our in-memory pending flag. */
     if (!canMarkSeen) {
-      self.pendingMarkSeenChatId = nil;
+      [self setPendingMarkSeenChatId:nil];
     }
     /* In-memory pending flag: keep the button disabled even if the DB still
      * reports unread messages, because we sent the RPC and are waiting for
      * the SSE push to confirm the seen state. */
-    if (self.pendingMarkSeenChatId && self.chatId &&
-        [self.pendingMarkSeenChatId isEqualToString:self.chatId]) {
-      self.markSeenButton.enabled = NO;
+    if ([self pendingMarkSeenChatId] && [self chatId] &&
+        [[self pendingMarkSeenChatId] isEqualToString:[self chatId]]) {
+      [[self markSeenButton] setEnabled:NO];
     } else {
-      self.markSeenButton.enabled = canMarkSeen;
+      [[self markSeenButton] setEnabled:canMarkSeen];
     }
   } @catch (NSException *exception) {
     ENILLog(@"MessageListViewController.updateMarkSeenEnabled",
@@ -398,14 +396,14 @@ static const CGFloat kComposeBarHeight = 44.0;
     sticonResources:(NSArray *)sticonResources
 {
   (void)bar;
-  if ([text length] == 0 || [self.chatId length] == 0) return;
+  if ([text length] == 0 || [[self chatId] length] == 0) return;
   @try {
     BOOL ok = ([sticonResources count] > 0)
-      ? [self.account sendInlineSticons:sticonResources text:text toChatId:self.chatId]
-      : [self.account sendText:text toChatId:self.chatId];
+      ? [[self account] sendInlineSticons:sticonResources text:text toChatId:[self chatId]]
+      : [[self account] sendText:text toChatId:[self chatId]];
     if (!ok)
       ENILLog(@"MessageListViewController.messageSend",
-              @"send returned NO for chat %@", self.chatId);
+              @"send returned NO for chat %@", [self chatId]);
   } @catch (NSException *exception) {
     ENILLog(@"MessageListViewController.messageSend",
             @"exception: %@", exception);
@@ -432,7 +430,7 @@ static const CGFloat kComposeBarHeight = 44.0;
 - (void)messageSendDidTapStickers:(MessageSendViewController *)bar
 {
   (void)bar;
-  StickerViewController *picker = self.stickerPicker;
+  StickerViewController *picker = [self stickerPicker];
   if (picker == nil) {
     ENILLog(@"MessageListViewController.messageSendDidTapStickers",
             @"no shared sticker picker");
@@ -440,7 +438,7 @@ static const CGFloat kComposeBarHeight = 44.0;
   }
   /* Claim the shared picker's delegate for the duration it is presented; every
    * dismiss path nils it again so a backgrounded thread never receives a pick. */
-  picker.pickerDelegate = self;
+  [picker setPickerDelegate:self];
   [self enil_presentModalViewController:picker];
 }
 
@@ -451,7 +449,7 @@ static const CGFloat kComposeBarHeight = 44.0;
 - (void)messageSendDidTapImagePicker:(MessageSendViewController *)bar
 {
   (void)bar;
-  if ([self.chatId length] == 0) return;
+  if ([[self chatId] length] == 0) return;
   if (![UIImagePickerController isSourceTypeAvailable:
           UIImagePickerControllerSourceTypePhotoLibrary]) {
     ENILLog(@"MessageListViewController.imagePicker",
@@ -459,8 +457,8 @@ static const CGFloat kComposeBarHeight = 44.0;
     return;
   }
   UIImagePickerController *picker = [[UIImagePickerController alloc] init];
-  picker.sourceType = UIImagePickerControllerSourceTypePhotoLibrary;
-  picker.delegate = self;
+  [picker setSourceType:UIImagePickerControllerSourceTypePhotoLibrary];
+  [picker setDelegate:self];
   [self enil_presentModalViewController:picker];
 }
 
@@ -473,15 +471,15 @@ static const CGFloat kComposeBarHeight = 44.0;
      didPickPackageId:(NSString *)packageId
             stickerId:(NSString *)stickerId
 {
-  picker.pickerDelegate = nil;
+  [picker setPickerDelegate:nil];
   [self enil_dismissModalViewController];
-  if (![packageId length] || ![stickerId length] || ![self.chatId length]) return;
+  if (![packageId length] || ![stickerId length] || ![[self chatId] length]) return;
   @try {
-    if (![self.account sendStickerId:stickerId
+    if (![[self account] sendStickerId:stickerId
                            packageId:packageId
-                            toChatId:self.chatId]) {
+                            toChatId:[self chatId]]) {
       ENILLog(@"MessageListViewController.stickerPicker",
-              @"sendStickerId returned NO for chat %@", self.chatId);
+              @"sendStickerId returned NO for chat %@", [self chatId]);
     }
   } @catch (NSException *exception) {
     ENILLog(@"MessageListViewController.stickerPicker",
@@ -497,15 +495,15 @@ didPickSticonPackageId:(NSString *)packageId
              sticonId:(NSString *)sticonId
               altText:(NSString *)altText
 {
-  picker.pickerDelegate = nil;
+  [picker setPickerDelegate:nil];
   [self enil_dismissModalViewController];
   if (![packageId length] || ![sticonId length]) return;
-  [self.sendBar insertSticonWithPackageId:packageId sticonId:sticonId altText:altText];
+  [[self sendBar] insertSticonWithPackageId:packageId sticonId:sticonId altText:altText];
 }
 
 - (void)stickerPickerDidCancel:(StickerViewController *)picker
 {
-  picker.pickerDelegate = nil;
+  [picker setPickerDelegate:nil];
   [self enil_dismissModalViewController];
 }
 
@@ -541,11 +539,11 @@ didPickSticonPackageId:(NSString *)packageId
   [self enil_dismissModalViewController];
   NSString *path = [self writeTempJPEGForImage:
     [info objectForKey:UIImagePickerControllerOriginalImage]];
-  if ([path length] == 0 || [self.chatId length] == 0) return;
+  if ([path length] == 0 || [[self chatId] length] == 0) return;
   @try {
-    if (![self.account sendImageAtPath:path toChatId:self.chatId]) {
+    if (![[self account] sendImageAtPath:path toChatId:[self chatId]]) {
       ENILLog(@"MessageListViewController.imagePicker",
-              @"sendImageAtPath returned NO for chat %@", self.chatId);
+              @"sendImageAtPath returned NO for chat %@", [self chatId]);
     }
   } @catch (NSException *exception) {
     ENILLog(@"MessageListViewController.imagePicker",
@@ -585,17 +583,17 @@ didPickSticonPackageId:(NSString *)packageId
 - (void)webViewDidFinishLoad:(UIWebView *)webView
 {
   (void)webView;
-  [[self.webView XP_scrollView] XP_removeShadow];
+  [[[self webView] XP_scrollView] XP_removeShadow];
 }
 
 - (void)dealloc
 {
   [[NSNotificationCenter defaultCenter] removeObserver:self];
-  _webView.delegate = nil;
-  _sendBar.delegate = nil;
+  [_webView setDelegate:nil];
+  [_sendBar setDelegate:nil];
   /* The shared picker outlives us; its pickerDelegate is unsafe_unretained, so
    * drop it if it still points here (the dismiss paths normally have already). */
-  if (_stickerPicker.pickerDelegate == self) _stickerPicker.pickerDelegate = nil;
+  if ([_stickerPicker pickerDelegate] == self) [_stickerPicker setPickerDelegate:nil];
 }
 
 @end

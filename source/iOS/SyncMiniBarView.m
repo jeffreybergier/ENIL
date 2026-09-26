@@ -54,7 +54,7 @@ static const CGFloat kInkLiftFactorBar    = 0.8f;  /* label stacked above the pr
 {
   if ((self = [super initWithFrame:frame])) {
     /* Paint nothing of our own — the hosting UIToolbar's chrome shows through. */
-    self.backgroundColor = [UIColor clearColor];
+    [self setBackgroundColor:[UIColor clearColor]];
     [self buildSubviews];
     /* The shared engine self-wires to the sync notifications and paints the
      * initial state the moment we become its delegate. Scoped to `account` so
@@ -68,20 +68,20 @@ static const CGFloat kInkLiftFactorBar    = 0.8f;  /* label stacked above the pr
 - (void)buildSubviews
 {
   _label = [[UILabel alloc] initWithFrame:CGRectZero];
-  _label.backgroundColor = [UIColor clearColor];
-  _label.textAlignment = kENILTextAlignCenter;
-  _label.font = [UIFont boldSystemFontOfSize:kBarFontPt];
+  [_label setBackgroundColor:[UIColor clearColor]];
+  [_label setTextAlignment:kENILTextAlignCenter];
+  [_label setFont:[UIFont boldSystemFontOfSize:kBarFontPt]];
   [self addSubview:_label];
 
   /* A light-gray copy of the label, painted on top and revealed only under the
    * moving gradient mask — the visible ping shimmer. Gray contrasts with both
    * the legacy white and modern dark base text. Hidden between sweeps. */
   _shineLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-  _shineLabel.backgroundColor = [UIColor clearColor];
-  _shineLabel.textAlignment = kENILTextAlignCenter;
-  _shineLabel.font = [UIFont boldSystemFontOfSize:kBarFontPt];
-  _shineLabel.textColor = [UIColor lightGrayColor];
-  _shineLabel.hidden = YES;
+  [_shineLabel setBackgroundColor:[UIColor clearColor]];
+  [_shineLabel setTextAlignment:kENILTextAlignCenter];
+  [_shineLabel setFont:[UIFont boldSystemFontOfSize:kBarFontPt]];
+  [_shineLabel setTextColor:[UIColor lightGrayColor]];
+  [_shineLabel setHidden:YES];
   [self addSubview:_shineLabel];
 
   /* ALWAYS a determinate bar. iOS has no constant-footprint indeterminate bar
@@ -90,7 +90,7 @@ static const CGFloat kInkLiftFactorBar    = 0.8f;  /* label stacked above the pr
    * peg the determinate bar at kIndetFill, keeping size/shape/position fixed. */
   _progress = [[UIProgressView alloc]
     initWithProgressViewStyle:UIProgressViewStyleDefault];
-  _progress.hidden = YES;
+  [_progress setHidden:YES];
   [self addSubview:_progress];
   [self refreshAppearance];
 }
@@ -104,12 +104,12 @@ static const CGFloat kInkLiftFactorBar    = 0.8f;  /* label stacked above the pr
     XP_isOperatingSystemAtLeastMajorVersion:7];
   UIColor *textColor = usesIOS7Appearance
     ? [UIColor darkTextColor] : [UIColor whiteColor];
-  self.label.textColor = [self.queue displayIsError]
-    ? [SyncMiniBarView errorColor] : textColor;
-  self.label.shadowColor = usesIOS7Appearance
-    ? nil : [UIColor colorWithWhite:0.0f alpha:0.5f];
-  self.label.shadowOffset = usesIOS7Appearance
-    ? CGSizeZero : CGSizeMake(0.0f, -1.0f);
+  [[self label] setTextColor:[[self queue] displayIsError]
+    ? [SyncMiniBarView errorColor] : textColor];
+  [[self label] setShadowColor:usesIOS7Appearance
+    ? nil : [UIColor colorWithWhite:0.0f alpha:0.5f]];
+  [[self label] setShadowOffset:usesIOS7Appearance
+    ? CGSizeZero : CGSizeMake(0.0f, -1.0f)];
 }
 
 /* Pull the queue's display snapshot onto the widgets — the iOS analogue of the
@@ -118,20 +118,20 @@ static const CGFloat kInkLiftFactorBar    = 0.8f;  /* label stacked above the pr
  * carrying the platform gloss while the SSE ping drives the shimmer sweep. */
 - (void)render
 {
-  BOOL active = ([self.queue displayMode] == ENILSyncDisplayModeBar);
+  BOOL active = ([[self queue] displayMode] == ENILSyncDisplayModeBar);
 
-  self.label.text = [self.queue displayLabel] ? [self.queue displayLabel] : @"";
+  [[self label] setText:[[self queue] displayLabel] ? [[self queue] displayLabel] : @""];
   /* Steady-state text (idle / "Syncing Live") rides a touch larger than the
    * in-flight phase labels. */
-  self.label.font = [UIFont boldSystemFontOfSize:
-    active ? kBarFontPt : (kBarFontPt + kSteadyFontBump)];
+  [[self label] setFont:[UIFont boldSystemFontOfSize:
+    active ? kBarFontPt : (kBarFontPt + kSteadyFontBump)]];
   [self refreshAppearance];
 
-  self.progress.hidden = !active;
+  [[self progress] setHidden:!active];
   if (active) {
     /* Plain property setter, not -setProgress:animated: (iOS 5.0+). */
-    self.progress.progress = [self.queue displayDeterminate]
-      ? (float)([self.queue displayPercent] / 100.0) : kIndetFill;
+    [[self progress] setProgress:[[self queue] displayDeterminate]
+      ? (float)([[self queue] displayPercent] / 100.0) : kIndetFill];
   }
 
   [self resizeToContent];
@@ -142,12 +142,12 @@ static const CGFloat kInkLiftFactorBar    = 0.8f;  /* label stacked above the pr
  * sandwich re-centers us. */
 - (void)resizeToContent
 {
-  [self.label sizeToFit];
-  CGFloat w = self.label.bounds.size.width;
-  if (!self.progress.hidden && kProgressW > w) w = kProgressW;
-  CGRect f = self.frame;
+  [[self label] sizeToFit];
+  CGFloat w = [[self label] bounds].size.width;
+  if (![[self progress] isHidden] && kProgressW > w) w = kProgressW;
+  CGRect f = [self frame];
   f.size = CGSizeMake(w, kBarHeight);
-  self.frame = f;
+  [self setFrame:f];
   [self setNeedsLayout];
   [self refreshHostingToolbar];
 }
@@ -158,8 +158,8 @@ static const CGFloat kInkLiftFactorBar    = 0.8f;  /* label stacked above the pr
  * when we're off-screen and not hosted in any toolbar). */
 - (void)refreshHostingToolbar
 {
-  UIView *v = self.superview;
-  while (v != nil && ![v isKindOfClass:[UIToolbar class]]) v = v.superview;
+  UIView *v = [self superview];
+  while (v != nil && ![v isKindOfClass:[UIToolbar class]]) v = [v superview];
   if (v == nil) return;
   UIToolbar *toolbar = (UIToolbar *)v;
   [toolbar setItems:[toolbar items] animated:NO];
@@ -172,9 +172,9 @@ static const CGFloat kInkLiftFactorBar    = 0.8f;  /* label stacked above the pr
 - (void)layoutSubviews
 {
   [super layoutSubviews];
-  CGFloat w  = self.bounds.size.width;
-  CGFloat h  = self.bounds.size.height;
-  CGFloat lh = self.label.bounds.size.height;
+  CGFloat w  = [self bounds].size.width;
+  CGFloat h  = [self bounds].size.height;
+  CGFloat lh = [[self label] bounds].size.height;
   /* Geometric centering leaves single-line text looking low: the font's line
    * box reserves descender room the word's ink only partly fills, so the ink
    * sits below the box center. Nudge up by a multiple of the descender to
@@ -182,21 +182,21 @@ static const CGFloat kInkLiftFactorBar    = 0.8f;  /* label stacked above the pr
    * descender is negative, so this raises the label, and it scales with the
    * current font (13pt bar phase vs 15pt steady). The factor is per mode so the
    * text-only and stacked layouts tune independently. */
-  CGFloat descender = self.label.font.descender;
+  CGFloat descender = [[[self label] font] descender];
 
-  if (self.progress.hidden) {
+  if ([[self progress] isHidden]) {
     CGFloat optShift = descender * kInkLiftFactorSteady;
-    self.label.frame = CGRectMake(0.0f, (h - lh) * 0.5f + optShift, w, lh);
-    self.shineLabel.frame = self.label.frame;  /* overlay for the ping shimmer */
+    [[self label] setFrame:CGRectMake(0.0f, (h - lh) * 0.5f + optShift, w, lh)];
+    [[self shineLabel] setFrame:[[self label] frame]];  /* overlay for the ping shimmer */
     return;
   }
 
   CGFloat optShift = descender * kInkLiftFactorBar;
-  CGFloat ph = self.progress.bounds.size.height;  /* the control's natural track height */
+  CGFloat ph = [[self progress] bounds].size.height;  /* the control's natural track height */
   CGFloat top = (h - (lh + kStackGap + ph)) * 0.5f;
-  self.label.frame = CGRectMake(0.0f, top + optShift, w, lh);
-  self.progress.frame = CGRectMake((w - kProgressW) * 0.5f, top + lh + kStackGap,
-                                   kProgressW, ph);
+  [[self label] setFrame:CGRectMake(0.0f, top + optShift, w, lh)];
+  [[self progress] setFrame:CGRectMake((w - kProgressW) * 0.5f, top + lh + kStackGap,
+                                   kProgressW, ph)];
 }
 
 #pragma mark - ENILSyncStatusQueueDelegate
@@ -220,41 +220,41 @@ static const CGFloat kInkLiftFactorBar    = 0.8f;  /* label stacked above the pr
  * base text. Runs on the render server, so it survives chat-list scrolling. */
 - (void)playShimmer
 {
-  UILabel *base = self.label;
-  if (base.bounds.size.width < 1.0 || base.text.length == 0) return;
+  UILabel *base = [self label];
+  if ([base bounds].size.width < 1.0 || [[base text] length] == 0) return;
 
-  UILabel *shine = self.shineLabel;
-  shine.frame = base.frame;
-  shine.text = base.text;
-  shine.font = base.font;
-  shine.hidden = NO;
+  UILabel *shine = [self shineLabel];
+  [shine setFrame:[base frame]];
+  [shine setText:[base text]];
+  [shine setFont:[base font]];
+  [shine setHidden:NO];
 
   CAGradientLayer *mask = [CAGradientLayer layer];
-  mask.frame = shine.bounds;
-  mask.startPoint = CGPointMake(0.0, 0.5);
-  mask.endPoint   = CGPointMake(1.0, 0.5);
-  mask.colors = [NSArray arrayWithObjects:
-    (__bridge id)[UIColor clearColor].CGColor,
-    (__bridge id)[UIColor whiteColor].CGColor,
-    (__bridge id)[UIColor clearColor].CGColor, nil];
-  mask.locations = [NSArray arrayWithObjects:
+  [mask setFrame:[shine bounds]];
+  [mask setStartPoint:CGPointMake(0.0, 0.5)];
+  [mask setEndPoint:CGPointMake(1.0, 0.5)];
+  [mask setColors:[NSArray arrayWithObjects:
+    (__bridge id)[[UIColor clearColor] CGColor],
+    (__bridge id)[[UIColor whiteColor] CGColor],
+    (__bridge id)[[UIColor clearColor] CGColor], nil]];
+  [mask setLocations:[NSArray arrayWithObjects:
     [NSNumber numberWithFloat:0.0f],
     [NSNumber numberWithFloat:0.5f],
-    [NSNumber numberWithFloat:1.0f], nil];
-  shine.layer.mask = mask;
+    [NSNumber numberWithFloat:1.0f], nil]];
+  [[shine layer] setMask:mask];
 
   CABasicAnimation *anim = [CABasicAnimation animationWithKeyPath:@"locations"];
-  anim.duration = kShineDuration;
-  anim.fromValue = [NSArray arrayWithObjects:
+  [anim setDuration:kShineDuration];
+  [anim setFromValue:[NSArray arrayWithObjects:
     [NSNumber numberWithFloat:-0.3f],
     [NSNumber numberWithFloat:-0.15f],
-    [NSNumber numberWithFloat:0.0f], nil];
-  anim.toValue = [NSArray arrayWithObjects:
+    [NSNumber numberWithFloat:0.0f], nil]];
+  [anim setToValue:[NSArray arrayWithObjects:
     [NSNumber numberWithFloat:1.0f],
     [NSNumber numberWithFloat:1.15f],
-    [NSNumber numberWithFloat:1.3f], nil];
-  anim.removedOnCompletion = YES;
-  anim.delegate = self;   /* to tear the mask down on completion */
+    [NSNumber numberWithFloat:1.3f], nil]];
+  [anim setRemovedOnCompletion:YES];
+  [anim setDelegate:self];   /* to tear the mask down on completion */
   [mask addAnimation:anim forKey:@"shine"];
 }
 
@@ -263,8 +263,8 @@ static const CGFloat kInkLiftFactorBar    = 0.8f;  /* label stacked above the pr
 - (void)animationDidStop:(CAAnimation *)anim finished:(BOOL)flag
 {
   (void)anim; (void)flag;
-  self.shineLabel.hidden = YES;
-  self.shineLabel.layer.mask = nil;
+  [[self shineLabel] setHidden:YES];
+  [[[self shineLabel] layer] setMask:nil];
 }
 
 - (void)dealloc

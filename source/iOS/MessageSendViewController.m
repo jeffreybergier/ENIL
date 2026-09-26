@@ -103,10 +103,10 @@ static const unichar kSticonMarker = 0x25C6;
 - (instancetype)initWithFrame:(CGRect)frame
 {
   if ((self = [super initWithFrame:frame])) {
-    self.opaque = NO;
-    self.backgroundColor = [UIColor clearColor];
-    self.userInteractionEnabled = NO;       /* touches fall through to the field */
-    self.contentMode = UIViewContentModeRedraw;  /* re-draw on resize, not stretch */
+    [self setOpaque:NO];
+    [self setBackgroundColor:[UIColor clearColor]];
+    [self setUserInteractionEnabled:NO];       /* touches fall through to the field */
+    [self setContentMode:UIViewContentModeRedraw];  /* re-draw on resize, not stretch */
   }
   return self;
 }
@@ -121,20 +121,20 @@ static const unichar kSticonMarker = 0x25C6;
   (void)rect;
   CGContextRef ctx = UIGraphicsGetCurrentContext();
   if (ctx == NULL) return;
-  CGRect b = self.bounds;
+  CGRect b = [self bounds];
   UIBezierPath *rounded =
     [UIBezierPath bezierPathWithRoundedRect:b cornerRadius:kFieldRadius];
 
   CGContextSaveGState(ctx);
   [rounded addClip];
   CGContextSetShadowWithColor(ctx, CGSizeMake(0.0f, 1.0f), 3.0f,
-    [UIColor colorWithWhite:0.0f alpha:0.22f].CGColor);
+    [[UIColor colorWithWhite:0.0f alpha:0.22f] CGColor]);
   CGMutablePathRef ring = CGPathCreateMutable();
   CGPathAddRect(ring, NULL, CGRectInset(b, -(kFieldRadius * 2.0f + 8.0f),
                                            -(kFieldRadius * 2.0f + 8.0f)));
-  CGPathAddPath(ring, NULL, rounded.CGPath);
+  CGPathAddPath(ring, NULL, [rounded CGPath]);
   CGContextAddPath(ctx, ring);
-  CGContextSetFillColorWithColor(ctx, [UIColor blackColor].CGColor);
+  CGContextSetFillColorWithColor(ctx, [[UIColor blackColor] CGColor]);
   CGContextEOFillPath(ctx);
   CGPathRelease(ring);
   CGContextRestoreGState(ctx);
@@ -171,12 +171,12 @@ static const unichar kSticonMarker = 0x25C6;
   (void)rect;
   CGContextRef ctx = UIGraphicsGetCurrentContext();
   if (ctx == NULL) return;
-  CGRect b = self.bounds;
+  CGRect b = [self bounds];
 
   UIColor *fill;
-  if (!self.enabled) {
+  if (![self isEnabled]) {
     fill = [UIColor colorWithWhite:0.74f alpha:1.0f];
-  } else if (self.highlighted) {
+  } else if ([self isHighlighted]) {
     fill = [UIColor colorWithRed:0.0f green:0.40f blue:0.80f alpha:1.0f];
   } else {
     fill = [UIColor colorWithRed:0.0f green:0.52f blue:1.0f alpha:1.0f];
@@ -192,12 +192,12 @@ static const unichar kSticonMarker = 0x25C6;
   CGContextSaveGState(ctx);
   [disc addClip];
   CGContextSetShadowWithColor(ctx, CGSizeMake(0.0f, 1.0f), 2.5f,
-    [UIColor colorWithWhite:0.0f alpha:0.35f].CGColor);
+    [[UIColor colorWithWhite:0.0f alpha:0.35f] CGColor]);
   CGMutablePathRef ring = CGPathCreateMutable();
   CGPathAddRect(ring, NULL, CGRectInset(b, -b.size.width, -b.size.height));
   CGPathAddEllipseInRect(ring, NULL, b);
   CGContextAddPath(ctx, ring);
-  CGContextSetFillColorWithColor(ctx, [UIColor blackColor].CGColor);
+  CGContextSetFillColorWithColor(ctx, [[UIColor blackColor] CGColor]);
   CGContextEOFillPath(ctx);
   CGPathRelease(ring);
   CGContextRestoreGState(ctx);
@@ -226,12 +226,12 @@ static const unichar kSticonMarker = 0x25C6;
 - (void)drawRect:(CGRect)rect
 {
   (void)rect;
-  if (!self.highlighted) return;
+  if (![self isHighlighted]) return;
   /* Inset so the fill reads as a key behind the glyph rather than flooding the
    * whole tap target (the dismiss button's tap area runs to the screen edge),
    * and so inside the attach pill it sits clear of the rounded ends + divider. */
   UIBezierPath *bg =
-    [UIBezierPath bezierPathWithRoundedRect:CGRectInset(self.bounds, 2.0f, 2.0f)
+    [UIBezierPath bezierPathWithRoundedRect:CGRectInset([self bounds], 2.0f, 2.0f)
                                cornerRadius:5.0f];
   [[UIColor colorWithWhite:0.0f alpha:0.12f] setFill];
   [bg fill];
@@ -256,14 +256,14 @@ static const unichar kSticonMarker = 0x25C6;
 - (instancetype)initWithFrame:(CGRect)frame
 {
   if ((self = [super initWithFrame:frame])) {
-    self.opaque = NO;
-    self.backgroundColor = [UIColor clearColor];
-    self.contentMode = UIViewContentModeRedraw;  /* re-draw on resize */
+    [self setOpaque:NO];
+    [self setBackgroundColor:[UIColor clearColor]];
+    [self setContentMode:UIViewContentModeRedraw];  /* re-draw on resize */
     _emojiButton = [[_PressableIconButton alloc] initWithFrame:CGRectZero];
     _imageButton = [[_PressableIconButton alloc] initWithFrame:CGRectZero];
     /* Center the FA glyph at its natural size — never let UIKit scale it. */
-    _emojiButton.imageView.contentMode = UIViewContentModeCenter;
-    _imageButton.imageView.contentMode = UIViewContentModeCenter;
+    [[_emojiButton imageView] setContentMode:UIViewContentModeCenter];
+    [[_imageButton imageView] setContentMode:UIViewContentModeCenter];
     [self addSubview:_emojiButton];
     [self addSubview:_imageButton];
   }
@@ -272,7 +272,7 @@ static const unichar kSticonMarker = 0x25C6;
 
 - (CGFloat)hairline
 {
-  CGFloat scale = [UIScreen mainScreen].scale;
+  CGFloat scale = [[UIScreen mainScreen] scale];
   if (scale <= 0.0f) scale = 1.0f;
   return 1.0f / scale;
 }
@@ -282,25 +282,23 @@ static const unichar kSticonMarker = 0x25C6;
  * the expanded portrait size — no explicit state to set or keep in sync. */
 - (BOOL)isPortrait
 {
-  return self.bounds.size.height > self.bounds.size.width;
+  return [self bounds].size.height > [self bounds].size.width;
 }
 
 - (void)layoutSubviews
 {
   [super layoutSubviews];
-  CGRect b = self.bounds;
+  CGRect b = [self bounds];
   if ([self isPortrait]) {
     /* Portrait (expanded): emoji on top, photo on the bottom. */
     CGFloat mid = (CGFloat)floorf((float)(b.size.height / 2.0f));
-    self.emojiButton.frame = CGRectMake(0.0f, 0.0f, b.size.width, mid);
-    self.imageButton.frame =
-      CGRectMake(0.0f, mid, b.size.width, b.size.height - mid);
+    [[self emojiButton] setFrame:CGRectMake(0.0f, 0.0f, b.size.width, mid)];
+    [[self imageButton] setFrame:CGRectMake(0.0f, mid, b.size.width, b.size.height - mid)];
   } else {
     /* Landscape (collapsed): emoji on the left, photo on the right. */
     CGFloat mid = (CGFloat)floorf((float)(b.size.width / 2.0f));
-    self.emojiButton.frame = CGRectMake(0.0f, 0.0f, mid, b.size.height);
-    self.imageButton.frame =
-      CGRectMake(mid, 0.0f, b.size.width - mid, b.size.height);
+    [[self emojiButton] setFrame:CGRectMake(0.0f, 0.0f, mid, b.size.height)];
+    [[self imageButton] setFrame:CGRectMake(mid, 0.0f, b.size.width - mid, b.size.height)];
   }
 }
 
@@ -310,11 +308,11 @@ static const unichar kSticonMarker = 0x25C6;
   CGFloat hair = [self hairline];
   /* Inset by half the hairline so the stroke sits fully inside the bounds. */
   UIBezierPath *pill = [UIBezierPath
-    bezierPathWithRoundedRect:CGRectInset(self.bounds, hair * 0.5f, hair * 0.5f)
+    bezierPathWithRoundedRect:CGRectInset([self bounds], hair * 0.5f, hair * 0.5f)
                  cornerRadius:6.0f];
   [[UIColor colorWithWhite:1.0f alpha:1.0f] setFill];
   [pill fill];
-  pill.lineWidth = hair;
+  [pill setLineWidth:hair];
   [[UIColor colorWithWhite:0.78f alpha:1.0f] setStroke];
   [pill stroke];
 
@@ -322,15 +320,15 @@ static const unichar kSticonMarker = 0x25C6;
    * vertical when landscape (side by side). */
   UIBezierPath *divider = [UIBezierPath bezierPath];
   if ([self isPortrait]) {
-    CGFloat midY = (CGFloat)floorf((float)(self.bounds.size.height / 2.0f));
+    CGFloat midY = (CGFloat)floorf((float)([self bounds].size.height / 2.0f));
     [divider moveToPoint:CGPointMake(5.0f, midY)];
-    [divider addLineToPoint:CGPointMake(self.bounds.size.width - 5.0f, midY)];
+    [divider addLineToPoint:CGPointMake([self bounds].size.width - 5.0f, midY)];
   } else {
-    CGFloat midX = (CGFloat)floorf((float)(self.bounds.size.width / 2.0f));
+    CGFloat midX = (CGFloat)floorf((float)([self bounds].size.width / 2.0f));
     [divider moveToPoint:CGPointMake(midX, 5.0f)];
-    [divider addLineToPoint:CGPointMake(midX, self.bounds.size.height - 5.0f)];
+    [divider addLineToPoint:CGPointMake(midX, [self bounds].size.height - 5.0f)];
   }
-  divider.lineWidth = hair;
+  [divider setLineWidth:hair];
   [[UIColor colorWithWhite:0.82f alpha:1.0f] setStroke];
   [divider stroke];
 }
@@ -364,12 +362,11 @@ static const unichar kSticonMarker = 0x25C6;
 - (instancetype)initWithFrame:(CGRect)frame
 {
   if ((self = [super initWithFrame:frame])) {
-    self.backgroundColor = [UIColor colorWithWhite:0.95f alpha:1.0f];
+    [self setBackgroundColor:[UIColor colorWithWhite:0.95f alpha:1.0f]];
     /* Flexible width + top margin keeps the bar full-width and bottom-pinned
      * as the host resizes it; -layoutSubviews handles the internal split. No
      * Auto Layout on the 4.3 floor. */
-    self.autoresizingMask =
-      UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin;
+    [self setAutoresizingMask:UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin];
     _sticonRuns = [[NSMutableArray alloc] init];
     [self buildSubviews];
   }
@@ -384,7 +381,7 @@ static const unichar kSticonMarker = 0x25C6;
                         style:(AIFontAwesomeStyle)style
                     pointSize:(CGFloat)pointSize
 {
-  CGFloat scale = [UIScreen mainScreen].scale;
+  CGFloat scale = [[UIScreen mainScreen] scale];
   if (scale <= 0.0f) scale = 1.0f;
   return [AIFontAwesome imageForIcon:icon
                             style:style
@@ -413,7 +410,7 @@ static const unichar kSticonMarker = 0x25C6;
 /* A crisp 1px line in screen terms (0.5pt on Retina), for the top bevel. */
 - (CGFloat)hairline
 {
-  CGFloat scale = [UIScreen mainScreen].scale;
+  CGFloat scale = [[UIScreen mainScreen] scale];
   if (scale <= 0.0f) scale = 1.0f;
   return 1.0f / scale;
 }
@@ -423,67 +420,67 @@ static const unichar kSticonMarker = 0x25C6;
   /* Top bevel hairlines. Frames are set in -layoutSubviews; both stretch the
    * full width there. */
   UIView *sep = [[UIView alloc] initWithFrame:CGRectZero];
-  sep.backgroundColor = [UIColor colorWithWhite:0.72f alpha:1.0f];
-  sep.userInteractionEnabled = NO;
+  [sep setBackgroundColor:[UIColor colorWithWhite:0.72f alpha:1.0f]];
+  [sep setUserInteractionEnabled:NO];
   [self addSubview:sep];
-  self.topSeparator = sep;
+  [self setTopSeparator:sep];
 
   UIView *hi = [[UIView alloc] initWithFrame:CGRectZero];
-  hi.backgroundColor = [UIColor colorWithWhite:1.0f alpha:1.0f];
-  hi.userInteractionEnabled = NO;
+  [hi setBackgroundColor:[UIColor colorWithWhite:1.0f alpha:1.0f]];
+  [hi setUserInteractionEnabled:NO];
   [self addSubview:hi];
-  self.topHighlight = hi;
+  [self setTopHighlight:hi];
 
   /* Keyboard-dismiss (fa-solid fa-chevron-down). Top-anchored, flush top-left;
    * hidden at rest (alpha 0). The compose state drives its alpha, applied in
    * -layoutSubviews so it animates with the keyboard. */
   _PressableIconButton *dis = [[_PressableIconButton alloc] initWithFrame:CGRectZero];
-  dis.alpha = 0.0f;
+  [dis setAlpha:0.0f];
   [dis setImage:[self iconImageForIcon:AIFAChevronDown
                                 style:AIFontAwesomeStyleSolid
                             pointSize:kDismissGlyphPt]
        forState:UIControlStateNormal];
-  dis.imageView.contentMode = UIViewContentModeCenter;  /* natural size, no scaling */
+  [[dis imageView] setContentMode:UIViewContentModeCenter];  /* natural size, no scaling */
   [dis addTarget:self
           action:@selector(dismissTapped)
         forControlEvents:UIControlEventTouchUpInside];
   [self addSubview:dis];
-  self.dismissButton = dis;
+  [self setDismissButton:dis];
 
   /* UITextView (multi-line) replacing the old single-line UITextField. The
    * rounded-rect bubble that UITextBorderStyleRoundedRect used to draw is
    * recreated on the layer here. clipsToBounds keeps the text inside the
    * rounded corners. */
   UITextView *f = [[UITextView alloc] initWithFrame:CGRectZero];
-  f.delegate = self;
-  f.font = [UIFont systemFontOfSize:kFieldFontPt];
-  f.backgroundColor = [UIColor whiteColor];
-  f.scrollEnabled = YES;  /* once the text exceeds the expanded height, scroll in place */
-  f.clipsToBounds = YES;
-  f.layer.cornerRadius = kFieldRadius;
-  f.layer.borderWidth = [self hairline];
-  f.layer.borderColor = [UIColor colorWithWhite:0.8f alpha:1.0f].CGColor;
+  [f setDelegate:self];
+  [f setFont:[UIFont systemFontOfSize:kFieldFontPt]];
+  [f setBackgroundColor:[UIColor whiteColor]];
+  [f setScrollEnabled:YES];  /* once the text exceeds the expanded height, scroll in place */
+  [f setClipsToBounds:YES];
+  [[f layer] setCornerRadius:kFieldRadius];
+  [[f layer] setBorderWidth:[self hairline]];
+  [[f layer] setBorderColor:[[UIColor colorWithWhite:0.8f alpha:1.0f] CGColor]];
   [self addSubview:f];
-  self.field = f;
+  [self setField:f];
 
   /* Inner-shadow overlay: above the field, below the placeholder, so the
    * recessed edge reads but the placeholder/text stay crisp. */
   _FieldInnerShadowView *shadow =
     [[_FieldInnerShadowView alloc] initWithFrame:CGRectZero];
   [self addSubview:shadow];
-  self.fieldShadow = shadow;
+  [self setFieldShadow:shadow];
 
   /* Placeholder overlay — UITextView has no native placeholder. Positioned
    * over the field's first text line in -layoutSubviews; hidden once the user
    * types. */
   UILabel *ph = [[UILabel alloc] initWithFrame:CGRectZero];
-  ph.text = NSLocalizedString(@"Message", nil);
-  ph.font = f.font;
-  ph.textColor = [UIColor colorWithWhite:0.6f alpha:1.0f];
-  ph.backgroundColor = [UIColor clearColor];
-  ph.userInteractionEnabled = NO;
+  [ph setText:NSLocalizedString(@"Message", nil)];
+  [ph setFont:[f font]];
+  [ph setTextColor:[UIColor colorWithWhite:0.6f alpha:1.0f]];
+  [ph setBackgroundColor:[UIColor clearColor]];
+  [ph setUserInteractionEnabled:NO];
   [self addSubview:ph];
-  self.placeholderLabel = ph;
+  [self setPlaceholderLabel:ph];
 
   /* Attachment group + Send on the right. The group (emoji + photo, joined as a
    * pill) is visible at all times — including with the keyboard dismissed — so
@@ -492,25 +489,25 @@ static const unichar kSticonMarker = 0x25C6;
    * portrait and tucks under send (see -layoutSubviews). */
   _AttachmentGroupView *grp =
     [[_AttachmentGroupView alloc] initWithFrame:CGRectZero];
-  grp.alpha = 1.0f;
+  [grp setAlpha:1.0f];
   /* AIFAFaceGrin (regular) — same glyph as the macOS picker's Emoji segment. */
-  [grp.emojiButton setImage:[self iconImageForIcon:AIFAFaceGrin
+  [[grp emojiButton] setImage:[self iconImageForIcon:AIFAFaceGrin
                                             style:AIFontAwesomeStyleRegular
                                         pointSize:kAttachGlyphPt]
                    forState:UIControlStateNormal];
-  [grp.emojiButton addTarget:self
+  [[grp emojiButton] addTarget:self
                       action:@selector(stickersTapped)
                 forControlEvents:UIControlEventTouchUpInside];
   /* AIFAImage (regular) — the macOS toolbar's Photo segment icon. */
-  [grp.imageButton setImage:[self iconImageForIcon:AIFAImage
+  [[grp imageButton] setImage:[self iconImageForIcon:AIFAImage
                                             style:AIFontAwesomeStyleRegular
                                         pointSize:kAttachGlyphPt]
                    forState:UIControlStateNormal];
-  [grp.imageButton addTarget:self
+  [[grp imageButton] addTarget:self
                       action:@selector(imageTapped)
                 forControlEvents:UIControlEventTouchUpInside];
   [self addSubview:grp];
-  self.attachGroup = grp;
+  [self setAttachGroup:grp];
 
   /* Send — a prominent blue disc carrying a white paper-plane glyph (see
    * _SendButton). Plain alloc/init yields a UIButtonTypeCustom instance of the
@@ -522,13 +519,13 @@ static const unichar kSticonMarker = 0x25C6;
                                   iconSize:kSendIconPt
                                 canvasSize:kSendDiameter]
        forState:UIControlStateNormal];
-  btn.imageView.contentMode = UIViewContentModeCenter;  /* natural size, no scaling */
-  btn.enabled = NO;
+  [[btn imageView] setContentMode:UIViewContentModeCenter];  /* natural size, no scaling */
+  [btn setEnabled:NO];
   [btn addTarget:self
           action:@selector(sendTapped)
         forControlEvents:UIControlEventTouchUpInside];
   [self addSubview:btn];
-  self.sendButton = btn;
+  [self setSendButton:btn];
 
   [self updatePlaceholderVisibility];
 }
@@ -547,8 +544,8 @@ static const unichar kSticonMarker = 0x25C6;
  * expansion. */
 - (CGRect)fieldFrame
 {
-  CGRect b = self.bounds;
-  CGFloat x = self.composing ? kDismissWidth : kCtrlGap;
+  CGRect b = [self bounds];
+  CGFloat x = [self composing] ? kDismissWidth : kCtrlGap;
   /* The field's right edge sits kCtrlGap left of the right-hand cluster.
    * Expanded (composing + multi-line): the cluster is a single narrow column
    * (send on top, attach group portrait beneath), so the field only yields the
@@ -567,11 +564,11 @@ static const unichar kSticonMarker = 0x25C6;
 - (void)layoutSubviews
 {
   [super layoutSubviews];
-  CGFloat w = self.bounds.size.width;
+  CGFloat w = [self bounds].size.width;
   CGFloat hair = [self hairline];
 
-  self.topSeparator.frame = CGRectMake(0.0f, 0.0f, w, hair);
-  self.topHighlight.frame = CGRectMake(0.0f, hair, w, hair);
+  [[self topSeparator] setFrame:CGRectMake(0.0f, 0.0f, w, hair)];
+  [[self topHighlight] setFrame:CGRectMake(0.0f, hair, w, hair)];
 
   /* The dismiss chevron is visible only while composing — it has nothing to
    * dismiss once the keyboard is down. Fading it here (rather than in
@@ -579,8 +576,8 @@ static const unichar kSticonMarker = 0x25C6;
    * the host calls -layoutIfNeeded inside its keyboard block. The attach group
    * (emoji + photo) stays visible at all times so stickers/images can be opened
    * with the keyboard dismissed. */
-  self.dismissButton.alpha = _composing ? 1.0f : 0.0f;
-  self.attachGroup.alpha = 1.0f;
+  [[self dismissButton] setAlpha:_composing ? 1.0f : 0.0f];
+  [[self attachGroup] setAlpha:1.0f];
 
   /* Dismiss + send are top-anchored and never move between collapsed and
    * expanded: dismiss flush top-left (its tap edges are invisible), send flush
@@ -588,38 +585,33 @@ static const unichar kSticonMarker = 0x25C6;
    * they read as vertically centered; when the bar grows downward for the
    * expanded layout they stay pinned at the top — which is exactly "send moves
    * to the top-right corner". */
-  self.dismissButton.frame =
-    CGRectMake(0.0f, kFieldInsetV, kDismissWidth, kButtonHeight);
-  self.sendButton.frame =
-    CGRectMake(w - kSendDiameter - kCtrlGap, kFieldInsetV,
-               kSendDiameter, kSendDiameter);
+  [[self dismissButton] setFrame:CGRectMake(0.0f, kFieldInsetV, kDismissWidth, kButtonHeight)];
+  [[self sendButton] setFrame:CGRectMake(w - kSendDiameter - kCtrlGap, kFieldInsetV,
+               kSendDiameter, kSendDiameter)];
 
   if ([self showsExpanded]) {
     /* Expanded: the attach group rotates to portrait — a 90° turn of its
      * collapsed size (kButtonHeight wide x kAttachGroupWidth tall) — and tucks
      * directly under the send disc, right-aligned with it (both kSendDiameter
      * wide, since kButtonHeight == kSendDiameter). */
-    self.attachGroup.frame =
-      CGRectMake(w - kSendDiameter - kCtrlGap,
+    [[self attachGroup] setFrame:CGRectMake(w - kSendDiameter - kCtrlGap,
                  kFieldInsetV + kSendDiameter + kCtrlGap,
-                 kButtonHeight, kAttachGroupWidth);
+                 kButtonHeight, kAttachGroupWidth)];
   } else {
     /* Collapsed: landscape, in the top row just left of the send disc. */
-    self.attachGroup.frame =
-      CGRectMake(w - kSendDiameter - kAttachGroupWidth - kCtrlGap * 2,
-                 kFieldInsetV, kAttachGroupWidth, kButtonHeight);
+    [[self attachGroup] setFrame:CGRectMake(w - kSendDiameter - kAttachGroupWidth - kCtrlGap * 2,
+                 kFieldInsetV, kAttachGroupWidth, kButtonHeight)];
   }
 
   CGRect ff = [self fieldFrame];
-  self.field.frame = ff;
-  self.fieldShadow.frame = ff;  /* overlay tracks the field exactly */
+  [[self field] setFrame:ff];
+  [[self fieldShadow] setFrame:ff];  /* overlay tracks the field exactly */
 
   /* Align the placeholder with the first text line. Pre-iOS 7 UITextView lays
    * text out at roughly an (8, 8) content inset; match that. */
-  CGFloat lineH = (CGFloat)ceilf((float)[self.field.font lineHeight]);
-  self.placeholderLabel.frame =
-    CGRectMake(ff.origin.x + 8.0f, ff.origin.y + 8.0f,
-               ff.size.width - 16.0f, lineH);
+  CGFloat lineH = (CGFloat)ceilf((float)[[[self field] font] lineHeight]);
+  [[self placeholderLabel] setFrame:CGRectMake(ff.origin.x + 8.0f, ff.origin.y + 8.0f,
+               ff.size.width - 16.0f, lineH)];
 }
 
 - (void)setComposing:(BOOL)composing
@@ -641,7 +633,7 @@ static const unichar kSticonMarker = 0x25C6;
  * layout snaps back when the keyboard (and first responder) return. */
 - (BOOL)showsExpanded
 {
-  return (self.expanded && self.composing) ? YES : NO;
+  return ([self expanded] && [self composing]) ? YES : NO;
 }
 
 - (CGFloat)preferredHeight
@@ -661,18 +653,18 @@ static const unichar kSticonMarker = 0x25C6;
  * -sizeThatFits: (not the deprecated -sizeWithFont:) keeps it warning-clean. */
 - (void)updateExpansion
 {
-  CGFloat lineH = (CGFloat)ceilf((float)[self.field.font lineHeight]);
+  CGFloat lineH = (CGFloat)ceilf((float)[[[self field] font] lineHeight]);
   if (lineH <= 0.0f) lineH = 20.0f;
   CGFloat oneLine = lineH + 16.0f;
-  CGFloat collapsedW = self.bounds.size.width - kDismissWidth
+  CGFloat collapsedW = [self bounds].size.width - kDismissWidth
     - kAttachGroupWidth - kSendDiameter - kCtrlGap * 3;
   if (collapsedW < 1.0f) collapsedW = 1.0f;
   CGFloat needed =
-    [self.field sizeThatFits:CGSizeMake(collapsedW, CGFLOAT_MAX)].height;
+    [[self field] sizeThatFits:CGSizeMake(collapsedW, CGFLOAT_MAX)].height;
   BOOL nowExpanded = (needed > oneLine + lineH * 0.5f);
-  if (nowExpanded == self.expanded) return;
-  self.expanded = nowExpanded;
-  [self.delegate messageSendDidChangeHeight:self];
+  if (nowExpanded == [self expanded]) return;
+  [self setExpanded:nowExpanded];
+  [[self delegate] messageSendDidChangeHeight:self];
 }
 
 #pragma mark - Text + actions
@@ -681,28 +673,28 @@ static const unichar kSticonMarker = 0x25C6;
  * -canSendCurrentMessage. Drives both the Send button and the placeholder. */
 - (NSString *)trimmedText
 {
-  return [self.field.text stringByTrimmingCharactersInSet:
+  return [[[self field] text] stringByTrimmingCharactersInSet:
             [NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
 
 - (void)updatePlaceholderVisibility
 {
-  self.placeholderLabel.hidden = ([self.field.text length] > 0);
+  [[self placeholderLabel] setHidden:([[[self field] text] length] > 0)];
 }
 
 - (void)dismissTapped
 {
-  [self.field resignFirstResponder];
+  [[self field] resignFirstResponder];
 }
 
 - (void)stickersTapped
 {
-  [self.delegate messageSendDidTapStickers:self];
+  [[self delegate] messageSendDidTapStickers:self];
 }
 
 - (void)imageTapped
 {
-  [self.delegate messageSendDidTapImagePicker:self];
+  [[self delegate] messageSendDidTapImagePicker:self];
 }
 
 - (void)sendTapped
@@ -714,12 +706,12 @@ static const unichar kSticonMarker = 0x25C6;
   /* Clear optimistically before handing off so the field is ready for the next
    * message even if the send path takes a moment. Clearing also collapses the
    * bar back to a single line via -updateExpansion. */
-  self.field.text = @"";
-  [self.sticonRuns removeAllObjects];
-  self.sendButton.enabled = NO;
+  [[self field] setText:@""];
+  [[self sticonRuns] removeAllObjects];
+  [[self sendButton] setEnabled:NO];
   [self updatePlaceholderVisibility];
   [self updateExpansion];
-  [self.delegate messageSend:self didSubmitText:text sticonResources:resources];
+  [[self delegate] messageSend:self didSubmitText:text sticonResources:resources];
 }
 
 #pragma mark - Inline sticons
@@ -739,31 +731,31 @@ static const unichar kSticonMarker = 0x25C6;
   SticonModel *run = [[SticonModel alloc] initWithPackageId:packageId
                                                    sticonId:sticonId
                                                     altText:altText];
-  NSString *cur = self.field.text ? self.field.text : @"";
-  NSRange sel = [self clampedSelectionForLength:cur.length];
+  NSString *cur = [[self field] text] ? [[self field] text] : @"";
+  NSRange sel = [self clampedSelectionForLength:[cur length]];
 
   NSUInteger ordinal  = [self sticonCountInString:cur range:NSMakeRange(0, sel.location)];
   NSUInteger replaced = [self sticonCountInString:cur range:sel];
   NSUInteger k;
-  for (k = 0; k < replaced && ordinal < [self.sticonRuns count]; k++)
-    [self.sticonRuns removeObjectAtIndex:ordinal];
-  if (ordinal <= [self.sticonRuns count])
-    [self.sticonRuns insertObject:run atIndex:ordinal];
+  for (k = 0; k < replaced && ordinal < [[self sticonRuns] count]; k++)
+    [[self sticonRuns] removeObjectAtIndex:ordinal];
+  if (ordinal <= [[self sticonRuns] count])
+    [[self sticonRuns] insertObject:run atIndex:ordinal];
   else
-    [self.sticonRuns addObject:run];
+    [[self sticonRuns] addObject:run];
 
   unichar m = kSticonMarker;
   NSString *marker = [NSString stringWithCharacters:&m length:1];
-  self.field.text = [cur stringByReplacingCharactersInRange:sel withString:marker];
-  self.field.selectedRange = NSMakeRange(sel.location + 1, 0);
+  [[self field] setText:[cur stringByReplacingCharactersInRange:sel withString:marker]];
+  [[self field] setSelectedRange:NSMakeRange(sel.location + 1, 0)];
   /* Setting .text programmatically does NOT fire the delegate, so refresh the
    * placeholder / send-enabled / expansion state by hand. */
-  [self textViewDidChange:self.field];
+  [self textViewDidChange:[self field]];
 }
 
 - (NSRange)clampedSelectionForLength:(NSUInteger)length
 {
-  NSRange sel = self.field.selectedRange;
+  NSRange sel = [[self field] selectedRange];
   if (sel.location > length) return NSMakeRange(length, 0);
   if (NSMaxRange(sel) > length) return NSMakeRange(sel.location, length - sel.location);
   return sel;
@@ -788,15 +780,15 @@ static const unichar kSticonMarker = 0x25C6;
  * the raw marker codepoint never escapes onto the wire. */
 - (NSString *)wireTextIntoResources:(NSMutableArray *)resources
 {
-  NSString *str = self.field.text;
-  NSMutableString *out = [NSMutableString stringWithCapacity:str.length];
+  NSString *str = [[self field] text];
+  NSMutableString *out = [NSMutableString stringWithCapacity:[str length]];
   unichar marker = kSticonMarker;
-  NSUInteger i, n = str.length, ordinal = 0;
+  NSUInteger i, n = [str length], ordinal = 0;
   for (i = 0; i < n; i++) {
     unichar c = [str characterAtIndex:i];
     if (c == marker) {
-      if (ordinal < [self.sticonRuns count])
-        [self appendMarkerForRun:[self.sticonRuns objectAtIndex:ordinal]
+      if (ordinal < [[self sticonRuns] count])
+        [self appendMarkerForRun:[[self sticonRuns] objectAtIndex:ordinal]
                           toText:out resources:resources];
       ordinal++;  /* consume in lockstep; an unmodelled glyph is dropped, not emitted raw */
     } else {
@@ -810,11 +802,11 @@ static const unichar kSticonMarker = 0x25C6;
                     toText:(NSMutableString *)out
                  resources:(NSMutableArray *)resources
 {
-  NSString *alt = ([run.altText length] ? run.altText : run.sticonId);
+  NSString *alt = ([[run altText] length] ? [run altText] : [run sticonId]);
   [out appendFormat:@"(%@)", alt];
   [resources addObject:[NSDictionary dictionaryWithObjectsAndKeys:
-    run.packageId, @"package_id",
-    run.sticonId,  @"sticon_id",
+    [run packageId], @"package_id",
+    [run sticonId],  @"sticon_id",
     alt,           @"alt_text", nil]];
 }
 
@@ -833,12 +825,12 @@ static const unichar kSticonMarker = 0x25C6;
             replacementText:(NSString *)text
 {
   (void)text;
-  NSString *s = textView.text;
+  NSString *s = [textView text];
   NSUInteger ordinal = [self sticonCountInString:s range:NSMakeRange(0, range.location)];
   NSUInteger deleted = [self sticonCountInString:s range:range];
   NSUInteger k;
-  for (k = 0; k < deleted && ordinal < [self.sticonRuns count]; k++)
-    [self.sticonRuns removeObjectAtIndex:ordinal];
+  for (k = 0; k < deleted && ordinal < [[self sticonRuns] count]; k++)
+    [[self sticonRuns] removeObjectAtIndex:ordinal];
   return YES;
 }
 
@@ -846,7 +838,7 @@ static const unichar kSticonMarker = 0x25C6;
 {
   (void)textView;
   [self updatePlaceholderVisibility];
-  self.sendButton.enabled = ([[self trimmedText] length] > 0);
+  [[self sendButton] setEnabled:([[self trimmedText] length] > 0)];
   [self updateExpansion];
 }
 
