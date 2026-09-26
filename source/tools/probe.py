@@ -30,7 +30,7 @@ APPLICATION = "DESKTOPWIN\t9.7.0.3556\tWINDOWS\t10.0.0-NT-x64"
 USER_AGENT = "Line/9.7.0.3556"
 MAX_RESPONSE = 2 * 1024 * 1024
 MAX_ITEMS = 10000
-REPO = Path(__file__).resolve().parents[3]
+REPO = Path(__file__).resolve().parents[2]
 
 
 class ProbeError(Exception):

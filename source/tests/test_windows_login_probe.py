@@ -15,7 +15,7 @@ from thrift.Thrift import TMessageType, TType
 from thrift.protocol.TCompactProtocol import TCompactProtocol
 from thrift.transport.TTransport import TMemoryBuffer
 
-PROBE = Path(__file__).resolve().parents[1] / "tools/windows-login/probe.py"
+PROBE = Path(__file__).resolve().parents[1] / "tools/probe.py"
 spec = importlib.util.spec_from_file_location("windows_login_probe", PROBE)
 probe = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(probe)

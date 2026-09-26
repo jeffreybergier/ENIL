@@ -68,6 +68,6 @@ for name in qr_schemas:
     visit(name)
 for m in methods:
     visit(m+'_args'); visit(m+'_result')
-out = Path(__file__).resolve().parents[2]/'shared/enil_thrift_schema.inc'
-out.write_text('/* Generated protocol field definitions; see tools/native-schema/generate.py. */\n' + '\n'.join(json.dumps(json.dumps({k:v},separators=(',',':'))[1:-1]+(',' if i<len(result)-1 else '')) for i,(k,v) in enumerate(sorted(result.items())))+'\n')
+out = Path(__file__).resolve().parents[1]/'shared/enil_thrift_schema.inc'
+out.write_text('/* Generated protocol field definitions; see tools/generate.py. */\n' + '\n'.join(json.dumps(json.dumps({k:v},separators=(',',':'))[1:-1]+(',' if i<len(result)-1 else '')) for i,(k,v) in enumerate(sorted(result.items())))+'\n')
 print(len(result), 'reachable structs')

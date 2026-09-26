@@ -35,14 +35,14 @@ test-build-system:
 
 help:
 	@echo 'make [release|debug|analyze|validate]  Run both native targets (default: release)'
-	@echo 'make macOS-<target> / iOS-<target>    Forward any child Makefile target'
-	@echo 'make clean                           Remove native outputs for both platforms'
-	@echo 'make macOS-clean / iOS-clean          Remove only one platform output tree'
-	@echo 'make test-host                       Run all host protocol, recovery, build-system, and Worker tests'
-	@echo 'make test-native                     Check Windows transport, login, and recovery on loopback'
-	@echo 'make test-client-identity             Check session identity and loopback HTTP requests'
-	@echo 'make cloudflare-<script>              Run a Worker npm script (e.g. test, build)'
-	@echo 'BUILD_ROOT=/path                     Override the default repository-root build/'
+	@echo 'make macOS-<target> / iOS-<target>     Forward any child Makefile target'
+	@echo 'make clean                             Remove native outputs for both platforms'
+	@echo 'make macOS-clean / iOS-clean           Remove only one platform output tree'
+	@echo 'make test-host                         Run all host protocol, recovery, build-system, and Worker tests'
+	@echo 'make test-native                       Check Windows transport, login, and recovery on loopback'
+	@echo 'make test-client-identity              Check session identity and loopback HTTP requests'
+	@echo 'make cloudflare-<script>               Run a Worker npm script (e.g. test, build)'
+	@echo 'BUILD_ROOT=/path                       Override the default repository-root build/'
 
 FORCE:
 .PHONY: debug release analyze validate clean test test-host test-native test-build-system test-client-identity help FORCE

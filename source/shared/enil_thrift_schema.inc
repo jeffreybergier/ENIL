@@ -1,4 +1,4 @@
-/* Generated protocol field definitions; see tools/native-schema/generate.py. */
+/* Generated protocol field definitions; see tools/generate.py. */
 "\"ApplicationVersionRange\":[[1,\"lowerBound\",\"string\"],[2,\"lowerBoundInclusive\",\"bool\"],[3,\"upperBound\",\"string\"],[4,\"upperBoundInclusive\",\"bool\"]],"
 "\"AvatarProfile\":[[1,\"version\",\"string\"],[2,\"updatedMillis\",\"i64\"],[3,\"thumbnail\",\"string\"],[4,\"usablePublicly\",\"bool\"]],"
 "\"Chat\":[[1,\"type\",\"i32\"],[2,\"chatMid\",\"string\"],[3,\"createdTime\",\"i64\"],[4,\"notificationDisabled\",\"bool\"],[5,\"favoriteTimestamp\",\"i64\"],[6,\"chatName\",\"string\"],[7,\"picturePath\",\"string\"],[8,\"extra\",\"Pb1_C13208v4\"]],"

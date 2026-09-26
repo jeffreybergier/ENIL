@@ -1,4 +1,15 @@
-# Windows login probe
+# ENIL tools
+
+Paths and commands below are relative to the repository root.
+
+## Native schema generator
+
+`source/tools/generate.py` generates `source/shared/enil_thrift_schema.inc`
+from a pinned LINEJS Thrift IDL supplied as its argument. Run it with
+`python3 source/tools/generate.py /path/to/line.thrift` when updating the
+reachable protocol schema.
+
+## Windows login probe
 
 This standalone Python tool tests ENIL's candidate Windows identity against
 LINE's native QR-login service. It sends Compact Thrift to
@@ -27,13 +38,13 @@ Requires Python 3.9 or newer. Run these commands from the ENIL repository root:
 
 ```sh
 python3 -m venv /tmp/enil-windows-probe-env
-/tmp/enil-windows-probe-env/bin/python -m pip install -r source/tools/windows-login/requirements.txt
+/tmp/enil-windows-probe-env/bin/python -m pip install -r source/tools/requirements.txt
 ```
 
 An anonymous endpoint check needs no Worker credentials or phone:
 
 ```sh
-/tmp/enil-windows-probe-env/bin/python source/tools/windows-login/probe.py --check-endpoint
+/tmp/enil-windows-probe-env/bin/python source/tools/probe.py --check-endpoint
 ```
 
 This creates one unauthenticated QR session and requests a secure QR code.
@@ -44,7 +55,7 @@ For a full login, set `ENIL_WORKER_URL` and `ENIL_WORKER_SECRET` in the environm
 to the same crypto Worker used by ENIL, then run:
 
 ```sh
-/tmp/enil-windows-probe-env/bin/python source/tools/windows-login/probe.py
+/tmp/enil-windows-probe-env/bin/python source/tools/probe.py
 ```
 
 The program prints a private output directory and writes `qr.svg` there. Open
@@ -131,5 +142,5 @@ The native apps now implement authenticated Talk schemas, native token refresh,
 operation polling, and LEGY transport. Production QR handling lives in
 `source/shared/enil_native_login.c`; pending recovery/activation lives in
 `enil_login_store.c`. This Python probe remains a standalone diagnostic tool.
-See [native development](../../../docs/native-development.md) for the production
-lifecycle and `make test-native` for the combined regression suite.
+See [repository guidance](../../AGENTS.md) for the production architecture
+and `make test-native` for the combined regression suite.

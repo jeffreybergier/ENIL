@@ -45,10 +45,9 @@ static long long parse_key_id(const char *chunk_b64) {
 }
 
 /* Location payloads (contentType 15) are intentionally unsupported by this
- * client (PLAN.md, "Message types to not support").  They can still carry E2EE
- * chunks, but attempting to decrypt an old one may require a peer key LINE no
- * longer serves.  Treat them as terminal non-text rows instead of feeding them
- * into the retryable decrypt queue. */
+ * client. They can still carry E2EE chunks, but decrypting an old one may
+ * require a peer key LINE no longer serves. Treat them as terminal non-text
+ * rows instead of feeding them into the retryable decrypt queue. */
 static int is_unsupported_location_message(cJSON *msg) {
   return msg &&
     enil_json_coerce_int64(cJSON_GetObjectItem(msg, "contentType")) == 15;
