@@ -133,6 +133,31 @@ MRC throughout.)
 - Deployment floor is iOS 4.3, where zeroing `__weak` is unavailable. Use
   `assign` / `__unsafe_unretained` for delegate back-pointers; reserve `weak`
   for if/when the floor rises to iOS 5+.
+
+### Objective-C coding preferences
+
+- Do not use dot syntax in Objective-C; call accessor methods explicitly.
+- Prefer C in `source/shared/` for non-UI logic. Keep C and Objective-C
+  interaction in the sanctioned model bridges and Apple-framework adapters
+  named above. Platform-specific Objective-C code may call system APIs when
+  needed for platform behavior.
+- Follow the ownership rules of each translation unit: balance retains and
+  releases in shared and macOS MRC code, and use ARC in iOS UI code. Keep Cocoa
+  UI updates on the main thread, including updates from callbacks.
+- Avoid repeated database queries, row construction, or other work proportional
+  to a chat's size while rendering or scrolling. Reuse loaded row data where
+  practical. Obtain table row counts without loading every row's details;
+  fetch details for requested rows with indexed queries or a bounded cache.
+  Measure large-list changes on target devices before changing algorithms for
+  performance.
+- In long loops that create autoreleased objects, drain a local autorelease
+  pool in bounded batches (`NSAutoreleasePool` in MRC code, `@autoreleasepool`
+  in ARC code). Release owned MRC objects promptly; choose batch sizes based
+  on memory use and measured performance.
+- Check both compile-time SDK support and runtime availability before using
+  newer Cocoa APIs. Prefer the existing `XPAppKit`, `XPUIKit`, and
+  `XPFoundation` helpers where they cover the operation. Keep compatibility
+  conditionals and warning suppressions narrow and near those helpers.
   
 ### Cross-platform code & deprecated APIs
 
