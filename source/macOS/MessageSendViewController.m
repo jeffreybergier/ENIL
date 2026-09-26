@@ -24,28 +24,6 @@ static NSColor *InputBezelBackgroundColor(void) { return [NSColor controlBackgro
 static NSColor *InputBezelBorderColor(void) { return [NSColor gridColor]; }
 static NSColor *InputBezelHighlightColor(void) { return XPColorControlHighlight; }
 
-/* NSOpenPanel allowed-types list for the image picker. Includes both UTIs
- * (so modern macOS filters cleanly) and bare extensions (so older SDKs and
- * files without UTI tagging still match). kUTType* is deprecated in 12+, but
- * we want the constants here for clarity, not the wrapped XP_ versions. */
-static NSArray *ImagePickerAllowedTypes(void) {
-  static NSArray *types = nil;
-  if (types) return types;
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
-  types = [[NSArray alloc] initWithObjects:
-    (NSString *)kUTTypeJPEG,
-    (NSString *)kUTTypePNG,
-    @"jpg", @"jpeg", @"png",
-    nil];
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-  return types;
-}
-
 @interface SticonAttachmentCell : NSTextAttachmentCell {
  @private
   CGFloat baselineOffset_;
@@ -588,8 +566,12 @@ static void SticonAttachmentSetBaselineCell(NSTextAttachment *attachment) {
   [panel setCanChooseFiles:YES];
   [panel setCanChooseDirectories:NO];
   [panel setAllowsMultipleSelection:NO];
+  /* Keep bare extensions for files without UTI tagging. */
+  NSArray *types = [NSArray arrayWithObjects:
+    (NSString *)kUTTypeJPEG, (NSString *)kUTTypePNG,
+    @"jpg", @"jpeg", @"png", nil];
   [panel XP_beginSheetForWindow:parent
-                          types:ImagePickerAllowedTypes()
+                          types:types
                   modalDelegate:self
                  didEndSelector:@selector(openPanelDidEnd:returnCode:contextInfo:)
                     contextInfo:NULL];
