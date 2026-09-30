@@ -1366,11 +1366,7 @@ static int sync_one_message_media(sqlite3 *db, const char *session_path,
   entry = enil_db_get_message_media_info(db, message_id);
   if (!entry) return -1;
   set_account_dir(session_path, account_dir, sizeof(account_dir));
-  if (sqlite3_exec(db, "BEGIN", NULL, NULL, NULL) != SQLITE_OK) { cJSON_Delete(entry); return -1; }
   result = download_media_entry(db, session_path, account_dir, entry);
-  if (result < 0 || sqlite3_exec(db, "COMMIT", NULL, NULL, NULL) != SQLITE_OK) {
-    sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL); result = -1;
-  }
   cJSON_Delete(entry);
   return result;
 }
@@ -2603,25 +2599,20 @@ static int sync_phase_downloading(sqlite3    *db,
 
   report(ENIL_SYNC_PHASE_DOWNLOADING, 0, total, "Downloading...", 0);
 
-  /* Originals and thumbnails share the same validation/recovery path as SSE. */
+  /* Each metadata UPDATE commits independently. Never hold a SQLite
+   * transaction across an OBS request or ImageIO work. */
   {
     char account_dir[1024];
     set_account_dir(session_path, account_dir, sizeof(account_dir));
-    if (sqlite3_exec(db, "BEGIN", NULL, NULL, NULL) != SQLITE_OK) { cJSON_Delete(pending_media); return -1; }
     for (i = 0; i < n_media; i++) {
       int result = download_media_entry(db, session_path, account_dir,
                                         cJSON_GetArrayItem(pending_media, i));
       if (result < 0) {
-        sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
         cJSON_Delete(pending_media); return -1;
       }
       errors += result;
       counter++;
       report(ENIL_SYNC_PHASE_DOWNLOADING, counter, total, "Downloading...", 0);
-    }
-    if (sqlite3_exec(db, "COMMIT", NULL, NULL, NULL) != SQLITE_OK) {
-      sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
-      cJSON_Delete(pending_media); return -1;
     }
   }
   cJSON_Delete(pending_media);

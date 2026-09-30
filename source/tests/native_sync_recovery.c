@@ -98,6 +98,14 @@ int __wrap_enil_obs_download_message(const char *session, const char *id,
     const char *key, size_t size, const char *dest) {
   (void)session; (void)id; (void)sid; (void)oid; (void)pop; (void)version; (void)key; (void)size;
   assert(media_test); media_downloads++;
+  /* A slow request must leave the database available to another writer. */
+  {
+    sqlite3 *other;
+    assert(sqlite3_get_autocommit(db));
+    assert(sqlite3_open(sqlite3_db_filename(db,"main"),&other)==SQLITE_OK);
+    assert(sqlite3_exec(other,"CREATE TABLE IF NOT EXISTS attachment_writer(n); INSERT INTO attachment_writer VALUES(1)",NULL,NULL,NULL)==SQLITE_OK);
+    sqlite3_close(other);
+  }
   if (media_offline) return -1;
   image_fixture(dest,"image"); return 0;
 }
