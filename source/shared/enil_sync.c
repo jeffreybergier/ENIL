@@ -21,6 +21,8 @@
 #include "enil_obs.h"
 #include "enil_cocoa_image.h"
 #include "enil_http.h"
+#include "enil_png.h"
+#include "enil_asset_cache.h"
 #include "enil_html.h"
 #include "enil_message_format.h"
 #include "enil_b64.h"
@@ -601,17 +603,6 @@ static const char *sticker_option_for_item(cJSON *item) {
   }
 }
 
-static void png_dimensions(const char *path, int *w, int *h) {
-  unsigned char buf[24];
-  FILE *f = fopen(path, "rb");
-  *w = *h = 0;
-  if (!f) return;
-  if (fread(buf, 1, 24, f) == 24)  {
-    *w = (buf[16]<<24)|(buf[17]<<16)|(buf[18]<<8)|buf[19];
-    *h = (buf[20]<<24)|(buf[21]<<16)|(buf[22]<<8)|buf[23];
-  }
-  fclose(f);
-}
 
 typedef struct {
   const char *sticker_id;
@@ -641,6 +632,17 @@ static int download_if_missing(const char *url, const char *dest_path,
   if (stat(dest_path, &st) == 0) return 0;
   if (enil_curl_download_file(url, dest_path) == 0) return 1;
   if (!optional) ENIL_LOG("Sync.downloads", "failed: %s", url);
+  return optional ? 0 : -1;
+}
+
+static int valid_png(const char *path) {
+  return enil_png_info(path, NULL, NULL);
+}
+
+static int download_png_if_missing(const char *url, const char *path, int optional) {
+  if (valid_png(path)) return 0;
+  if (enil_curl_download_file_validated(url, path, valid_png) == 0) return 1;
+  if (!optional) ENIL_LOG("Sync.downloads", "PNG download/validation failed: %s", url);
   return optional ? 0 : -1;
 }
 
@@ -732,10 +734,10 @@ static int run_stickershop_download(ENILStickerDownloadJob *job) {
   snprintf(thumb_dest, sizeof(thumb_dest), "%s/%s.png", job->pkg_dir, job->sticker_id);
   snprintf(job->thumb_rel, sizeof(job->thumb_rel), "purchases/%s/%s.png",
            job->package_id, job->sticker_id);
-  thumb_result = download_if_missing(thumb_url, thumb_dest, 0);
+  thumb_result = download_png_if_missing(thumb_url, thumb_dest, 0);
   if (thumb_result < 0) return -1;
   job->downloaded += thumb_result;
-  png_dimensions(thumb_dest, &job->thumb_width, &job->thumb_height);
+  enil_png_info(thumb_dest, &job->thumb_width, &job->thumb_height);
 
   is_anim  = job->option && (strcmp(job->option, "A") == 0 || strcmp(job->option, "AS") == 0);
   is_popup = job->option && (strcmp(job->option, "P") == 0 || strcmp(job->option, "PS") == 0);
@@ -755,10 +757,10 @@ static int run_stickershop_download(ENILStickerDownloadJob *job) {
              job->sticker_id, tag);
     snprintf(job->image_rel, sizeof(job->image_rel), "purchases/%s/%s%s.png",
              job->package_id, job->sticker_id, tag);
-    image_result = download_if_missing(image_url, image_dest, 0);
+    image_result = download_png_if_missing(image_url, image_dest, 0);
     if (image_result < 0) return -1;
     job->downloaded += image_result;
-    png_dimensions(image_dest, &job->image_width, &job->image_height);
+    enil_png_info(image_dest, &job->image_width, &job->image_height);
   }
   return 0;
 }
@@ -767,7 +769,6 @@ static int run_sticonshop_download(ENILStickerDownloadJob *job) {
   char thumb_url[640], thumb_dest[1600], anim_url[640], anim_dest[1600];
   int thumb_result, anim_result;
   int is_animated_package;
-  struct stat st_anim;
 
   snprintf(thumb_url, sizeof(thumb_url),
            "https://stickershop.line-scdn.net/sticonshop/v1/sticon/%s/android/%s.png",
@@ -775,23 +776,23 @@ static int run_sticonshop_download(ENILStickerDownloadJob *job) {
   snprintf(thumb_dest, sizeof(thumb_dest), "%s/%s.png", job->pkg_dir, job->sticker_id);
   snprintf(job->thumb_rel, sizeof(job->thumb_rel), "purchases/%s/%s.png",
            job->package_id, job->sticker_id);
-  thumb_result = download_if_missing(thumb_url, thumb_dest, 0);
+  thumb_result = download_png_if_missing(thumb_url, thumb_dest, 0);
   if (thumb_result < 0) return -1;
   job->downloaded += thumb_result;
-  png_dimensions(thumb_dest, &job->thumb_width, &job->thumb_height);
+  enil_png_info(thumb_dest, &job->thumb_width, &job->thumb_height);
 
   snprintf(anim_url, sizeof(anim_url),
            "https://stickershop.line-scdn.net/sticonshop/v1/sticon/%s/android/%s_animation.png",
            job->package_id, job->sticker_id);
   snprintf(anim_dest, sizeof(anim_dest), "%s/%s_anim.png", job->pkg_dir, job->sticker_id);
   is_animated_package = job->sticon_type && strcmp(job->sticon_type, "ANIMATION") == 0;
-  anim_result = is_animated_package ? download_if_missing(anim_url, anim_dest, 1) : 0;
+  anim_result = is_animated_package ? download_png_if_missing(anim_url, anim_dest, 1) : 0;
   job->downloaded += anim_result > 0 ? anim_result : 0;
 
-  if (stat(anim_dest, &st_anim) == 0) {
+  if (valid_png(anim_dest)) {
     snprintf(job->image_rel, sizeof(job->image_rel), "purchases/%s/%s_anim.png",
              job->package_id, job->sticker_id);
-    png_dimensions(anim_dest, &job->image_width, &job->image_height);
+    enil_png_info(anim_dest, &job->image_width, &job->image_height);
     return 0;
   }
 
@@ -851,7 +852,9 @@ static void apply_sticker_job(sqlite3 *db, ENILStickerDownloadJob *job,
   int is_sticon;
   if (!job || !job->started) return;
   *done += job->downloaded;
-  if (job->error || !job->image_rel[0] || !job->thumb_rel[0]) {
+  if (job->error || !job->image_rel[0] || !job->thumb_rel[0] ||
+      job->image_width <= 0 || job->image_height <= 0 ||
+      job->thumb_width <= 0 || job->thumb_height <= 0) {
     (*errors)++;
     /* Name the specific failure so a sticker/sticon that silently never
      * downloads is diagnosable (it stays pending and is retried next sync). */
@@ -860,7 +863,7 @@ static void apply_sticker_job(sqlite3 *db, ENILStickerDownloadJob *job,
              job->sticker_id ? job->sticker_id : "?",
              job->shop       ? job->shop       : "?",
              job->error          ? "fetch error" :
-             (!job->image_rel[0] ? "no image"    : "no thumbnail"));
+             (!job->image_rel[0] ? "no image" : "invalid image/thumbnail"));
     return;
   }
   is_sticon = job->shop && strcmp(job->shop, "sticonshop") == 0;
@@ -909,8 +912,6 @@ static int download_sticker_list(sqlite3 *db, const char *session_path,
   snprintf(stk_dir, sizeof(stk_dir), "%s/purchases", account_dir);
   mkdir(stk_dir, 0755);
 
-  sqlite3_exec(db, "BEGIN", NULL, NULL, NULL);
-
   for (i = 0; i < total && !enil_http_cancelled(); i++) {
     ENILStickerDownloadJob jobs[STICKER_CDN_BATCH_SIZE];
     pthread_t threads[STICKER_CDN_BATCH_SIZE];
@@ -939,6 +940,7 @@ static int download_sticker_list(sqlite3 *db, const char *session_path,
     for (j = 0; j < batch_count; j++)
       if (thread_started[j]) pthread_join(threads[j], NULL);
 
+    sqlite3_exec(db, "SAVEPOINT sticker_batch", NULL, NULL, NULL);
     for (j = 0; j < batch_count; j++) {
       apply_sticker_job(db, &jobs[j], &done, &errors);
       if (counter) (*counter)++;
@@ -946,8 +948,8 @@ static int download_sticker_list(sqlite3 *db, const char *session_path,
         report(ENIL_SYNC_PHASE_DOWNLOADING, *counter, phase_total,
                "Downloading...", 0);
     }
+    sqlite3_exec(db, "RELEASE sticker_batch", NULL, NULL, NULL);
   }
-  sqlite3_exec(db, "COMMIT", NULL, NULL, NULL);
   cJSON_Delete(pending);
   ENIL_LOG("Sync.downloads",
            "%s %s: %d files downloaded for %d items, %d errors",
@@ -1222,7 +1224,9 @@ static void collect_message_sticon_pkgs(cJSON *meta, cJSON *set) {
 static void download_message_sticon_images(sqlite3 *db, const char *session_path,
                                            const char *message_id) {
   cJSON *rows, *pending;
+  char account_dir[1024];
   int i, n;
+  set_account_dir(session_path, account_dir, sizeof(account_dir));
   if (!message_id || !message_id[0]) return;
   rows = enil_db_get_message_sticons(db, message_id);
   n = rows ? cJSON_GetArraySize(rows) : 0;
@@ -1234,8 +1238,10 @@ static void download_message_sticon_images(sqlite3 *db, const char *session_path
     const char *sid = cJSON_GetStringValue(cJSON_GetObjectItem(row, "sticon_id"));
     const char *img = cJSON_GetStringValue(cJSON_GetObjectItem(row, "image_path"));
     cJSON      *entry;
-    if (img && img[0]) continue;                 /* already on disk */
+    if (enil_asset_cache_png(account_dir, img, NULL, NULL)) continue;
     if (!pkg || !pkg[0] || !sid || !sid[0]) continue;
+    enil_db_set_sticon_image_path(db, sid, pkg, NULL, 0, 0);
+    enil_db_set_sticon_thumb_path(db, sid, pkg, NULL, 0, 0);
     entry = cJSON_CreateObject();
     cJSON_AddStringToObject(entry, "sticker_id", sid);
     cJSON_AddStringToObject(entry, "package_id", pkg);
@@ -1276,8 +1282,9 @@ static void sync_one_message_sticker(sqlite3 *db, const char *session_path,
   cJSON *meta = cJSON_GetObjectItem(msg, "contentMetadata");
   const char *pkg_id, *stk_id, *opt, *hash;
   cJSON *pending, *entry;
-  char buf[512];
+  char buf[512], account_dir[1024];
   int  w, h;
+  set_account_dir(session_path, account_dir, sizeof(account_dir));
   if (!cJSON_IsObject(meta)) return;
   pkg_id = cJSON_GetStringValue(cJSON_GetObjectItem(meta, "STKPKGID"));
   stk_id = cJSON_GetStringValue(cJSON_GetObjectItem(meta, "STKID"));
@@ -1285,8 +1292,11 @@ static void sync_one_message_sticker(sqlite3 *db, const char *session_path,
   hash   = cJSON_GetStringValue(cJSON_GetObjectItem(meta, "STKHASH"));
   if (!pkg_id || !pkg_id[0] || !stk_id || !stk_id[0]) return;
   if (enil_db_get_sticker_image_info_for_package(db, pkg_id, stk_id,
-                                                 buf, sizeof(buf), &w, &h))
-    return; /* already on disk */
+                                                 buf, sizeof(buf), &w, &h) &&
+      enil_asset_cache_png(account_dir, buf, NULL, NULL))
+    return;
+  enil_db_set_sticker_image_path(db, stk_id, pkg_id, NULL, 0, 0);
+  enil_db_set_sticker_thumb_path(db, stk_id, pkg_id, NULL, 0, 0);
   pending = cJSON_CreateArray();
   entry   = cJSON_CreateObject();
   if (!pending || !entry) { cJSON_Delete(pending); cJSON_Delete(entry); return; }
@@ -2757,8 +2767,17 @@ int enil_sync_all(sqlite3    *db,
     sync_phase_read_range(db, current_token, boxes, boxes_n);
     sync_phase_decrypting(db, current_token, my_mid, session_path);
     sync_phase_preparing(db, current_token, session_path);
-    sync_phase_downloading(db, current_token, session_path);
-    ok = sync_phase_finish(db, local_rev, session_path, snapshot);
+    {
+      char account_dir[1024];
+      set_account_dir(session_path, account_dir, sizeof(account_dir));
+      report(ENIL_SYNC_PHASE_DOWNLOADING, 0, 0, "Checking cached images...", 0);
+      if (enil_asset_cache_reconcile(db, account_dir) == 0) {
+        sync_phase_downloading(db, current_token, session_path);
+        ok = sync_phase_finish(db, local_rev, session_path, snapshot);
+      } else {
+        report(ENIL_SYNC_PHASE_DOWNLOADING, 0, 0, "Could not check cached images", 1);
+      }
+    }
   }
 
   for (i = 0; i < boxes_n; i++) talk_message_box_free(&boxes[i]);

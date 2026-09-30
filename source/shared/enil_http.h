@@ -29,6 +29,12 @@ int enil_http_cancelled(void);
 /* GET url and write body to dest_path. Returns 0 on success (HTTP 200). */
 int   enil_curl_download_file(const char *url, const char *dest_path);
 
+/* As above, but validate the closed temporary file before publishing it.
+ * The callback returns nonzero for valid content. A rejected response leaves
+ * an existing destination untouched. */
+int enil_curl_download_file_validated(const char *url, const char *dest_path,
+                                      int (*validate)(const char *path));
+
 /* GET url and return body as a malloc'd string, or NULL on failure/non-200. */
 char *enil_curl_get(const char *url);
 

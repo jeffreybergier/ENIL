@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+from test_native_png import png
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -23,9 +24,12 @@ class DownloadTests(unittest.TestCase):
                         "-I" + str(REPO / "source/shared"),
                         str(REPO / "source/tests/native_download.c"),
                         str(REPO / "source/shared/enil_http.c"),
+                        str(REPO / "source/shared/enil_png.c"), "-lz",
                         "-pthread", *flags, "-o", str(cls.binary)], check=True)
 
-    def transfer(self, mode, existing=None, kill=False, cancel=False):
+    def transfer(self, mode, existing=None, kill=False, cancel=False,
+                 validate=False, payload=b"data", expect_success=None):
+        success = mode == "ok" if expect_success is None else expect_success
         ready, release = threading.Event(), threading.Event()
 
         class Handler(BaseHTTPRequestHandler):
@@ -34,9 +38,9 @@ class DownloadTests(unittest.TestCase):
 
             def do_GET(self):
                 self.send_response(404 if mode == "404" else 200)
-                self.send_header("Content-Length", "100" if mode != "ok" else "4")
+                self.send_header("Content-Length", "100" if mode != "ok" else str(len(payload)))
                 self.end_headers()
-                self.wfile.write(b"data")
+                self.wfile.write(payload)
                 self.wfile.flush()
                 ready.set()
                 if mode == "stall":
@@ -52,15 +56,15 @@ class DownloadTests(unittest.TestCase):
                     dest.write_bytes(existing)
                 proc = subprocess.Popen([str(self.binary),
                     f"http://127.0.0.1:{server.server_port}/image", str(dest),
-                    *(["cancel"] if cancel else [])])
+                    *(["cancel"] if cancel else ["validate"] if validate else [])])
                 try:
                     self.assertTrue(ready.wait(5))
                     if kill:
                         proc.kill()
                     code = proc.wait(timeout=5)
-                    self.assertEqual(code == 0, mode == "ok")
-                    if mode == "ok":
-                        self.assertEqual(dest.read_bytes(), b"data")
+                    self.assertEqual(code == 0, success)
+                    if success:
+                        self.assertEqual(dest.read_bytes(), payload)
                     elif existing is not None:
                         self.assertEqual(dest.read_bytes(), existing)
                     else:
@@ -96,3 +100,11 @@ class DownloadTests(unittest.TestCase):
 
     def test_cancelled_download_preserves_cached_file(self):
         self.transfer("stall", b"previous", cancel=True)
+
+    def test_http_200_invalid_png_never_replaces_valid_cache(self):
+        for payload in (b"", b"<html>error</html>", png()[:-1]):
+            with self.subTest(payload=payload):
+                self.transfer("ok", png(), validate=True, payload=payload, expect_success=False)
+
+    def test_valid_png_is_published(self):
+        self.transfer("ok", validate=True, payload=png())

@@ -1,5 +1,7 @@
 #include "enil_http.h"
 #include "enil_identity.h"
+#include "enil_png.h"
+#include <string.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <pthread.h>
@@ -14,9 +16,12 @@ static void *cancel_later(void *unused) {
   cancelled = 1;
   return NULL;
 }
+static int validate_png(const char *path) { return enil_png_info(path, NULL, NULL); }
 int main(int argc, char **argv) {
   pthread_t thread;
   int result;
+  if (argc == 4 && !strcmp(argv[3], "validate"))
+    return enil_curl_download_file_validated(argv[1], argv[2], validate_png) == 0 ? 0 : 1;
   if (argc == 4) {
     enil_http_bind_cancel(&cancelled);
     if (pthread_create(&thread, NULL, cancel_later, NULL)) return 2;

@@ -33,6 +33,14 @@ enum {
   CHAT_BAD_ENTRY, CHAT_DB_ERROR, CHAT_BAD_ARRAY, CHAT_BAD_BODY
 };
 static int chat_update_mode, chat_calls;
+static int cache_test, cache_download_attempts;
+int __wrap_enil_curl_download_file_validated(const char *url, const char *dest,
+                                             int (*validate)(const char *)) {
+  (void)dest; (void)validate;
+  assert(cache_test && strstr(url, "/sticker/18194067/"));
+  cache_download_attempts++;
+  return -1; /* Still offline: the repaired row must remain pending. */
+}
 
 int __real_fsync(int fd);
 int __wrap_fsync(int fd) {
@@ -108,7 +116,7 @@ ENILLineResponse __wrap_enil_line_post(const char *path, const char *body, const
   }
   fetching = 1;
   /* The saved cursor must stay unchanged throughout the fetch. */
-  assert(enil_db_get_local_rev(db) == 10);
+  assert(enil_db_get_local_rev(db) == (cache_test && cache_download_attempts ? baseline : 10));
   if (!strcmp(method, "getProfile")) return response("{\"mid\":\"self\",\"displayName\":\"Self\"}");
   if (!strcmp(method, "getAllContactIds")) return response("[]");
   if (!strcmp(method, "getAllChatMids"))
@@ -627,6 +635,27 @@ static void chat_page_and_status_queries(void) {
   assert(enil_db_message_box_last_delivered_time(db, "missing") == 0);
 }
 
+static void recover_missing_sticker(void) {
+  sqlite3_stmt *row = NULL;
+  cache_test = 1;
+  assert(sqlite3_exec(db,
+    "INSERT INTO sticker_packages_v2(id,isPurchased) VALUES('1498401',0);"
+    "INSERT INTO stickers_v2(sticker_id,package_id,image_path,thumb_path,image_width,image_height)"
+    " VALUES('18194067','1498401','purchases/1498401/18194067.png',"
+    "'purchases/1498401/18194067.png',0,0)", NULL, NULL, NULL) == SQLITE_OK);
+  assert(enil_account_sync_all(health, db, "synthetic", "self", session_path));
+  assert(cache_download_attempts == 1);
+  assert(sqlite3_prepare_v2(db, "SELECT image_path,thumb_path FROM stickers_v2 "
+                              "WHERE sticker_id='18194067'", -1, &row, NULL) == SQLITE_OK);
+  assert(sqlite3_step(row) == SQLITE_ROW);
+  assert(sqlite3_column_type(row, 0) == SQLITE_NULL && sqlite3_column_type(row, 1) == SQLITE_NULL);
+  sqlite3_finalize(row);
+  /* A failed replacement stays eligible on the next full sync. */
+  fetching = 0;
+  assert(enil_account_sync_all(health, db, "synthetic", "self", session_path));
+  assert(cache_download_attempts == 2);
+}
+
 int main(int argc, char **argv) {
   enil_identity_t identity;
   cJSON *root;
@@ -646,7 +675,8 @@ int main(int argc, char **argv) {
   assert(enil_session_write(session_path, root));
   cJSON_Delete(root);
   if (argc == 4) {
-    if (!strcmp(argv[3], "chat-page")) chat_page_and_status_queries();
+    if (!strcmp(argv[3], "cache")) recover_missing_sticker();
+    else if (!strcmp(argv[3], "chat-page")) chat_page_and_status_queries();
     else if (!strcmp(argv[3], "replay-synced")) replay_synced_messages();
     else if (!strcmp(argv[3], "idle-reset")) polling_failure_streak(0);
     else if (!strncmp(argv[3], "chat-update-", 12)) chat_update_recovery(atoi(argv[3] + 12));

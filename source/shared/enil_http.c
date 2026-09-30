@@ -160,6 +160,11 @@ char *enil_curl_get(const char *url) {
 /* Write beside the destination and publish only a complete, closed response.
  * A killed process may leave a temporary file, but never a poisoned cache hit. */
 int enil_curl_download_file(const char *url, const char *dest_path) {
+  return enil_curl_download_file_validated(url, dest_path, NULL);
+}
+
+int enil_curl_download_file_validated(const char *url, const char *dest_path,
+                                     int (*validate)(const char *path)) {
   CURL *curl = NULL;
   FILE *f = NULL;
   char *temporary;
@@ -195,7 +200,8 @@ int enil_curl_download_file(const char *url, const char *dest_path) {
   /* Buffered writes can fail at close even when curl reports success. */
   if (fclose(f) != 0) { f = NULL; goto done; }
   f = NULL;
-  if (rename(temporary, dest_path) == 0) result = 0;
+  if ((!validate || validate(temporary)) &&
+      rename(temporary, dest_path) == 0) result = 0;
 
 done:
   if (curl) curl_easy_cleanup(curl);

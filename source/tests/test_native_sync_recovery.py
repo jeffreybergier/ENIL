@@ -28,6 +28,7 @@ class NativeSyncRecoveryTests(unittest.TestCase):
             *[str(p) for p in sorted(shared.glob("*.c"))],
             "-Wl,--gc-sections", "-Wl,--wrap=curl_easy_perform",
             "-Wl,--wrap=sleep", "-Wl,--wrap=fsync",
+            "-Wl,--wrap=enil_curl_download_file_validated",
             "-Wl,--wrap=enil_line_post", "-Wl,--wrap=enil_line_post_ex",
             "-Wl,--wrap=enil_line_acquire_obs_token", "-pthread", *flags, "-lz", "-o", str(binary),
         ], check=True)
@@ -89,3 +90,6 @@ class NativeSyncRecoveryTests(unittest.TestCase):
         for mode in ["partial-native", "partial-chrome", "partial-newer"]:
             with self.subTest(mode=mode):
                 self.run_recovery(mode)
+
+    def test_full_sync_retries_sticker_whose_cached_file_is_missing(self):
+        self.run_recovery("cache")
