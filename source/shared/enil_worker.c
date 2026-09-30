@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 #include "cJSON.h"
 #include "enil_http.h"
 #include "enil_worker.h"
@@ -22,6 +23,7 @@
  * enil_worker_set_credentials() is called from ENILAccount / AppDelegate. */
 static char *g_worker_url    = NULL;
 static char *g_worker_secret = NULL;
+static pthread_mutex_t g_credentials_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static char *dup_or_null(const char *s) {
   size_t n;
@@ -35,19 +37,44 @@ static char *dup_or_null(const char *s) {
 }
 
 void enil_worker_set_credentials(const char *url, const char *secret) {
+  char *next_url = dup_or_null(url), *next_secret = dup_or_null(secret);
+  /* An allocation failure must not install half of a credential pair. */
+  if ((url && *url && !next_url) || (secret && *secret && !next_secret)) {
+    free(next_url); free(next_secret);
+    LOG("set_credentials", "cannot copy credentials");
+    return;
+  }
+  pthread_mutex_lock(&g_credentials_lock);
   free(g_worker_url);
   free(g_worker_secret);
-  g_worker_url    = dup_or_null(url);
-  g_worker_secret = dup_or_null(secret);
-  ENIL_LOG("Worker.set_credentials",
-           "url=%s secret=%s",
-           g_worker_url    ? g_worker_url : "(unset)",
-           g_worker_secret ? "(set)"      : "(unset)");
-  /* Fresh credentials give us a reason to try again — clear any sticky
-   * worker failure so the next call hits the network. enil_health
-   * suppresses the UI notification if the flag wasn't actually set, so
-   * this is a no-op churn-free call when nothing was wrong. */
+  g_worker_url = next_url;
+  g_worker_secret = next_secret;
+  pthread_mutex_unlock(&g_credentials_lock);
+  ENIL_LOG("Worker.set_credentials", "url=%s secret=%s",
+           url && *url ? url : "(unset)", secret && *secret ? "(set)" : "(unset)");
   enil_health_clear_failure(ENIL_ERR_WORKER);
+}
+
+/* Return an owned, internally consistent pair. No credential mutex is held
+ * during curl or Cocoa callbacks; replacing Preferences cannot invalidate it. */
+static int worker_credentials_copy(const char *path, char **url, char **header) {
+  size_t url_size, header_size;
+  *url = NULL; *header = NULL;
+  pthread_mutex_lock(&g_credentials_lock);
+  if (g_worker_url && g_worker_secret) {
+    url_size = strlen(g_worker_url) + strlen(path) + 1;
+    header_size = strlen("X-Worker-Secret: ") + strlen(g_worker_secret) + 1;
+    *url = malloc(url_size);
+    *header = malloc(header_size);
+    if (*url && *header) {
+      snprintf(*url, url_size, "%s%s", g_worker_url, path);
+      snprintf(*header, header_size, "X-Worker-Secret: %s", g_worker_secret);
+    }
+  }
+  pthread_mutex_unlock(&g_credentials_lock);
+  if (*url && *header) return 1;
+  free(*url); free(*header); *url = NULL; *header = NULL;
+  return 0;
 }
 
 static int worker_cancel(void *ctx, curl_off_t a, curl_off_t b, curl_off_t c, curl_off_t d) {
@@ -57,8 +84,7 @@ static int worker_cancel(void *ctx, curl_off_t a, curl_off_t b, curl_off_t c, cu
 
 static char *worker_post(const char *path, const char *json_body,
                          const volatile int *cancel) {
-  char url[512];
-  char secret_hdr[256];
+  char *url = NULL, *secret_hdr = NULL;
   ENILBuf buf = {NULL, 0};
   CURL *curl;
   struct curl_slist *hdrs = NULL;
@@ -66,10 +92,6 @@ static char *worker_post(const char *path, const char *json_body,
   long status = 0;
 
   if (cancel && enil_atomic_load(cancel)) return NULL;
-  if (!g_worker_url || !g_worker_secret) {
-    LOG("worker_post", "credentials not configured");
-    return NULL;
-  }
 
   /* Sticky-failure gate. Once any worker call has failed (auth, transport,
    * or HTTP 5xx), every subsequent worker_post() returns NULL without
@@ -85,16 +107,23 @@ static char *worker_post(const char *path, const char *json_body,
     return NULL;
   }
 
-  snprintf(url, sizeof(url), "%s%s", g_worker_url, path);
-  snprintf(secret_hdr, sizeof(secret_hdr),
-           "X-Worker-Secret: %s", g_worker_secret);
+  if (!worker_credentials_copy(path, &url, &secret_hdr)) {
+    LOG("worker_post", "credentials unavailable");
+    return NULL;
+  }
   curl = enil_curl_new(&buf);
-  if (!curl) { LOG("worker_post", "enil_curl_new failed"); return NULL; }
-
-  hdrs = curl_slist_append(hdrs, "Content-Type: application/json");
-  hdrs = curl_slist_append(hdrs, secret_hdr);
+  if (!curl) { free(url); free(secret_hdr); return NULL; }
+  hdrs = curl_slist_append(NULL, "Content-Type: application/json");
+  if (hdrs) {
+    struct curl_slist *next = curl_slist_append(hdrs, secret_hdr);
+    if (!next) { curl_slist_free_all(hdrs); hdrs = NULL; }
+    else hdrs = next;
+  }
+  free(secret_hdr);
+  if (!hdrs) { free(url); curl_easy_cleanup(curl); return NULL; }
 
   curl_easy_setopt(curl, CURLOPT_URL, url);
+  free(url); /* CURLOPT_URL copies the string. */
   curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_body);
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
 
