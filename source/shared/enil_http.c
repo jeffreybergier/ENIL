@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <pthread.h>
+#include <unistd.h>
 #include "enil_http.h"
 #include "enil_identity.h"
 #include "enil_cocoa_log.h"
@@ -114,50 +115,52 @@ char *enil_curl_get(const char *url) {
   return buf.data;
 }
 
-/* ============================================================================
- * Stream a URL to dest_path. Removes the file and returns -1 if not HTTP 200.
- * ==========================================================================*/
+/* Write beside the destination and publish only a complete, closed response.
+ * A killed process may leave a temporary file, but never a poisoned cache hit. */
 int enil_curl_download_file(const char *url, const char *dest_path) {
-  CURL *curl;
-  FILE *f;
-  long  status = 0;
+  CURL *curl = NULL;
+  FILE *f = NULL;
+  char *temporary;
+  int fd, result = -1;
+  long status = 0;
   CURLcode rc;
 
   if (!url || !dest_path) return -1;
-  f = fopen(dest_path, "wb");
-  if (!f) {
-    ENIL_LOG("Http.download", "fopen failed: %s", dest_path);
-    return -1;
-  }
-
+  temporary = malloc(strlen(dest_path) + sizeof(".download-XXXXXX"));
+  if (!temporary) return -1;
+  sprintf(temporary, "%s.download-XXXXXX", dest_path);
+  fd = mkstemp(temporary);
+  if (fd < 0) goto done;
+  f = fdopen(fd, "wb");
+  if (!f) { close(fd); goto done; }
   curl = enil_curl_new_raw();
-  if (!curl) {
-    ENIL_LOG("Http.download", "curl init failed: %s", url);
-    fclose(f);
-    return -1;
-  }
+  if (!curl) goto done;
   if (enil_identity_current())
     curl_easy_setopt(curl, CURLOPT_USERAGENT, enil_identity_current()->user_agent);
   curl_easy_setopt(curl, CURLOPT_URL, url);
-  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, NULL); /* default fwrite */
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, NULL);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, f);
   curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
 
   rc = curl_easy_perform(curl);
   curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
-  curl_easy_cleanup(curl);
-  fclose(f);
-
-  if (rc != CURLE_OK) {
-    ENIL_LOG("Http.download", "transport error %s: %s",
+  if (rc != CURLE_OK || status != 200) {
+    ENIL_LOG("Http.download", "HTTP %ld / %s: %s", status,
              curl_easy_strerror(rc), url);
-    remove(dest_path);
-    return -1;
+    goto done;
   }
-  if (status != 200) {
-    ENIL_LOG("Http.download", "HTTP %ld: %s", status, url);
-    remove(dest_path);
-    return -1;
+  /* Buffered writes can fail at close even when curl reports success. */
+  if (fclose(f) != 0) { f = NULL; goto done; }
+  f = NULL;
+  if (rename(temporary, dest_path) == 0) result = 0;
+
+done:
+  if (curl) curl_easy_cleanup(curl);
+  if (f) fclose(f);
+  if (result != 0) {
+    unlink(temporary);
+    ENIL_LOG("Http.download", "download not published: %s", dest_path);
   }
-  return 0;
+  free(temporary);
+  return result;
 }
