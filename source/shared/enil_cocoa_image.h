@@ -14,6 +14,9 @@ typedef struct {
   int thumb_height;
 } ENILThumbInfo;
 
+/* Return 0 only for a complete, decodable image with positive dimensions. */
+int enil_image_validate(const char *path, int *width, int *height);
+
 /* Generate a JPEG thumbnail of src_path at thumb_path (bounded by an internal
    thumbnail size constant on the longest edge). Fills info with original and
    thumbnail pixel dimensions. Returns 0 on success, -1 on failure. */

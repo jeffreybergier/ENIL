@@ -28,6 +28,8 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 #import  "XPFoundation.h"   /* ENILLog macro (used by the progress logger below) */
 #include "enil_cocoa_image.h"
@@ -118,9 +120,44 @@ static int write_jpeg(CGImageRef img, CFURLRef dst_url) {
  *   max_px = 0 → full-resolution copy
  * Fills info with both original and output dimensions.
  * ==========================================================================*/
+/* Validate the complete source and force a bounded decode. Metadata alone can
+ * describe an image whose pixel payload is truncated. */
+int enil_image_validate(const char *path, int *width, int *height) {
+  CFURLRef url;
+  CGImageSourceRef src;
+  CGImageRef image = NULL;
+  CFDictionaryRef props = NULL;
+  int w = 0, h = 0, result = -1;
+  if (!path) return -1;
+  url = url_from_path(path);
+  if (!url) return -1;
+  src = CGImageSourceCreateWithURL(url, NULL);
+  CFRelease(url);
+  if (!src) return -1;
+  if (CGImageSourceGetStatus(src) != kCGImageStatusComplete ||
+      CGImageSourceGetStatusAtIndex(src, 0) != kCGImageStatusComplete) goto done;
+  props = CGImageSourceCopyPropertiesAtIndex(src, 0, NULL);
+  if (!props) goto done;
+  w = cf_int(props, kCGImagePropertyPixelWidth);
+  h = cf_int(props, kCGImagePropertyPixelHeight);
+  if (w <= 0 || h <= 0) goto done;
+  image = build_source_image(src, THUMB_MAX_PX);
+  if (!image || !CGImageGetWidth(image) || !CGImageGetHeight(image) ||
+      CGImageSourceGetStatusAtIndex(src, 0) != kCGImageStatusComplete) goto done;
+  if (width) *width = w;
+  if (height) *height = h;
+  result = 0;
+done:
+  if (image) CGImageRelease(image);
+  if (props) CFRelease(props);
+  CFRelease(src);
+  return result;
+}
+
 int enil_image_jpeg_create(const char *src_path, const char *dst_path,
                            int max_px, ENILThumbInfo *info) {
-  int result = -1;
+  int result = -1, fd;
+  char *temporary = NULL;
   CFURLRef src_url = NULL;
   CFURLRef dst_url = NULL;
   CGImageSourceRef isrc = NULL;
@@ -131,11 +168,18 @@ int enil_image_jpeg_create(const char *src_path, const char *dst_path,
   memset(info, 0, sizeof(*info));
 
   src_url = url_from_path(src_path);
-  dst_url = url_from_path(dst_path);
+  temporary = (char *)malloc(strlen(dst_path) + 20);
+  if (!temporary) goto done;
+  sprintf(temporary, "%s.render-XXXXXX", dst_path);
+  fd = mkstemp(temporary);
+  if (fd < 0) goto done;
+  if (close(fd) != 0) goto done;
+  dst_url = url_from_path(temporary);
   if (!src_url || !dst_url) goto done;
 
   isrc = CGImageSourceCreateWithURL(src_url, NULL);
-  if (!isrc) goto done;
+  if (!isrc || CGImageSourceGetStatus(isrc) != kCGImageStatusComplete ||
+      CGImageSourceGetStatusAtIndex(isrc, 0) != kCGImageStatusComplete) goto done;
 
   props = CGImageSourceCopyPropertiesAtIndex(isrc, 0, NULL);
   if (props) {
@@ -143,13 +187,17 @@ int enil_image_jpeg_create(const char *src_path, const char *dst_path,
     info->orig_height = cf_int(props, kCGImagePropertyPixelHeight);
   }
 
+  if (info->orig_width <= 0 || info->orig_height <= 0) goto done;
   img = build_source_image(isrc, max_px);
   if (!img) goto done;
 
   info->thumb_width  = (int)CGImageGetWidth(img);
   info->thumb_height = (int)CGImageGetHeight(img);
 
-  if (write_jpeg(img, dst_url) == 0) result = 0;
+  if (info->thumb_width > 0 && info->thumb_height > 0 &&
+      write_jpeg(img, dst_url) == 0 &&
+      enil_image_validate(temporary, NULL, NULL) == 0 &&
+      rename(temporary, dst_path) == 0) result = 0;
 
 done:
   if (img)     CGImageRelease(img);
@@ -157,6 +205,8 @@ done:
   if (isrc)    CFRelease(isrc);
   if (dst_url) CFRelease(dst_url);
   if (src_url) CFRelease(src_url);
+  if (temporary) { if (result != 0) unlink(temporary); free(temporary); }
+  if (result != 0) memset(info, 0, sizeof(*info));
   return result;
 }
 

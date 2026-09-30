@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 static sqlite3 *db;
 static const char *session_path;
@@ -34,6 +35,7 @@ enum {
 };
 static int chat_update_mode, chat_calls;
 static int cache_test, cache_download_attempts, retry_test;
+static int media_test, media_downloads, media_offline, thumbnail_failure;
 int __wrap_enil_curl_download_file_validated(const char *url, const char *dest,
                                              int (*validate)(const char *)) {
   (void)dest; (void)validate;
@@ -72,8 +74,32 @@ int enil_localized_collate(void *ctx, int an, const void *a, int bn, const void 
 int enil_format_date_string(long long ms, char *out, size_t size) {
   (void)ms; if (size) out[0] = 0; return 0;
 }
+static void image_fixture(const char *path, const char *content) {
+  FILE *f = fopen(path,"wb"); assert(f); assert(fputs(content,f)>=0); assert(fclose(f)==0);
+}
+int enil_image_validate(const char *path, int *w, int *h) {
+  FILE *f = fopen(path,"rb"); char buf[8] = {0};
+  if (!f) return -1;
+  (void)fread(buf,1,7,f); fclose(f);
+  if (strcmp(buf,"image")) return -1;
+  if (w) *w=20;
+  if (h) *h=10;
+  return 0;
+}
 int enil_thumb_generate(const char *src, const char *dst, ENILThumbInfo *info) {
-  (void)src; (void)dst; (void)info; assert(0); return -1;
+  assert(media_test && enil_image_validate(src,NULL,NULL)==0);
+  if (thumbnail_failure) return -1;
+  image_fixture(dst,"image");
+  info->orig_width=20; info->orig_height=10; info->thumb_width=20; info->thumb_height=10;
+  return 0;
+}
+int __wrap_enil_obs_download_message(const char *session, const char *id,
+    const char *sid, const char *oid, const char *pop, const char *version,
+    const char *key, size_t size, const char *dest) {
+  (void)session; (void)id; (void)sid; (void)oid; (void)pop; (void)version; (void)key; (void)size;
+  assert(media_test); media_downloads++;
+  if (media_offline) return -1;
+  image_fixture(dest,"image"); return 0;
 }
 CURLcode __wrap_curl_easy_perform(CURL *curl) { (void)curl; assert(0); return CURLE_FAILED_INIT; }
 char *__wrap_enil_line_acquire_obs_token(const char *path, const char *token) {
@@ -120,7 +146,7 @@ ENILLineResponse __wrap_enil_line_post(const char *path, const char *body, const
   }
   fetching = 1;
   /* The saved cursor must stay unchanged throughout the fetch. */
-  assert(enil_db_get_local_rev(db) == (cache_test && cache_download_attempts ? baseline : 10));
+  assert(media_test || enil_db_get_local_rev(db) == (cache_test && cache_download_attempts ? baseline : 10));
   if (!strcmp(method, "getProfile")) return response("{\"mid\":\"self\",\"displayName\":\"Self\"}");
   if (!strcmp(method, "getAllContactIds")) return response("[]");
   if (!strcmp(method, "getAllChatMids"))
@@ -681,6 +707,39 @@ static void recover_missing_sticker(void) {
   assert(cache_download_attempts == 2);
 }
 
+static void media_recovery(void) {
+  char dir[1024], original[1200], thumb[1200];
+  sqlite3_stmt *row;
+  media_test=1;
+  snprintf(dir,sizeof(dir),"%s",session_path); *strrchr(dir,'/')=0;
+  snprintf(original,sizeof(original),"%s/media",dir); assert(mkdir(original,0700)==0);
+  snprintf(original,sizeof(original),"%s/media/chat",dir); assert(mkdir(original,0700)==0);
+  snprintf(original,sizeof(original),"%s/media/chat/photo.jpg",dir);
+  snprintf(thumb,sizeof(thumb),"%s/media/chat/photo_t.jpg",dir);
+  image_fixture(original,"bad"); image_fixture(thumb,"image");
+  assert(sqlite3_exec(db,"INSERT INTO messages_v2(id,chat_id,contentType,media_path,thumb_path) VALUES('photo','chat',1,'media/chat/photo.jpg','media/chat/photo_t.jpg')",NULL,NULL,NULL)==SQLITE_OK);
+  thumbnail_failure=1;
+  assert(enil_account_sync_all(health,db,"synthetic","self",session_path));
+  assert(media_downloads==1);
+  assert(sqlite3_prepare_v2(db,"SELECT media_path,thumb_path FROM messages_v2 WHERE id='photo'",-1,&row,NULL)==SQLITE_OK);
+  assert(sqlite3_step(row)==SQLITE_ROW && sqlite3_column_type(row,0)==SQLITE_NULL && sqlite3_column_type(row,1)==SQLITE_NULL);
+  sqlite3_finalize(row);
+  /* The valid original survives the failed thumbnail; retry needs no network. */
+  unlink(thumb); thumbnail_failure=0; media_offline=1; fetching=0;
+  assert(enil_account_sync_all(health,db,"synthetic","self",session_path));
+  assert(media_downloads==1 && enil_image_validate(thumb,NULL,NULL)==0);
+  assert(sqlite3_prepare_v2(db,"SELECT orig_width,thumb_width FROM messages_v2 WHERE id='photo' AND media_path IS NOT NULL AND thumb_path IS NOT NULL",-1,&row,NULL)==SQLITE_OK);
+  assert(sqlite3_step(row)==SQLITE_ROW && sqlite3_column_int(row,0)==20 && sqlite3_column_int(row,1)==20);
+  sqlite3_finalize(row);
+  /* A vanished original with an offline server clears both completed paths. */
+  unlink(original); fetching=0;
+  assert(enil_account_sync_all(health,db,"synthetic","self",session_path));
+  assert(media_downloads==2);
+  assert(sqlite3_prepare_v2(db,"SELECT media_path,thumb_path FROM messages_v2 WHERE id='photo'",-1,&row,NULL)==SQLITE_OK);
+  assert(sqlite3_step(row)==SQLITE_ROW && sqlite3_column_type(row,0)==SQLITE_NULL && sqlite3_column_type(row,1)==SQLITE_NULL);
+  sqlite3_finalize(row);
+}
+
 static int reject_commit(void *unused) { (void)unused; return 1; }
 static void asset_write_failures(void) {
   sqlite3_stmt *row;
@@ -722,6 +781,7 @@ int main(int argc, char **argv) {
   cJSON_Delete(root);
   if (argc == 4) {
     if (!strcmp(argv[3], "retry-worker")) retry_failed_worker();
+    else if (!strcmp(argv[3], "media")) media_recovery();
     else if (!strcmp(argv[3], "asset-write")) asset_write_failures();
     else if (!strcmp(argv[3], "cache")) recover_missing_sticker();
     else if (!strcmp(argv[3], "chat-page")) chat_page_and_status_queries();

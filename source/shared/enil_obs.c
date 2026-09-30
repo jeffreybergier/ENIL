@@ -239,26 +239,24 @@ static int write_bytes(const char *path, const unsigned char *data,
                        size_t len)
 {
   FILE *fp;
-
-  if (!path || !data) {
-    LOG("write", "NULL argument");
-    return -1;
+  char *temporary;
+  int fd, result = -1;
+  if (!path || !data || !len) return -1;
+  temporary = (char *)malloc(strlen(path) + 20);
+  if (!temporary) return -1;
+  sprintf(temporary, "%s.download-XXXXXX", path);
+  fd = mkstemp(temporary);
+  if (fd < 0) { free(temporary); return -1; }
+  fp = fdopen(fd, "wb");
+  if (!fp) close(fd);
+  else {
+    int complete = fwrite(data, 1, len, fp) == len;
+    if (fclose(fp) != 0) complete = 0;
+    if (complete && rename(temporary, path) == 0) result = 0;
   }
-
-  fp = fopen(path, "wb");
-  if (!fp) {
-    LOG("write", "cannot open dest_path");
-    return -1;
-  }
-
-  if (fwrite(data, 1, len, fp) != len) {
-    fclose(fp);
-    LOG("write", "short write");
-    return -1;
-  }
-
-  fclose(fp);
-  return 0;
+  if (result != 0) unlink(temporary);
+  free(temporary);
+  return result;
 }
 
 static unsigned char *decrypt_payload(const char *enc_km,

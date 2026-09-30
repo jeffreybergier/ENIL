@@ -30,6 +30,7 @@ class NativeSyncRecoveryTests(unittest.TestCase):
             "-Wl,--wrap=sleep", "-Wl,--wrap=fsync",
             "-Wl,--wrap=enil_curl_download_file_validated",
             "-Wl,--wrap=enil_line_post", "-Wl,--wrap=enil_line_post_ex",
+            "-Wl,--wrap=enil_obs_download_message",
             "-Wl,--wrap=enil_line_acquire_obs_token", "-pthread", *flags, "-lz", "-o", str(binary),
         ], check=True)
 
@@ -99,3 +100,6 @@ class NativeSyncRecoveryTests(unittest.TestCase):
 
     def test_asset_write_and_commit_failures_preserve_pending_paths_and_cursor(self):
         self.run_recovery("asset-write")
+
+    def test_photos_repair_corrupt_originals_and_retry_thumbnails_offline(self):
+        self.run_recovery("media")

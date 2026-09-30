@@ -1306,65 +1306,73 @@ static int sync_one_message_sticker(sqlite3 *db, const char *session_path,
   return download_sticker_list(db, session_path, pending, "live", "sticker", NULL, 0, 0);
 }
 
-/* Download one media entry (from enil_db_get_message*_media). No-op if the row
- * already has a media_path. */
-static void download_media_entry(sqlite3 *db, const char *session_path,
+/* Return -1 for persistence failures, 1 for an unavailable attachment, and 0
+ * for a complete image/thumbnail pair. Both live and full sync use this path. */
+static int download_media_entry(sqlite3 *db, const char *session_path,
                                  const char *account_dir, cJSON *entry) {
   const char *message_id = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "message_id"));
-  const char *chat_id    = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "chat_id"));
-  const char *media_path = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "media_path"));
+  const char *chat_id = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "chat_id"));
   const char *enc_km, *sid, *oid, *obs_pop, *e2ee_version;
   char media_dir[1280], chat_dir[1536], dest[1600], rel_path[512];
   char thumb_dest[1600], thumb_rel[512];
-  ENILThumbInfo tinfo;
-  size_t plain_size;
-  if (!message_id || !chat_id) return;
-  if (media_path && media_path[0]) return;
-  enc_km = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "enc_km"));
-  sid = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "sid"));
-  oid = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "oid"));
-  obs_pop = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "obs_pop"));
-  e2ee_version = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "e2ee_version"));
-  plain_size = (size_t)cJSON_GetNumberValue(cJSON_GetObjectItem(entry, "plain_size"));
+  ENILThumbInfo info;
+  struct stat st;
+  double size_value = cJSON_GetNumberValue(cJSON_GetObjectItem(entry, "plain_size"));
+  size_t plain_size = size_value > 0 ? (size_t)size_value : 0;
+  int original_ok, thumb_ok;
+  if (!message_id || !chat_id || !account_dir[0]) return 1;
   snprintf(media_dir, sizeof(media_dir), "%s/media", account_dir);
   snprintf(chat_dir, sizeof(chat_dir), "%s/%s", media_dir, chat_id);
   snprintf(dest, sizeof(dest), "%s/%s.jpg", chat_dir, message_id);
   snprintf(rel_path, sizeof(rel_path), "media/%s/%s.jpg", chat_id, message_id);
-  mkdir(media_dir, 0755);
-  mkdir(chat_dir, 0755);
-  if (enil_obs_download_message(session_path, message_id, sid, oid,
-                                obs_pop, e2ee_version, enc_km,
-                                plain_size, dest) != 0)
-    return;
-  memset(&tinfo, 0, sizeof(tinfo));
   snprintf(thumb_dest, sizeof(thumb_dest), "%s/%s_t.jpg", chat_dir, message_id);
   snprintf(thumb_rel, sizeof(thumb_rel), "media/%s/%s_t.jpg", chat_id, message_id);
-  if (enil_thumb_generate(dest, thumb_dest, &tinfo) != 0)
-    thumb_rel[0] = '\0';
-  enil_db_set_media_info(db, message_id, rel_path,
-                         tinfo.orig_width, tinfo.orig_height,
-                         thumb_rel[0] ? thumb_rel : NULL,
-                         tinfo.thumb_width, tinfo.thumb_height);
+  mkdir(media_dir, 0755);
+  mkdir(chat_dir, 0755);
+  memset(&info, 0, sizeof(info));
+  original_ok = enil_image_validate(dest, &info.orig_width, &info.orig_height) == 0 &&
+    (!plain_size || (stat(dest, &st) == 0 && (size_t)st.st_size == plain_size));
+  thumb_ok = original_ok && enil_image_validate(thumb_dest, &info.thumb_width, &info.thumb_height) == 0;
+  if (!original_ok || !thumb_ok) {
+    /* Clear stale metadata before attempting repair; a failed transfer or
+     * thumbnail must never leave a completed row behind. */
+    if (enil_db_set_media_info(db, message_id, NULL, 0, 0, NULL, 0, 0) != SQLITE_OK) return -1;
+    if (!original_ok) {
+      enc_km = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "enc_km"));
+      sid = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "sid"));
+      oid = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "oid"));
+      obs_pop = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "obs_pop"));
+      e2ee_version = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "e2ee_version"));
+      if (enil_obs_download_message(session_path, message_id, sid, oid, obs_pop,
+            e2ee_version, enc_km, plain_size, dest) != 0 ||
+          enil_image_validate(dest, &info.orig_width, &info.orig_height) != 0 ||
+          (plain_size && (stat(dest, &st) != 0 || (size_t)st.st_size != plain_size))) return 1;
+    }
+    /* Reuse a valid original after thumbnail failure, including across launch. */
+    if (enil_thumb_generate(dest, thumb_dest, &info) != 0) return 1;
+  }
+  if (info.orig_width <= 0 || info.orig_height <= 0 ||
+      info.thumb_width <= 0 || info.thumb_height <= 0) return 1;
+  return enil_db_set_media_info(db, message_id, rel_path, info.orig_width,
+      info.orig_height, thumb_rel, info.thumb_width, info.thumb_height) == SQLITE_OK ? 0 : -1;
 }
 
-/* SSE path: download just THIS message's image if it isn't already on disk. */
-static void sync_one_message_media(sqlite3 *db, const char *session_path,
+static int sync_one_message_media(sqlite3 *db, const char *session_path,
                                    const char *message_id) {
   cJSON *entry;
-  const char *media_path;
   char account_dir[1024];
-  if (!message_id || !message_id[0]) return;
+  int result;
+  if (!message_id || !message_id[0]) return 0;
   entry = enil_db_get_message_media_info(db, message_id);
-  if (!entry) return;
-  media_path = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "media_path"));
-  if (media_path && media_path[0]) { cJSON_Delete(entry); return; }
+  if (!entry) return -1;
   set_account_dir(session_path, account_dir, sizeof(account_dir));
-  if (account_dir[0]) {
-    sqlite3_exec(db, "BEGIN", NULL, NULL, NULL);
-    download_media_entry(db, session_path, account_dir, entry);
-    sqlite3_exec(db, "COMMIT", NULL, NULL, NULL);
+  if (sqlite3_exec(db, "BEGIN", NULL, NULL, NULL) != SQLITE_OK) { cJSON_Delete(entry); return -1; }
+  result = download_media_entry(db, session_path, account_dir, entry);
+  if (result < 0 || sqlite3_exec(db, "COMMIT", NULL, NULL, NULL) != SQLITE_OK) {
+    sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL); result = -1;
   }
   cJSON_Delete(entry);
+  return result;
 }
 
 static int message_has_plaintext(sqlite3 *db, const char *message_id) {
@@ -1700,7 +1708,7 @@ int enil_sync_process_sse_event(sqlite3    *db,
         (cJSON_GetObjectItem(cmeta, "STICON_OWNERSHIP") != NULL ||
          cJSON_GetObjectItem(cmeta, "REPLACE") != NULL);
       if (has_sticon && sync_one_message_sticons(db, session_path, msg) < 0) rc = SQLITE_ERROR;
-      if (ctype == 1) sync_one_message_media(db, session_path, op.message->id);
+      if (ctype == 1 && sync_one_message_media(db, session_path, op.message->id) < 0) rc = SQLITE_ERROR;
       if (ctype == 7 && sync_one_message_sticker(db, session_path, msg) < 0) rc = SQLITE_ERROR;
     }
   }
@@ -2578,7 +2586,7 @@ static int sync_phase_downloading(sqlite3    *db,
   int    n_seen_sti  = count_seen_sti  ? cJSON_GetArraySize(count_seen_sti)  : 0;
   int    total     = n_media + n_owned_stk + n_owned_sti + n_seen_stk + n_seen_sti;
   int    counter   = 0;
-  int    downloaded = 0, skipped = 0, errors = 0;
+  int    errors = 0;
   int    i;
 
   (void)current_token;
@@ -2595,110 +2603,28 @@ static int sync_phase_downloading(sqlite3    *db,
 
   report(ENIL_SYNC_PHASE_DOWNLOADING, 0, total, "Downloading...", 0);
 
-  /* --- Sub-loop A: encrypted media downloads --- */
-  sqlite3_exec(db, "BEGIN", NULL, NULL, NULL);
+  /* Originals and thumbnails share the same validation/recovery path as SSE. */
   {
-
-  /* derive account dir from session_path by stripping the filename */
-  char account_dir[1024];
-  const char *last_slash = strrchr(session_path, '/');
-  if (last_slash && (size_t)(last_slash - session_path) < sizeof(account_dir) - 1) {
-    size_t dir_len = (size_t)(last_slash - session_path);
-    memcpy(account_dir, session_path, dir_len);
-    account_dir[dir_len] = '\0';
-  } else {
-    account_dir[0] = '\0';
-  }
-
-  for (i = 0; i < n_media; i++) {
-    cJSON      *entry      = cJSON_GetArrayItem(pending_media, i);
-    const char *message_id = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "message_id"));
-    const char *chat_id    = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "chat_id"));
-    const char *media_path = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "media_path"));
-    const char *enc_km, *sid, *oid, *obs_pop, *e2ee_version;
-    char        media_dir[1280], chat_dir[1536], dest[1600];
-    char        rel_path[512];
-    size_t      plain_size;
-
-    if (!message_id || !chat_id || !account_dir[0]) {
-      /* Count as an error so the summary balances (was silently dropped). */
-      errors++;
-      ENIL_LOG("Sync.media", "skipping malformed entry: %s%s%s",
-               !message_id     ? "no message_id " : "",
-               !chat_id        ? "no chat_id "    : "",
-               !account_dir[0] ? "no account_dir" : "");
+    char account_dir[1024];
+    set_account_dir(session_path, account_dir, sizeof(account_dir));
+    if (sqlite3_exec(db, "BEGIN", NULL, NULL, NULL) != SQLITE_OK) { cJSON_Delete(pending_media); return -1; }
+    for (i = 0; i < n_media; i++) {
+      int result = download_media_entry(db, session_path, account_dir,
+                                        cJSON_GetArrayItem(pending_media, i));
+      if (result < 0) {
+        sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+        cJSON_Delete(pending_media); return -1;
+      }
+      errors += result;
       counter++;
       report(ENIL_SYNC_PHASE_DOWNLOADING, counter, total, "Downloading...", 0);
-      continue;
     }
-
-    enc_km       = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "enc_km"));
-    sid          = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "sid"));
-    oid          = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "oid"));
-    obs_pop      = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "obs_pop"));
-    e2ee_version = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "e2ee_version"));
-    plain_size   = (size_t)cJSON_GetNumberValue(cJSON_GetObjectItem(entry, "plain_size"));
-    /* build dest path: <account_dir>/media/<chat_id>/<message_id>.jpg */
-    snprintf(media_dir, sizeof(media_dir), "%s/media", account_dir);
-    snprintf(chat_dir,  sizeof(chat_dir),  "%s/%s", media_dir, chat_id);
-    snprintf(dest,      sizeof(dest),      "%s/%s.jpg", chat_dir, message_id);
-    snprintf(rel_path,  sizeof(rel_path),  "media/%s/%s.jpg", chat_id, message_id);
-
-    mkdir(media_dir, 0755);
-    mkdir(chat_dir,  0755);
-
-    if (media_path && media_path[0]) {
-      struct stat st;
-      char existing[1600];
-      snprintf(existing, sizeof(existing), "%s/%s", account_dir, media_path);
-      if (stat(existing, &st) == 0 &&
-          (plain_size == 0 || (size_t)st.st_size == plain_size)) {
-        /* The DB listed this as needing media but the file is already on disk
-         * with the expected size — surfaces DB<->disk drift, not steady state
-         * (this loop only ever sees rows enil_db_get_messages_needing_media
-         * returned). */
-        skipped++;
-        ENIL_LOG("Sync.media", "%s (%s): already on disk, skipping",
-                 message_id, chat_id);
-        counter++;
-        report(ENIL_SYNC_PHASE_DOWNLOADING, counter, total, "Downloading...", 0);
-        continue;
-      }
-      /* File missing or wrong size — clear stale path so UI won't use it */
-      enil_db_set_media_info(db, message_id, NULL, 0, 0, NULL, 0, 0);
-      media_path = NULL;
+    if (sqlite3_exec(db, "COMMIT", NULL, NULL, NULL) != SQLITE_OK) {
+      sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+      cJSON_Delete(pending_media); return -1;
     }
-
-    if (enil_obs_download_message(session_path, message_id,
-                                  sid, oid, obs_pop, e2ee_version,
-                                  enc_km, plain_size, dest) == 0) {
-      ENILThumbInfo tinfo;
-      char thumb_dest[1600], thumb_rel[512];
-      memset(&tinfo, 0, sizeof(tinfo));
-      snprintf(thumb_dest, sizeof(thumb_dest), "%s/%s_t.jpg", chat_dir, message_id);
-      snprintf(thumb_rel,  sizeof(thumb_rel),  "media/%s/%s_t.jpg", chat_id, message_id);
-      if (enil_thumb_generate(dest, thumb_dest, &tinfo) != 0) {
-        thumb_rel[0] = '\0';
-        ENIL_LOG("Sync.media", "thumb failed for %s", message_id);
-      }
-      enil_db_set_media_info(db, message_id, rel_path,
-                              tinfo.orig_width, tinfo.orig_height,
-                              thumb_rel[0] ? thumb_rel : NULL,
-                              tinfo.thumb_width, tinfo.thumb_height);
-      downloaded++;
-    } else {
-      errors++;
-      ENIL_LOG("Sync.media", "%s (%s): OBS download failed",
-               message_id, chat_id);
-    }
-
-    counter++;
-    report(ENIL_SYNC_PHASE_DOWNLOADING, counter, total, "Downloading...", 0);
   }
-  sqlite3_exec(db, "COMMIT", NULL, NULL, NULL);
   cJSON_Delete(pending_media);
-  ENIL_LOG("Sync.media", "%d downloaded, %d skipped, %d errors", downloaded, skipped, errors);
-  } /* end sub-loop A inner block */
 
   /* --- Sub-loop B: purchased sticker / sticon images --- */
   i = run_sticker_downloads(db, session_path, 1, 0, &counter, total, 1);
