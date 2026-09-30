@@ -96,3 +96,6 @@ class NativeSyncRecoveryTests(unittest.TestCase):
 
     def test_explicit_full_sync_retries_failed_worker_without_clearing_other_accounts(self):
         self.run_recovery("retry-worker")
+
+    def test_asset_write_and_commit_failures_preserve_pending_paths_and_cursor(self):
+        self.run_recovery("asset-write")

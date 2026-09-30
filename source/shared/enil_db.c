@@ -982,9 +982,9 @@ int enil_db_create_tables(sqlite3 *db) {
 
 /* --- Accounts --- */
 
-static void bind_text_or_null(sqlite3_stmt *stmt, int idx, const char *s) {
-  if (s) sqlite3_bind_text(stmt, idx, s, -1, SQLITE_TRANSIENT);
-  else   sqlite3_bind_null(stmt, idx);
+static int bind_text_or_null(sqlite3_stmt *stmt, int idx, const char *s) {
+  if (s) return sqlite3_bind_text(stmt, idx, s, -1, SQLITE_TRANSIENT);
+  return sqlite3_bind_null(stmt, idx);
 }
 
 static char *dup_or_null(const char *s) {
@@ -1043,10 +1043,16 @@ static int enil_db_exec(sqlite3 *db, const char *sql, const char *tag,
     return rc;
   }
   for (i = 0; i < n; i++) {
+    rc = SQLITE_MISUSE;
     switch (binds[i].kind) {
-      case ENIL_BIND_STR: bind_text_or_null(stmt, i + 1, binds[i].s);       break;
-      case ENIL_BIND_INT: sqlite3_bind_int  (stmt, i + 1, (int)binds[i].i); break;
-      case ENIL_BIND_I64: sqlite3_bind_int64(stmt, i + 1, binds[i].i);      break;
+      case ENIL_BIND_STR: rc = bind_text_or_null(stmt, i + 1, binds[i].s);       break;
+      case ENIL_BIND_INT: rc = sqlite3_bind_int  (stmt, i + 1, (int)binds[i].i); break;
+      case ENIL_BIND_I64: rc = sqlite3_bind_int64(stmt, i + 1, binds[i].i);      break;
+    }
+    if (rc != SQLITE_OK) {
+      ENIL_LOG(tag, "bind: %s", sqlite3_errmsg(db));
+      sqlite3_finalize(stmt);
+      return rc;
     }
   }
   return step_done(db, stmt, tag);
@@ -1320,9 +1326,15 @@ static cJSON *row_to_cjson(sqlite3_stmt *stmt, const enil_col_t *cols, size_t co
 static cJSON *rows_to_cjson_array(sqlite3_stmt *stmt,
                                   const enil_col_t *cols, size_t count) {
   cJSON *result = cJSON_CreateArray();
-  while (sqlite3_step(stmt) == SQLITE_ROW)
-    cJSON_AddItemToArray(result, row_to_cjson(stmt, cols, count));
+  int rc = SQLITE_NOMEM;
+  if (result) while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    cJSON *row = row_to_cjson(stmt, cols, count);
+    if (!row || !cJSON_AddItemToArray(result, row)) {
+      cJSON_Delete(row); rc = SQLITE_NOMEM; break;
+    }
+  }
   sqlite3_finalize(stmt);
+  if (rc != SQLITE_DONE) { cJSON_Delete(result); return NULL; }
   return result;
 }
 
@@ -2438,9 +2450,15 @@ cJSON *enil_db_get_messages_needing_media(sqlite3 *db) {
   }
 
   result = cJSON_CreateArray();
-  while (sqlite3_step(stmt) == SQLITE_ROW)
-    cJSON_AddItemToArray(result, media_row_from_stmt(stmt));
+  rc = SQLITE_NOMEM;
+  if (result) while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+    cJSON *row = media_row_from_stmt(stmt);
+    if (!row || !cJSON_AddItemToArray(result, row)) {
+      cJSON_Delete(row); rc = SQLITE_NOMEM; break;
+    }
+  }
   sqlite3_finalize(stmt);
+  if (rc != SQLITE_DONE) { cJSON_Delete(result); return NULL; }
   return result;
 }
 
@@ -3519,4 +3537,17 @@ int enil_db_sse_event_record(sqlite3    *db,
            event_type ? event_type : "(null)",
            op_name ? op_name : "-", revision, handled);
   return SQLITE_OK;
+}
+
+/* Publish or invalidate both paths in one SQLite statement. */
+int enil_db_set_sticker_asset(sqlite3 *db, int sticon,
+    const char *id, const char *package_id, const char *image, int w, int h,
+    const char *thumb, int tw, int th) {
+  char sql[256];
+  enil_bind_t b[] = { ENIL_S(image), ENIL_I(w), ENIL_I(h),
+    ENIL_S(thumb), ENIL_I(tw), ENIL_I(th), ENIL_S(id), ENIL_S(package_id) };
+  snprintf(sql, sizeof(sql), "UPDATE %s SET image_path=?, image_width=?, image_height=?,"
+      " thumb_path=?, thumb_width=?, thumb_height=? WHERE %s=? AND package_id=?",
+      sticon ? "sticons_v2" : "stickers_v2", sticon ? "sticon_id" : "sticker_id");
+  return enil_db_exec(db, sql, "Db.set_sticker_asset", b, 8);
 }

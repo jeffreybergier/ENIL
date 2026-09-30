@@ -224,6 +224,10 @@ cJSON *enil_db_get_stickers_needing_download(sqlite3 *db, int purchased);
 cJSON *enil_db_get_sticons_needing_download (sqlite3 *db, int purchased);
 int enil_db_sticker_rows_get(sqlite3 *db, sticker_row_t **out, int *out_count);
 int enil_db_sticon_rows_get(sqlite3 *db, sticon_row_t **out, int *out_count);
+int enil_db_set_sticker_asset(sqlite3 *db, int sticon,
+    const char *id, const char *package_id, const char *image, int w, int h,
+    const char *thumb, int tw, int th);
+
 int    enil_db_set_sticker_image_path(sqlite3 *db, const char *sticker_id,
                                        const char *package_id,
                                        const char *image_path,

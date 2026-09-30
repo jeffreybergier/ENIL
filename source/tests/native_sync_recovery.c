@@ -681,6 +681,27 @@ static void recover_missing_sticker(void) {
   assert(cache_download_attempts == 2);
 }
 
+static int reject_commit(void *unused) { (void)unused; return 1; }
+static void asset_write_failures(void) {
+  sqlite3_stmt *row;
+  assert(sqlite3_exec(db, "INSERT INTO stickers_v2(sticker_id,package_id) VALUES('s','p')", NULL,NULL,NULL)==SQLITE_OK);
+  assert(sqlite3_exec(db, "CREATE TRIGGER reject_asset BEFORE UPDATE ON stickers_v2 BEGIN SELECT RAISE(ABORT,'full disk'); END",NULL,NULL,NULL)==SQLITE_OK);
+  assert(enil_db_set_sticker_asset(db,0,"s","p","image",2,3,"thumb",1,2)!=SQLITE_OK);
+  assert(sqlite3_exec(db,"DROP TRIGGER reject_asset",NULL,NULL,NULL)==SQLITE_OK);
+  sqlite3_commit_hook(db,reject_commit,NULL);
+  assert(enil_db_set_sticker_asset(db,0,"s","p","image",2,3,"thumb",1,2)!=SQLITE_OK);
+  sqlite3_commit_hook(db,NULL,NULL);
+  assert(sqlite3_prepare_v2(db,"SELECT image_path,thumb_path FROM stickers_v2",-1,&row,NULL)==SQLITE_OK);
+  assert(sqlite3_step(row)==SQLITE_ROW);
+  assert(sqlite3_column_type(row,0)==SQLITE_NULL && sqlite3_column_type(row,1)==SQLITE_NULL);
+  sqlite3_finalize(row);
+  assert(enil_db_set_sticker_asset(db,0,"s","p","image",2,3,"thumb",1,2)==SQLITE_OK);
+  /* A failed cache invalidation must not acknowledge the sync cursor. */
+  assert(sqlite3_exec(db, "CREATE TRIGGER reject_asset BEFORE UPDATE ON stickers_v2 BEGIN SELECT RAISE(ABORT,'full disk'); END",NULL,NULL,NULL)==SQLITE_OK);
+  assert(!enil_account_sync_all(health,db,"synthetic","self",session_path));
+  assert(enil_db_get_local_rev(db)==10 && failed && !succeeded);
+}
+
 int main(int argc, char **argv) {
   enil_identity_t identity;
   cJSON *root;
@@ -701,6 +722,7 @@ int main(int argc, char **argv) {
   cJSON_Delete(root);
   if (argc == 4) {
     if (!strcmp(argv[3], "retry-worker")) retry_failed_worker();
+    else if (!strcmp(argv[3], "asset-write")) asset_write_failures();
     else if (!strcmp(argv[3], "cache")) recover_missing_sticker();
     else if (!strcmp(argv[3], "chat-page")) chat_page_and_status_queries();
     else if (!strcmp(argv[3], "replay-synced")) replay_synced_messages();
