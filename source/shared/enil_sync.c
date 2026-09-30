@@ -980,13 +980,13 @@ static int run_sticker_downloads(sqlite3 *db, const char *session_path,
  *                 unowned packs sparse so we don't pre-download images for
  *                 sticons the user may never see.
  *     The meta.json file itself is cached on disk regardless of mode.
- *     Returns 0 on success, -1 on fetch failure. */
+ *     Returns 0 on success, -1 on fetch failure, -2 on database failure. */
 static int sync_sticonshop_meta(sqlite3 *db, const char *session_path,
                                 const char *pkg_id, int expand) {
   char  meta_url[256];
   char *meta_body;
   cJSON *meta, *orders, *alt_map;
-  int k, nk;
+  int k, nk, rc;
 
   if (!pkg_id || !pkg_id[0]) return -1;
   snprintf(meta_url, sizeof(meta_url),
@@ -1006,6 +1006,8 @@ static int sync_sticonshop_meta(sqlite3 *db, const char *session_path,
   }
   save_sticon_meta_file(session_path, pkg_id, meta_body);
 
+  rc = sqlite3_exec(db, "SAVEPOINT sticon_meta", NULL, NULL, NULL);
+  if (rc != SQLITE_OK) { cJSON_Delete(meta); free(meta_body); return -2; }
   /* meta.json carries sticonResourceType="ANIMATION" for animated packs (the
    * field is absent on static packs). Back-fill the int form on the package
    * row so the download phase knows whether to also fetch <id>_animation.png
@@ -1014,36 +1016,42 @@ static int sync_sticonshop_meta(sqlite3 *db, const char *session_path,
     const char *rt = cJSON_GetStringValue(
                        cJSON_GetObjectItem(meta, "sticonResourceType"));
     if (rt && strcmp(rt, "ANIMATION") == 0)
-      enil_db_sticon_package_set_resource_type(db, pkg_id, 2);
+      rc = enil_db_sticon_package_set_resource_type(db, pkg_id, 2);
     else if (rt && strcmp(rt, "STATIC") == 0)
-      enil_db_sticon_package_set_resource_type(db, pkg_id, 1);
+      rc = enil_db_sticon_package_set_resource_type(db, pkg_id, 1);
   }
 
   alt_map = cJSON_GetObjectItem(meta, "altTexts");
   orders  = cJSON_GetObjectItem(meta, "orders");
   nk = cJSON_IsArray(orders) ? cJSON_GetArraySize(orders) : 0;
-  for (k = 0; k < nk; k++) {
+  for (k = 0; k < nk && rc == SQLITE_OK; k++) {
     cJSON      *id_item   = cJSON_GetArrayItem(orders, k);
     const char *sticon_id = cJSON_IsString(id_item) ? id_item->valuestring : NULL;
     if (sticon_id && sticon_id[0]) {
       const char *alt_text = cJSON_GetStringValue(cJSON_GetObjectItem(alt_map, sticon_id));
       if (expand)
-        enil_db_sticon_upsert(db, sticon_id, pkg_id, alt_text);
+        rc = enil_db_sticon_upsert(db, sticon_id, pkg_id, alt_text);
       else if (alt_text && alt_text[0])
-        enil_db_set_sticon_alt_text(db, sticon_id, pkg_id, alt_text);
+        rc = enil_db_set_sticon_alt_text(db, sticon_id, pkg_id, alt_text);
     }
   }
   ENIL_LOG("Sync.sticon_meta", "%s: %d sticons (%s)", pkg_id, nk, expand ? "expand" : "enrich");
   cJSON_Delete(meta);
   free(meta_body);
-  return 0;
+  if (rc == SQLITE_OK) rc = sqlite3_exec(db, "RELEASE sticon_meta", NULL, NULL, NULL);
+  if (rc != SQLITE_OK) {
+    sqlite3_exec(db, "ROLLBACK TO sticon_meta", NULL, NULL, NULL);
+    sqlite3_exec(db, "RELEASE sticon_meta", NULL, NULL, NULL);
+  }
+  return rc == SQLITE_OK ? 0 : -2;
 }
 
 /* --- Inline message scan: discover sticker/sticon packages from raw message JSON.
  *     Called per chat as part of PHASE_MESSAGES. */
-static void scan_messages_for_stickers(sqlite3 *db, cJSON *msgs) {
+static int scan_messages_for_stickers(sqlite3 *db, cJSON *msgs) {
+  int rc = SQLITE_OK;
   int j, nm = cJSON_GetArraySize(msgs);
-  for (j = 0; j < nm; j++) {
+  for (j = 0; j < nm && rc == SQLITE_OK; j++) {
     cJSON *m    = cJSON_GetArrayItem(msgs, j);
     cJSON *ct   = cJSON_GetObjectItem(m, "contentType");
     cJSON *meta = cJSON_GetObjectItem(m, "contentMetadata");
@@ -1054,8 +1062,8 @@ static void scan_messages_for_stickers(sqlite3 *db, cJSON *msgs) {
       const char *opt    = cJSON_GetStringValue(cJSON_GetObjectItem(meta, "STKOPT"));
       const char *hash   = cJSON_GetStringValue(cJSON_GetObjectItem(meta, "STKHASH"));
       if (pkg_id && pkg_id[0] && stk_id && stk_id[0]) {
-        enil_db_sticker_package_discover(db, pkg_id);
-        enil_db_sticker_upsert(db, stk_id, pkg_id, opt, hash);
+        if (rc == SQLITE_OK) rc = enil_db_sticker_package_discover(db, pkg_id);
+        if (rc == SQLITE_OK) rc = enil_db_sticker_upsert(db, stk_id, pkg_id, opt, hash);
       }
     } else if (cJSON_IsNumber(ct) && (int)ct->valuedouble == 0) {
       cJSON *own_item = cJSON_GetObjectItem(meta, "STICON_OWNERSHIP");
@@ -1063,10 +1071,10 @@ static void scan_messages_for_stickers(sqlite3 *db, cJSON *msgs) {
         cJSON *ownership = cJSON_Parse(own_item->valuestring);
         if (cJSON_IsArray(ownership)) {
           int k, nk = cJSON_GetArraySize(ownership);
-          for (k = 0; k < nk; k++) {
+          for (k = 0; k < nk && rc == SQLITE_OK; k++) {
             cJSON *item = cJSON_GetArrayItem(ownership, k);
             if (cJSON_IsString(item) && item->valuestring && item->valuestring[0])
-              enil_db_sticon_package_discover(db, item->valuestring);
+              rc = enil_db_sticon_package_discover(db, item->valuestring);
           }
         }
         cJSON_Delete(ownership);
@@ -1078,13 +1086,13 @@ static void scan_messages_for_stickers(sqlite3 *db, cJSON *msgs) {
         cJSON *resources  = sticon_obj ? cJSON_GetObjectItem(sticon_obj, "resources") : NULL;
         if (cJSON_IsArray(resources)) {
           int k, nk = cJSON_GetArraySize(resources);
-          for (k = 0; k < nk; k++) {
+          for (k = 0; k < nk && rc == SQLITE_OK; k++) {
             cJSON *res = cJSON_GetArrayItem(resources, k);
             const char *prod_id = cJSON_GetStringValue(cJSON_GetObjectItem(res, "productId"));
             const char *sti_id  = cJSON_GetStringValue(cJSON_GetObjectItem(res, "sticonId"));
             if (prod_id && prod_id[0] && sti_id && sti_id[0]) {
-              enil_db_sticon_package_discover(db, prod_id);
-              enil_db_sticon_upsert(db, sti_id, prod_id, NULL);
+              if (rc == SQLITE_OK) rc = enil_db_sticon_package_discover(db, prod_id);
+              if (rc == SQLITE_OK) rc = enil_db_sticon_upsert(db, sti_id, prod_id, NULL);
             }
           }
         }
@@ -1092,6 +1100,7 @@ static void scan_messages_for_stickers(sqlite3 *db, cJSON *msgs) {
       }
     }
   }
+  return rc;
 }
 
 static int upsert_chat_for_message(sqlite3 *db, cJSON *msg,
@@ -1118,7 +1127,7 @@ static int decrypt_one_message(sqlite3 *db, cJSON *msg,
   const char *message_id = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "id"));
   char *plaintext = NULL, *replace_json = NULL, *key_material = NULL;
   int restore_changed = 0;
-  int to_type;
+  int to_type, rc = SQLITE_OK;
 
   if (!db || !msg || !message_id || !access_token || !session_path) return SQLITE_ERROR;
   if (is_unsupported_location_message(msg)) {
@@ -1132,8 +1141,7 @@ static int decrypt_one_message(sqlite3 *db, cJSON *msg,
   to_type_item = cJSON_GetObjectItem(msg, "toType");
   if (!cJSON_IsArray(chunks) || cJSON_GetArraySize(chunks) < 5 ||
       !cJSON_IsObject(meta) || !cJSON_GetObjectItem(meta, "e2eeVersion")) {
-    enil_db_set_message_text(db, message_id, NULL, ENIL_DECRYPT_NOT_TEXT);
-    return SQLITE_OK;
+    return enil_db_set_message_text(db, message_id, NULL, ENIL_DECRYPT_NOT_TEXT);
   }
   if (load_session(session_path, &session, &restore_state, &e2ee_keys) != 0)
     return SQLITE_ERROR;
@@ -1156,16 +1164,16 @@ static int decrypt_one_message(sqlite3 *db, cJSON *msg,
       updated_raw = cJSON_PrintUnformatted(msg);
     }
     if (updated_raw) {
-      enil_db_set_message_plaintext(db, message_id, plaintext, updated_raw,
+      rc = enil_db_set_message_plaintext(db, message_id, plaintext, updated_raw,
                                     replace_json, ENIL_DECRYPT_SUCCESS);
       free(updated_raw);
     } else {
-      enil_db_set_message_text(db, message_id, plaintext, ENIL_DECRYPT_SUCCESS);
+      rc = enil_db_set_message_text(db, message_id, plaintext, ENIL_DECRYPT_SUCCESS);
     }
   } else if (key_material) {
-    enil_db_set_message_enc_km(db, message_id, key_material);
+    rc = enil_db_set_message_enc_km(db, message_id, key_material);
   } else {
-    enil_db_set_message_text(db, message_id, NULL, ENIL_DECRYPT_FAILED);
+    rc = enil_db_set_message_text(db, message_id, NULL, ENIL_DECRYPT_FAILED);
   }
   if (restore_changed && restore_state)
     save_restore_state(session_path, &session, restore_state);
@@ -1173,7 +1181,7 @@ static int decrypt_one_message(sqlite3 *db, cJSON *msg,
   free(replace_json);
   free(key_material);
   enil_session_free(&session);
-  return SQLITE_OK;
+  return rc;
 }
 
 /* Add pkg_id to a cJSON string-array set, skipping empties and duplicates. */
@@ -1270,8 +1278,9 @@ static int sync_one_message_sticons(sqlite3 *db, const char *session_path,
   for (i = 0; i < n; i++) {
     const char *pkg = cJSON_GetArrayItem(set, i)->valuestring;
     int st = enil_db_sticon_package_meta_state(db, pkg);
-    if (st == 1) sync_sticonshop_meta(db, session_path, pkg, 1);
-    else if (st == 2) sync_sticonshop_meta(db, session_path, pkg, 0);
+    if ((st == 1 || st == 2) && sync_sticonshop_meta(db, session_path, pkg, st == 1) == -2) {
+      cJSON_Delete(set); return -1;
+    }
   }
   cJSON_Delete(set);
   return download_message_sticon_images(db, session_path, message_id);
@@ -1683,15 +1692,15 @@ int enil_sync_process_sse_event(sqlite3    *db,
   if (rc == SQLITE_OK) {
     cJSON *updated_arr;
     backfill_chat_metadata(db, access_token, session_path, chat_id);
-    scan_messages_for_stickers(db, arr);
-    if (!message_has_plaintext(db, op.message->id))
-      decrypt_one_message(db, msg, my_mid, access_token, session_path);
+    rc = scan_messages_for_stickers(db, arr);
+    if (rc == SQLITE_OK && !message_has_plaintext(db, op.message->id))
+      rc = decrypt_one_message(db, msg, my_mid, access_token, session_path);
     updated_arr = cJSON_CreateArray();
     if (updated_arr) {
       cJSON *updated_msg = cJSON_Duplicate(msg, 1);
       if (updated_msg) {
         cJSON_AddItemToArray(updated_arr, updated_msg);
-        scan_messages_for_stickers(db, updated_arr);
+        if (rc == SQLITE_OK) rc = scan_messages_for_stickers(db, updated_arr);
       }
       cJSON_Delete(updated_arr);
     }
@@ -1820,20 +1829,19 @@ static long long read_range_max_end_time(cJSON *segs) {
  * silently ignored. The DB functions enforce monotonic overwrite, so calling
  * this after a fresher live op-55 is a no-op.
  * ==========================================================================*/
-static void read_range_apply_one(sqlite3    *db,
+static int read_range_apply_one(sqlite3    *db,
                                   const char *chat_mid,
                                   const char *reader_mid,
                                   long long   end_time) {
   if (!db || !chat_mid || !chat_mid[0] || !reader_mid || !reader_mid[0]
-      || end_time <= 0) return;
+      || end_time <= 0) return SQLITE_OK;
   switch (chat_mid[0]) {
     case 'u': case 'U':
-      enil_db_message_box_set_peer_read(db, chat_mid, reader_mid, end_time);
-      return;
+      return enil_db_message_box_set_peer_read(db, chat_mid, reader_mid, end_time);
     case 'c': case 'C': case 'r': case 'R':
-      enil_db_message_box_set_group_reader(db, chat_mid, reader_mid, end_time);
-      return;
+      return enil_db_message_box_set_group_reader(db, chat_mid, reader_mid, end_time);
   }
+  return SQLITE_OK;
 }
 
 /* ============================================================================
@@ -1853,8 +1861,8 @@ static int read_range_apply_data(sqlite3 *db, cJSON *data) {
     const char *chat_mid = (id_item && cJSON_IsString(id_item)) ? id_item->valuestring : NULL;
     if (!chat_mid || !chat_mid[0] || !cJSON_IsObject(ranges)) continue;
     cJSON_ArrayForEach(reader_node, ranges) {
-      read_range_apply_one(db, chat_mid, reader_node->string,
-                           read_range_max_end_time(reader_node));
+      if (read_range_apply_one(db, chat_mid, reader_node->string,
+                           read_range_max_end_time(reader_node)) != SQLITE_OK) return -1;
       applied++;
     }
   }
@@ -2023,15 +2031,15 @@ static int sync_phase_account(sqlite3    *db,
       report(ENIL_SYNC_PHASE_ACCOUNT, 1, 3, "Friends fetch failed", 1);
       return 1;
     }
-    sqlite3_exec(db, "BEGIN", NULL, NULL, NULL);
-    rc = SQLITE_OK;
+    rc = sqlite3_exec(db, "BEGIN", NULL, NULL, NULL);
     for (ci = 0; ci < contacts_n && rc == SQLITE_OK; ci++) {
       rc = enil_db_talk_contact_upsert(db, &contacts_arr[ci]);
       talk_contact_free(&contacts_arr[ci]);
     }
     for (; ci < contacts_n; ci++) talk_contact_free(&contacts_arr[ci]);
     free(contacts_arr);
-    sqlite3_exec(db, rc == SQLITE_OK ? "COMMIT" : "ROLLBACK", NULL, NULL, NULL);
+    if (rc == SQLITE_OK) rc = sqlite3_exec(db, "COMMIT", NULL, NULL, NULL);
+    if (rc != SQLITE_OK) sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
     if (rc != SQLITE_OK) {
       report(ENIL_SYNC_PHASE_ACCOUNT, 1, 3, "Friends write failed", rc);
       return 1;
@@ -2086,8 +2094,7 @@ static int sync_phase_account(sqlite3    *db,
     }
     free(all_mids);
 
-    sqlite3_exec(db, "BEGIN", NULL, NULL, NULL);
-    rc = SQLITE_OK;
+    rc = sqlite3_exec(db, "BEGIN", NULL, NULL, NULL);
     for (ci = 0; ci < chats_n && rc == SQLITE_OK; ci++) {
       chats_arr[ci].isInvited = 0;
       for (ii = 0; ii < mids.invitedCount; ii++) {
@@ -2105,7 +2112,8 @@ static int sync_phase_account(sqlite3    *db,
     for (; ci < chats_n; ci++) talk_chat_free(&chats_arr[ci]);
     free(chats_arr);
     talk_get_all_chat_mids_free(&mids);
-    sqlite3_exec(db, rc == SQLITE_OK ? "COMMIT" : "ROLLBACK", NULL, NULL, NULL);
+    if (rc == SQLITE_OK) rc = sqlite3_exec(db, "COMMIT", NULL, NULL, NULL);
+    if (rc != SQLITE_OK) sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
 
     /* Resolve names for non-friend group members. Runs AFTER the chats commit
      * (it issues network calls and its own row writes — never nested in the
@@ -2185,7 +2193,11 @@ static int sync_phase_messages(sqlite3 *db, const char *current_token,
         report(ENIL_SYNC_PHASE_MESSAGES, done, boxes_n, "Messages write failed", rc);
         failed = 1;
       } else if (scan_arr) {
-        scan_messages_for_stickers(db, scan_arr);
+        rc = scan_messages_for_stickers(db, scan_arr);
+        if (rc != SQLITE_OK) {
+          report(ENIL_SYNC_PHASE_MESSAGES, done, boxes_n, "Sticker inventory write failed", 1);
+          failed = 1;
+        }
       }
     }
     cJSON_Delete(scan_arr);
@@ -2206,7 +2218,7 @@ static int sync_phase_messages(sqlite3 *db, const char *current_token,
  * after PHASE_MESSAGES because the marker renderer resolves the bubble
  * id by joining peerLastReadTime against the user's outgoing messages
  * in messages_v2, which only just landed. */
-static void sync_phase_read_range(sqlite3 *db, const char *current_token,
+static int sync_phase_read_range(sqlite3 *db, const char *current_token,
                                   const talk_message_box_t *boxes, int boxes_n)
 {
   enum { READ_RANGE_BATCH_SIZE = 100 };
@@ -2214,6 +2226,10 @@ static void sync_phase_read_range(sqlite3 *db, const char *current_token,
   if (boxes_n > 0) {
     const char **batch = (const char **)calloc((size_t)boxes_n, sizeof(*batch));
     int          j;
+    if (!batch) {
+      report(ENIL_SYNC_PHASE_MESSAGES, 0, 0, "Read receipts allocation failed", 1);
+      return -1;
+    }
     if (batch) {
       for (j = 0; j < boxes_n; j++) batch[j] = boxes[j].id;
       for (j = 0; j < boxes_n; j += READ_RANGE_BATCH_SIZE) {
@@ -2222,20 +2238,27 @@ static void sync_phase_read_range(sqlite3 *db, const char *current_token,
         cJSON *data  = talk_get_message_read_range(current_token,
                                                     &batch[j], chunk);
         if (!data) continue;
-        sqlite3_exec(db, "BEGIN", NULL, NULL, NULL);
-        read_range_apply_data(db, data);
-        sqlite3_exec(db, "COMMIT", NULL, NULL, NULL);
+        int rc = sqlite3_exec(db, "BEGIN", NULL, NULL, NULL);
+        if (rc == SQLITE_OK && read_range_apply_data(db, data) < 0) rc = SQLITE_ERROR;
+        if (rc == SQLITE_OK) rc = sqlite3_exec(db, "COMMIT", NULL, NULL, NULL);
         cJSON_Delete(data);
+        if (rc != SQLITE_OK) {
+          sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+          free(batch);
+          report(ENIL_SYNC_PHASE_MESSAGES, 0, 0, "Read receipts write failed", 1);
+          return -1;
+        }
       }
       free(batch);
     }
   }
+  return 0;
 }
 
 /* PHASE 4 — DECRYPTING: decrypt pending E2EE messages, then re-extract the
  * REPLACE field for sticon messages decrypted before REPLACE storage existed.
  * Both sub-loops share one done/total counter. */
-static void sync_phase_decrypting(sqlite3    *db,
+static int sync_phase_decrypting(sqlite3    *db,
                                   const char *current_token,
                                   const char *my_mid,
                                   const char *session_path)
@@ -2246,7 +2269,7 @@ static void sync_phase_decrypting(sqlite3    *db,
   int    n_replace    = sticon_msgs ? cJSON_GetArraySize(sticon_msgs) : 0;
   int    total        = n_decrypt + n_replace;
   int    done         = 0;
-  int    i;
+  int    i, rc = pending && sticon_msgs ? SQLITE_OK : SQLITE_ERROR;
   session_t session;
   cJSON *restore_state = NULL, *e2ee_keys = NULL;
   int    restore_changed = 0;
@@ -2257,12 +2280,11 @@ static void sync_phase_decrypting(sqlite3    *db,
   memset(&group_key_cache, 0, sizeof(group_key_cache));
 
   report(ENIL_SYNC_PHASE_DECRYPTING, 0, total, "Decrypting...", 0);
-  sqlite3_exec(db, "BEGIN", NULL, NULL, NULL);
 
   if (session_path)
     load_session(session_path, &session, &restore_state, &e2ee_keys);
 
-  for (i = 0; i < n_decrypt; i++) {
+  for (i = 0; i < n_decrypt && rc == SQLITE_OK; i++) {
     cJSON      *entry      = cJSON_GetArrayItem(pending, i);
     cJSON      *mid_item   = cJSON_GetObjectItem(entry, "message_id");
     cJSON      *raw_item   = cJSON_GetObjectItem(entry, "raw_json");
@@ -2290,7 +2312,7 @@ static void sync_phase_decrypting(sqlite3    *db,
     if (is_unsupported_location_message(msg)) {
       ENIL_LOG("Sync.decrypting",
                "%s: unsupported location; leaving undecrypted", message_id);
-      enil_db_set_message_text(db, message_id, NULL, ENIL_DECRYPT_NOT_TEXT);
+      rc = enil_db_set_message_text(db, message_id, NULL, ENIL_DECRYPT_NOT_TEXT);
       cJSON_Delete(msg);
       done++;
       report(ENIL_SYNC_PHASE_DECRYPTING, done, total, "Decrypting...", 0);
@@ -2326,23 +2348,23 @@ static void sync_phase_decrypting(sqlite3    *db,
           updated_raw = cJSON_PrintUnformatted(msg);
         }
         if (updated_raw) {
-          enil_db_set_message_plaintext(db, message_id, plaintext,
+          rc = enil_db_set_message_plaintext(db, message_id, plaintext,
                                         updated_raw, replace_json,
                                         ENIL_DECRYPT_SUCCESS);
           free(updated_raw);
         } else {
-          enil_db_set_message_text(db, message_id, plaintext, ENIL_DECRYPT_SUCCESS);
+          rc = enil_db_set_message_text(db, message_id, plaintext, ENIL_DECRYPT_SUCCESS);
         }
         free(plaintext);
       } else if (key_material) {
-        enil_db_set_message_enc_km(db, message_id, key_material);
+        rc = enil_db_set_message_enc_km(db, message_id, key_material);
       } else {
-        enil_db_set_message_text(db, message_id, NULL, ENIL_DECRYPT_FAILED);
+        rc = enil_db_set_message_text(db, message_id, NULL, ENIL_DECRYPT_FAILED);
       }
       free(key_material);
       free(replace_json);
     } else {
-      enil_db_set_message_text(db, message_id, NULL, ENIL_DECRYPT_NOT_TEXT);
+      rc = enil_db_set_message_text(db, message_id, NULL, ENIL_DECRYPT_NOT_TEXT);
     }
 
     cJSON_Delete(msg);
@@ -2350,19 +2372,13 @@ static void sync_phase_decrypting(sqlite3    *db,
     report(ENIL_SYNC_PHASE_DECRYPTING, done, total, "Decrypting...", 0);
   }
 
-  /* Commit the initial decrypt writes. The REPLACE loop below runs without
-   * a wrapping transaction so each write auto-commits before report() is
-   * called. This ensures all DB writes are visible to the main thread
-   * before syncDidFinish fires (report fires it via waitUntilDone:NO). */
-  sqlite3_exec(db, "COMMIT", NULL, NULL, NULL);
-
   /* Re-extract REPLACE for already-decrypted sticon messages.
    * These were decrypted before REPLACE extraction was added. We re-call
    * the worker with the same ciphertext (ECDH is deterministic) and only
    * update raw_json — never touch text or decrypt_status. */
   {
     int si;
-    for (si = 0; si < n_replace; si++) {
+    for (si = 0; si < n_replace && rc == SQLITE_OK; si++) {
       cJSON      *entry      = cJSON_GetArrayItem(sticon_msgs, si);
       const char *message_id = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "message_id"));
       const char *raw_json_s = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "raw_json"));
@@ -2418,7 +2434,7 @@ static void sync_phase_decrypting(sqlite3    *db,
         cJSON_AddStringToObject(meta2, "REPLACE", replace_json2);
         updated_raw2 = cJSON_PrintUnformatted(msg2);
         if (updated_raw2) {
-          enil_db_set_message_raw_json(db, message_id, updated_raw2, replace_json2);
+          rc = enil_db_set_message_raw_json(db, message_id, updated_raw2, replace_json2);
           free(updated_raw2);
         }
       }
@@ -2443,11 +2459,13 @@ static void sync_phase_decrypting(sqlite3    *db,
     save_restore_state(session_path, &session, restore_state);
 
   enil_session_free(&session);
+  if (rc != SQLITE_OK) report(ENIL_SYNC_PHASE_DECRYPTING, done, total, "Decrypted message write failed", 1);
+  return rc == SQLITE_OK ? 0 : -1;
 }
 
 /* PHASE 5 — PREPARING DOWNLOADS: stickershop + sticonshop catalog and the
  * sticon meta.json expansion/enrichment inventory. */
-static void sync_phase_preparing(sqlite3    *db,
+static int sync_phase_preparing(sqlite3    *db,
                                  const char *current_token,
                                  const char *session_path)
 {
@@ -2462,25 +2480,26 @@ static void sync_phase_preparing(sqlite3    *db,
   cJSON *remaining_meta;
   int total = 0, processed = 0;
   int n_meta = 0;
-  int p;
+  int p, rc = needs_alt ? SQLITE_OK : SQLITE_ERROR;
 
   sticker_package_fetch_all(current_token, &stk_pkgs, &n_stk);
   sticon_package_fetch_all (current_token, &sti_pkgs, &n_sti);
   pending_meta = enil_db_sticon_packages_needing_meta(db);
+  if (!pending_meta) rc = SQLITE_ERROR;
   n_meta       = pending_meta ? cJSON_GetArraySize(pending_meta) : 0;
   total = n_stk + n_sti + n_meta + n_alt;
   report(ENIL_SYNC_PHASE_PREPARING_DOWNLOADS, 0, total,
          "Preparing downloads...", 0);
 
   /* --- Stickershop: upsert package + expand stickerIdRanges into stickers_v2 */
-  sqlite3_exec(db, "BEGIN", NULL, NULL, NULL);
-  for (p = 0; p < n_stk; p++) {
+  for (p = 0; p < n_stk && rc == SQLITE_OK; p++) {
     const sticker_package_t *pkg = &stk_pkgs[p];
     const char *opt;
     int r, nr;
     long long total_stickers = 0;
 
-    enil_db_sticker_package_upsert(db, pkg);
+    rc = sqlite3_exec(db, "SAVEPOINT sticker_catalog", NULL, NULL, NULL);
+    if (rc == SQLITE_OK) rc = enil_db_sticker_package_upsert(db, pkg);
 
     opt = sticker_option_for_item(
             cJSON_GetObjectItem(
@@ -2489,17 +2508,22 @@ static void sync_phase_preparing(sqlite3    *db,
                 "stickerSummary"),
               "stickerResourceType"));
     nr = cJSON_IsArray(pkg->stickerIdRanges) ? cJSON_GetArraySize(pkg->stickerIdRanges) : 0;
-    for (r = 0; r < nr; r++) {
+    for (r = 0; r < nr && rc == SQLITE_OK; r++) {
       cJSON *range    = cJSON_GetArrayItem(pkg->stickerIdRanges, r);
       long long start = enil_json_coerce_int64(cJSON_GetObjectItem(range, "start"));
       long long size  = enil_json_coerce_int64(cJSON_GetObjectItem(range, "size"));
       long long k;
-      for (k = 0; k < size; k++) {
+      for (k = 0; k < size && rc == SQLITE_OK; k++) {
         char stk_id[32];
         snprintf(stk_id, sizeof(stk_id), "%lld", start + k);
-        enil_db_sticker_upsert(db, stk_id, pkg->id, opt, NULL);
+        if (rc == SQLITE_OK) rc = enil_db_sticker_upsert(db, stk_id, pkg->id, opt, NULL);
       }
       total_stickers += size;
+    }
+    if (rc == SQLITE_OK) rc = sqlite3_exec(db, "RELEASE sticker_catalog", NULL, NULL, NULL);
+    if (rc != SQLITE_OK) {
+      sqlite3_exec(db, "ROLLBACK TO sticker_catalog", NULL, NULL, NULL);
+      sqlite3_exec(db, "RELEASE sticker_catalog", NULL, NULL, NULL);
     }
     ENIL_LOG("Sync.catalog", "%s: %lld stickers", pkg->id, total_stickers);
 
@@ -2509,15 +2533,14 @@ static void sync_phase_preparing(sqlite3    *db,
   }
 
   /* --- Sticonshop: upsert package + full expansion (owned packs only) */
-  for (p = 0; p < n_sti; p++) {
+  for (p = 0; p < n_sti && rc == SQLITE_OK; p++) {
     const sticon_package_t *pkg = &sti_pkgs[p];
-    enil_db_sticon_package_upsert(db, pkg);
-    sync_sticonshop_meta(db, session_path, pkg->id, 1 /* expand */);
+    if (rc == SQLITE_OK) rc = enil_db_sticon_package_upsert(db, pkg);
+    if (rc == SQLITE_OK && sync_sticonshop_meta(db, session_path, pkg->id, 1 /* expand */) == -2) rc = SQLITE_ERROR;
     processed++;
     report(ENIL_SYNC_PHASE_PREPARING_DOWNLOADS,
            processed, total, "Preparing downloads...", 0);
   }
-  sqlite3_exec(db, "COMMIT", NULL, NULL, NULL);
 
   for (p = 0; p < n_stk; p++) sticker_package_free(&stk_pkgs[p]);
   for (p = 0; p < n_sti; p++) sticon_package_free (&sti_pkgs[p]);
@@ -2529,18 +2552,18 @@ static void sync_phase_preparing(sqlite3    *db,
    * remaining_meta filter avoids re-expanding any pack the owned loop above
    * already handled this run. */
   remaining_meta = enil_db_sticon_packages_needing_meta(db);
+  if (!remaining_meta) rc = SQLITE_ERROR;
   if (n_meta > 0) {
-    sqlite3_exec(db, "BEGIN", NULL, NULL, NULL);
-    for (i = 0; i < n_meta; i++) {
+    for (i = 0; i < n_meta && rc == SQLITE_OK; i++) {
       cJSON      *item   = cJSON_GetArrayItem(pending_meta, i);
       const char *pkg_id = cJSON_IsString(item) ? item->valuestring : NULL;
-      if (json_string_array_contains(remaining_meta, pkg_id))
-        sync_sticonshop_meta(db, session_path, pkg_id, 1 /* expand */);
+      if (json_string_array_contains(remaining_meta, pkg_id) &&
+          sync_sticonshop_meta(db, session_path, pkg_id, 1 /* expand */) == -2) rc = SQLITE_ERROR;
       processed++;
       report(ENIL_SYNC_PHASE_PREPARING_DOWNLOADS,
              processed, total, "Preparing downloads...", 0);
     }
-    sqlite3_exec(db, "COMMIT", NULL, NULL, NULL);
+
   }
   cJSON_Delete(remaining_meta);
   cJSON_Delete(pending_meta);
@@ -2550,21 +2573,22 @@ static void sync_phase_preparing(sqlite3    *db,
    * existing rows only — no new sticon rows are created, so we don't
    * pre-download images for sticons the user hasn't seen in messages. */
   if (n_alt > 0) {
-    sqlite3_exec(db, "BEGIN", NULL, NULL, NULL);
-    for (i = 0; i < n_alt; i++) {
+    for (i = 0; i < n_alt && rc == SQLITE_OK; i++) {
       cJSON      *item   = cJSON_GetArrayItem(needs_alt, i);
       const char *pkg_id = cJSON_IsString(item) ? item->valuestring : NULL;
-      if (pkg_id && pkg_id[0])
-        sync_sticonshop_meta(db, session_path, pkg_id, 0 /* enrich */);
+      if (pkg_id && pkg_id[0] &&
+          sync_sticonshop_meta(db, session_path, pkg_id, 0 /* enrich */) == -2) rc = SQLITE_ERROR;
       processed++;
       report(ENIL_SYNC_PHASE_PREPARING_DOWNLOADS,
              processed, total, "Preparing downloads...", 0);
     }
-    sqlite3_exec(db, "COMMIT", NULL, NULL, NULL);
+
   }
   cJSON_Delete(needs_alt);
   report(ENIL_SYNC_PHASE_PREPARING_DOWNLOADS, total, total,
          "Preparing downloads...", 0);
+  if (rc != SQLITE_OK) report(ENIL_SYNC_PHASE_PREPARING_DOWNLOADS, processed, total, "Sticker inventory write failed", 1);
+  return rc == SQLITE_OK ? 0 : -1;
 }
 
 /* PHASE 6 — DOWNLOADING: encrypted media, then purchased and seen sticker/
@@ -2731,10 +2755,9 @@ int enil_sync_all(sqlite3    *db,
 
   if (sync_phase_account(db, current_token, session_path, &boxes, &boxes_n) == 0 &&
       sync_phase_messages(db, current_token, boxes, boxes_n) == 0) {
-    sync_phase_read_range(db, current_token, boxes, boxes_n);
-    sync_phase_decrypting(db, current_token, my_mid, session_path);
-    sync_phase_preparing(db, current_token, session_path);
-    {
+    if (sync_phase_read_range(db, current_token, boxes, boxes_n) == 0 &&
+        sync_phase_decrypting(db, current_token, my_mid, session_path) == 0 &&
+        sync_phase_preparing(db, current_token, session_path) == 0) {
       char account_dir[1024];
       set_account_dir(session_path, account_dir, sizeof(account_dir));
       report(ENIL_SYNC_PHASE_DOWNLOADING, 0, 0, "Checking cached images...", 0);

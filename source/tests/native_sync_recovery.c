@@ -35,6 +35,7 @@ enum {
 };
 static int chat_update_mode, chat_calls;
 static int cache_test, cache_download_attempts, retry_test;
+static int phase_fault;
 static int media_test, media_downloads, media_offline, thumbnail_failure;
 int __wrap_enil_curl_download_file_validated(const char *url, const char *dest,
                                              int (*validate)(const char *)) {
@@ -184,6 +185,7 @@ ENILLineResponse __wrap_enil_line_post(const char *path, const char *body, const
       cJSON_Delete(request);
       queue_during_sync = 0;
     }
+    if (phase_fault == 4) return response("[{\"id\":\"saved-message\",\"from\":\"peer\",\"to\":\"self\",\"toType\":0,\"contentType\":7,\"contentMetadata\":{\"STKID\":\"s\",\"STKPKGID\":\"p\"}}]");
     if (fail_messages) { ENILLineResponse r = {503, NULL}; return r; }
     return response("[{\"id\":\"saved-message\",\"from\":\"peer\",\"to\":\"self\","
                     "\"toType\":0,\"createdTime\":\"1\",\"contentType\":0,\"text\":\"recovered\"}]");
@@ -191,6 +193,7 @@ ENILLineResponse __wrap_enil_line_post(const char *path, const char *body, const
   if (!strcmp(method, "getMessageReadRange")) {
     assert(!strstr(body, "obsolete-chat"));
     read_range_calls++;
+    if (phase_fault == 3) return response("[{\"chatId\":\"cfixture\",\"ranges\":{\"ureader\":[{\"endTime\":\"2\"}]}}]");
     return response("[]");
   }
   if (!strcmp(method, "getOwnedProductSummaries")) return response("{\"productList\":[]}");
@@ -794,6 +797,31 @@ static void asset_write_failures(void) {
   assert(enil_db_get_local_rev(db)==10 && failed && !succeeded);
 }
 
+static int deny_transaction(void *context, int action, const char *first,
+                            const char *second, const char *database, const char *trigger) {
+  (void)second; (void)database; (void)trigger;
+  return action == SQLITE_TRANSACTION && first && !strcmp(first,(const char *)context)
+    ? SQLITE_DENY : SQLITE_OK;
+}
+static void phase_write_failure(int mode) {
+  phase_fault=mode;
+  if (mode < 2) sqlite3_set_authorizer(db,deny_transaction,mode ? "COMMIT" : "BEGIN");
+  else if (mode == 2) {
+    assert(sqlite3_exec(db,"INSERT INTO messages_v2(id,chat_id,contentType,decrypt_status,raw_json) VALUES('location','peer',15,0,'{\"id\":\"location\",\"contentType\":15}'); CREATE TRIGGER reject_phase BEFORE UPDATE ON messages_v2 WHEN NEW.id='location' BEGIN SELECT RAISE(ABORT,'disk full'); END",NULL,NULL,NULL)==SQLITE_OK);
+  } else if (mode == 3) {
+    assert(sqlite3_exec(db,"CREATE TRIGGER reject_phase BEFORE INSERT ON message_box_readers_v2 BEGIN SELECT RAISE(ABORT,'disk full'); END",NULL,NULL,NULL)==SQLITE_OK);
+  } else {
+    assert(sqlite3_exec(db,"CREATE TRIGGER reject_phase BEFORE INSERT ON stickers_v2 BEGIN SELECT RAISE(ABORT,'disk full'); END",NULL,NULL,NULL)==SQLITE_OK);
+  }
+  assert(!enil_account_sync_all(health,db,"synthetic","self",session_path));
+  assert(failed && !succeeded && enil_db_get_local_rev(db)==10 && sqlite3_get_autocommit(db));
+  sqlite3_set_authorizer(db,NULL,NULL);
+  assert(sqlite3_exec(db,"DROP TRIGGER IF EXISTS reject_phase",NULL,NULL,NULL)==SQLITE_OK);
+  phase_fault=0; fetching=0;
+  assert(enil_account_sync_all(health,db,"synthetic","self",session_path)==1);
+  assert(enil_db_get_local_rev(db)==baseline);
+}
+
 int main(int argc, char **argv) {
   enil_identity_t identity;
   cJSON *root;
@@ -813,7 +841,8 @@ int main(int argc, char **argv) {
   assert(enil_session_write(session_path, root));
   cJSON_Delete(root);
   if (argc == 4) {
-    if (!strcmp(argv[3], "retry-worker")) retry_failed_worker();
+    if (!strncmp(argv[3], "phase-write-", 12)) phase_write_failure(atoi(argv[3]+12));
+    else if (!strcmp(argv[3], "retry-worker")) retry_failed_worker();
     else if (!strcmp(argv[3], "media")) media_recovery();
     else if (!strcmp(argv[3], "asset-write")) asset_write_failures();
     else if (!strcmp(argv[3], "cache")) recover_missing_sticker();
