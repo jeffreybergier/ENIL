@@ -29,6 +29,7 @@
 
 NSString * const ENILErrorDomain               = @"com.enil.error";
 NSString * const ENILSyncStatusNotification    = @"ENILSyncStatusNotification";
+NSString * const ENILAttachmentStatusNotification = @"ENILAttachmentStatusNotification";
 NSString * const ENILSyncDidFinishNotification = @"ENILSyncDidFinishNotification";
 NSString * const ENILMessageJSNotification     = @"ENILMessageJSNotification";
 NSString * const ENILSSEEventNotification      = @"ENILSSEEventNotification";
@@ -395,9 +396,14 @@ static void qr_status_trampoline(const char *msg, void *ctx)
   NSString *sessionPath;
   char *token = NULL;
   char *mid = NULL;
-  BOOL ok = [result boolValue];
+  BOOL ok = [result intValue] > 0;
+  if (ok) [[NSNotificationCenter defaultCenter]
+      postNotificationName:ENILAttachmentStatusNotification object:self
+      userInfo:[NSDictionary dictionaryWithObject:
+          [NSNumber numberWithInt:[result intValue] - 1] forKey:@"unavailable"]];
   syncRunning_ = NO;
   syncRetryRequested_ = NO;
+  syncAttachmentsOnly_ = NO;
   if (ok) {
     sessionPath = [enilDir_ stringByAppendingPathComponent:@"session.json"];
     if (enil_session_validate([sessionPath fileSystemRepresentation], &token, &mid)) {
@@ -420,7 +426,8 @@ static void qr_status_trampoline(const char *msg, void *ctx)
   NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
   NSString *sessionPath = [enilDir_ stringByAppendingPathComponent:@"session.json"];
   int (*runSync)(enil_health_t *, sqlite3 *, const char *, const char *, const char *) =
-    syncRetryRequested_ ? enil_account_retry_sync_all : enil_account_sync_all;
+    syncAttachmentsOnly_ ? enil_account_retry_attachments :
+      (syncRetryRequested_ ? enil_account_retry_sync_all : enil_account_sync_all);
   int ok = runSync(health_, db_,
                         [accessToken_ UTF8String],
                         myMid_ ? [myMid_ UTF8String] : NULL,
@@ -428,9 +435,16 @@ static void qr_status_trampoline(const char *msg, void *ctx)
   /* Complete this account only, after its worker has returned. Global
    * progress notifications can belong to another open account. */
   [self performSelectorOnMainThread:@selector(syncDidFinish:)
-                         withObject:[NSNumber numberWithBool:ok != 0]
+                         withObject:[NSNumber numberWithInt:ok]
                       waitUntilDone:NO];
   [pool release];
+}
+
+- (void)retryAttachments;
+{
+  if (syncRunning_) return;
+  syncAttachmentsOnly_ = YES;
+  [self startSync];
 }
 
 - (void)retrySync;

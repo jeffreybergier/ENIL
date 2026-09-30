@@ -922,6 +922,9 @@ static int download_sticker_list(sqlite3 *db, const char *session_path,
         thread_started[batch_count] = rc == 0;
         if (rc != 0) sticker_download_thread(&jobs[batch_count]);
         batch_count++;
+      } else {
+        errors++;
+        if (counter) (*counter)++;
       }
       i++;
     }
@@ -2637,10 +2640,47 @@ static int sync_phase_downloading(sqlite3    *db,
   return errors;
 }
 
+/* Attachment failures do not undo successfully synced messages. Keep their
+ * summary distinct from both a fatal sync error and an unqualified Done. */
+static void report_attachment_completion(int errors, int full_sync) {
+  if (errors > 0) {
+    ENIL_LOG("Sync.attachments", "%d attachments unavailable", errors);
+    enil_progress_post(ENIL_SYNC_PHASE_DONE, ENIL_SYNC_PHASES, errors, 0,
+        full_sync ? "Messages synced; attachments unavailable" : "Attachments unavailable",
+        0, "sync.attachments", 0);
+  } else report(ENIL_SYNC_PHASE_DONE, 0, 0, full_sync ? "Done" : "Attachments checked", 0);
+}
+
+/* Explicit attachment-only recovery: no chat/history fetch, cursor advance,
+ * or partial-full-sync acknowledgement. Existing originals are reusable. */
+int enil_sync_attachments(sqlite3 *db, const char *access_token,
+                           const char *my_mid, const char *session_path) {
+  char account_dir[1024];
+  int errors;
+  (void)my_mid;
+  if (!enil_session_bind_identity(session_path)) {
+    report(ENIL_SYNC_PHASE_DOWNLOADING, 0, 0, "Invalid client identity", 1);
+    return 0;
+  }
+  set_account_dir(session_path, account_dir, sizeof(account_dir));
+  report(ENIL_SYNC_PHASE_DOWNLOADING, 0, 0, "Checking cached images...", 0);
+  if (enil_asset_cache_reconcile(db, account_dir) != 0) {
+    report(ENIL_SYNC_PHASE_DOWNLOADING, 0, 0, "Could not check cached images", 1);
+    return 0;
+  }
+  errors = sync_phase_downloading(db, access_token, session_path);
+  if (errors < 0) {
+    report(ENIL_SYNC_PHASE_DOWNLOADING, 0, 0, "Could not save attachments", 1);
+    return 0;
+  }
+  report_attachment_completion(errors, 0);
+  return errors + 1;
+}
+
 /* Commit only the revision captured before fetching data. Events created
  * during the sync must still be delivered when the stream restarts. */
 static int sync_phase_finish(sqlite3 *db, long long local_rev,
-                              const char *session_path, const cJSON *snapshot)
+                              const char *session_path, const cJSON *snapshot, int attachment_errors)
 {
   if (enil_health_any_failed() || local_rev < 0 ||
       enil_db_set_local_rev(db, local_rev) != SQLITE_OK) {
@@ -2653,8 +2693,8 @@ static int sync_phase_finish(sqlite3 *db, long long local_rev,
     report(ENIL_SYNC_PHASE_DONE, 0, 0, "Could not save partial sync completion", 1);
     return 0;
   }
-  report(ENIL_SYNC_PHASE_DONE, 0, 0, "Done", 0);
-  return 1;
+  report_attachment_completion(attachment_errors, 1);
+  return attachment_errors + 1;
 }
 
 /* ============================================================================
@@ -2699,8 +2739,9 @@ int enil_sync_all(sqlite3    *db,
       set_account_dir(session_path, account_dir, sizeof(account_dir));
       report(ENIL_SYNC_PHASE_DOWNLOADING, 0, 0, "Checking cached images...", 0);
       if (enil_asset_cache_reconcile(db, account_dir) == 0) {
-        if (sync_phase_downloading(db, current_token, session_path) >= 0)
-          ok = sync_phase_finish(db, local_rev, session_path, snapshot);
+        int attachment_errors = sync_phase_downloading(db, current_token, session_path);
+        if (attachment_errors >= 0)
+          ok = sync_phase_finish(db, local_rev, session_path, snapshot, attachment_errors);
         else report(ENIL_SYNC_PHASE_DOWNLOADING, 0, 0, "Could not save attachments", 1);
       } else {
         report(ENIL_SYNC_PHASE_DOWNLOADING, 0, 0, "Could not check cached images", 1);

@@ -63,12 +63,16 @@ void enil_account_free(void *p);
 int enil_account_upsert_response_message(sqlite3 *db, const char *chat_id,
                                          talk_message_t *msg);
 
-/* Returns 1 only after this account's sync and revision commit succeed. */
+/* Returns 0 on fatal failure, otherwise 1 + unavailable attachments after
+ * this account's message sync and revision commit succeed. */
 int enil_account_sync_all(enil_health_t *health, sqlite3 *db,
                            const char *access_token, const char *my_mid,
                            const char *session_path);
 /* User-requested retry; clears the global Worker and this account's LINE gate.
  * Automatic full-sync requests must continue using enil_account_sync_all. */
+int enil_account_retry_attachments(enil_health_t *health, sqlite3 *db,
+    const char *access_token, const char *my_mid, const char *session_path);
+
 int enil_account_retry_sync_all(enil_health_t *health, sqlite3 *db,
                                  const char *access_token, const char *my_mid,
                                  const char *session_path);

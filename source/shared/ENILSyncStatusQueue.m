@@ -61,6 +61,9 @@ static const NSTimeInterval kENILSyncMiniMinDisplaySec = 3.0;
      * object:account, so scoping them to account_ keeps one macOS window from
      * mirroring another account's state (e.g. a sticky "Link Off"). */
     [[NSNotificationCenter defaultCenter] addObserver:self
+      selector:@selector(handleAttachmentNote:)
+          name:ENILAttachmentStatusNotification object:account_];
+    [[NSNotificationCenter defaultCenter] addObserver:self
       selector:@selector(handleStatusNote:)
           name:ENILSyncStatusNotification
         object:nil];
@@ -171,7 +174,7 @@ static NSString *labelForKey(NSString *key, NSString *fallback)
   else if ([key isEqualToString:@"sync.decrypting"])      raw = @"Decrypting";
   else if ([key isEqualToString:@"sync.preparing"])       raw = @"Purchases";
   else if ([key isEqualToString:@"sync.downloading"])     raw = @"Downloads";
-  else if ([key isEqualToString:@"sync.done"])            raw = @"Done";
+  else if ([key isEqualToString:@"sync.done"])            raw = fallback;
   if (raw) return NSLocalizedString(raw, nil);
   if (fallback && [fallback length])
     return NSLocalizedString(fallback, nil); /* C-side message becomes key */
@@ -188,6 +191,10 @@ static NSString *labelForKey(NSString *key, NSString *fallback)
     return NSLocalizedString(@"Syncing", nil);
   if (syncState_ == ENILSyncStateReauthNeeded)
     return NSLocalizedString(@"Reauthenticate", nil);
+  if (unavailableAttachments_ > 0 &&
+      (syncState_ == ENILSyncStateLive || syncState_ == ENILSyncStateOffline))
+    return [NSString stringWithFormat:NSLocalizedString(@"%d attachments unavailable", nil),
+                                      unavailableAttachments_];
   /* A deliberate disconnect is the user's own choice, so it wins over a stale
    * health flag — "Link Off" must read unambiguously, never "LINE Error". */
   if (syncState_ == ENILSyncStateOffline)
@@ -229,6 +236,12 @@ static NSString *labelForKey(NSString *key, NSString *fallback)
     promoteTimer_ = nil;
   }
 
+  [self notifyChange];
+}
+
+- (void)handleAttachmentNote:(NSNotification *)note;
+{
+  unavailableAttachments_ = [[[note userInfo] objectForKey:@"unavailable"] intValue];
   [self notifyChange];
 }
 
@@ -279,6 +292,12 @@ static void updateItemFields(ENILSyncStatusItem *it, NSString *label,
   int unitTotal      = [[info objectForKey:@"unitTotal"] intValue];
   BOOL isError       = [[info objectForKey:@"error"] intValue] != 0;
   NSString *label    = labelForKey(key, message);
+  if ([key isEqualToString:@"sync.attachments"])
+    label = [NSString stringWithFormat:NSLocalizedString(
+      [message isEqualToString:@"Messages synced; attachments unavailable"]
+        ? @"Messages synced; %d attachments unavailable" : @"%d attachments unavailable", nil), unitCount];
+  else if ([[info objectForKey:@"error"] intValue] && [message length])
+    label = NSLocalizedString(message, nil);
   ENILSyncStatusItem *cur = (ENILSyncStatusItem *)currentItem_;
   ENILSyncStatusItem *existing;
 

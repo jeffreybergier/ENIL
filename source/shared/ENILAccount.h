@@ -4,6 +4,7 @@
 
 extern NSString * const ENILErrorDomain;
 extern NSString * const ENILSyncStatusNotification;      /* userInfo: @{step, total, unitCount, unitTotal, message, error} */
+extern NSString * const ENILAttachmentStatusNotification; /* account-scoped unavailable count */
 extern NSString * const ENILSyncDidFinishNotification;   /* userInfo: @{@"ok": NSNumber(BOOL)} */
 extern NSString * const ENILMessageJSNotification;       /* userInfo: @{@"chat_id": NSString, @"js": NSString} */
 extern NSString * const ENILSSEEventNotification;        /* userInfo: @{@"type": NSString, @"data": NSString, @"chat_id": NSString (optional, present when the event moved one chat's order/unread)} */
@@ -63,6 +64,7 @@ typedef enum {
   enil_health_t       *health_;       /* per-account LINE failure gate */
   ENILSyncState        syncState_;
   BOOL                 syncRunning_; /* main-thread gate; only this account's completion clears it */
+  BOOL                 syncAttachmentsOnly_;
   BOOL                 syncRetryRequested_; /* explicit user recovery, consumed after shutdown */
   BOOL                 sseStopping_; /* shutdown owns/retains this account until join completes */
   BOOL                 sseStartPending_; /* latest start request, applied after shutdown */
@@ -134,6 +136,7 @@ typedef enum {
 - (void)startSync;
 /* Full Sync button: retry a latched connection failure once. */
 - (void)retrySync;
+- (void)retryAttachments;
 - (void)startSSE;
 /* Nonblocking: cancellation is immediate; cleanup joins in the background. */
 - (void)stopSSE;

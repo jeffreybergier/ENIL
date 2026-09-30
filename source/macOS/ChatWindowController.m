@@ -257,10 +257,24 @@ static const CGFloat kSheetBtnPad = 12.0;
   [self enil_handleDismissSheetSender:sender];
 }
 
-- (void)enilStartSync:(id)sender;
+- (void)enilRetryAttachments:(id)sender;
 {
   (void)sender;
-  [self enil_handleStartSync];
+  [engine_ retryAttachments];
+}
+
+- (void)enilStartSync:(id)sender;
+{
+  NSMenu *menu = [[[NSMenu alloc] initWithTitle:NSLocalizedString(@"Sync", nil)] autorelease];
+  NSMenuItem *item;
+  (void)sender;
+  item = [menu addItemWithTitle:NSLocalizedString(@"Full Sync", nil)
+                        action:@selector(enil_handleStartSync) keyEquivalent:@""];
+  [item setTarget:self];
+  item = [menu addItemWithTitle:NSLocalizedString(@"Retry Attachments", nil)
+                        action:@selector(enilRetryAttachments:) keyEquivalent:@""];
+  [item setTarget:self];
+  [NSMenu popUpContextMenu:menu withEvent:[NSApp currentEvent] forView:[[self window] contentView]];
 }
 
 /* Bottom-bar link toggle: flip the persisted SSE preference. The engine

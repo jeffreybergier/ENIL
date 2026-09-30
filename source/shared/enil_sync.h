@@ -20,11 +20,17 @@ typedef enum {
 } ENIL_SYNC_PHASE;
 
 /* Progress is reported via enil_progress_post() → ENILSyncStatusNotification. */
-/* Returns 1 only after the data sync and revision commit succeed. */
+/* Returns 0 on fatal failure, otherwise 1 + the unavailable attachment count.
+ * A positive result means message data and revision were committed. */
 int enil_sync_all(sqlite3    *db,
                    const char *access_token,
                    const char *my_mid,
                    const char *session_path);
+
+/* Retry only cached attachment inventory; never alter the operation cursor.
+ * Same 0 / 1 + unavailable count result convention as enil_sync_all. */
+int enil_sync_attachments(sqlite3 *db, const char *access_token,
+                           const char *my_mid, const char *session_path);
 
 /* out_handled (nullable): set to 1 if the dispatcher acted on the op,
  * 0 if it fell through to the unhandled default. Only meaningful for

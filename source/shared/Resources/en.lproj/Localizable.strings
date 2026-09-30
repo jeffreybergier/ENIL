@@ -239,3 +239,17 @@
 /* macOS login sections */
 "Login" = "Login";
 "This account's saved client identity will be used." = "This account's saved client identity will be used.";
+
+"Full Sync" = "Full Sync";
+
+"Retry Attachments" = "Retry Attachments";
+
+"Attachments checked" = "Attachments checked";
+
+"Messages synced; %d attachments unavailable" = "Messages synced; %d attachments unavailable";
+
+"%d attachments unavailable" = "%d attachments unavailable";
+
+"Could not save attachments" = "Could not save attachments";
+
+"Could not check cached images" = "Could not check cached images";

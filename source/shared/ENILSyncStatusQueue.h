@@ -42,6 +42,7 @@ typedef enum {
   NSTimeInterval  currentShownAt_;
   NSTimer        *promoteTimer_;
   ENILSyncState   syncState_;
+  int             unavailableAttachments_;
   id              account_;         /* unsafe_unretained notification-filter token */
 }
 

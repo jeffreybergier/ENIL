@@ -238,3 +238,17 @@
 /* macOS login sections */
 "Login" = "ログイン";
 "This account's saved client identity will be used." = "このアカウントに保存されたクライアント情報を使用します。";
+
+"Full Sync" = "完全同期";
+
+"Retry Attachments" = "添付ファイルを再試行";
+
+"Attachments checked" = "添付ファイルを確認しました";
+
+"Messages synced; %d attachments unavailable" = "メッセージを同期しました。添付ファイル%d件を取得できません";
+
+"%d attachments unavailable" = "添付ファイル%d件を取得できません";
+
+"Could not save attachments" = "添付ファイルの情報を保存できません";
+
+"Could not check cached images" = "キャッシュ画像を確認できません";

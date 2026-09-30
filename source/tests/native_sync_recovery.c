@@ -23,7 +23,7 @@ static enil_health_t *health;
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t poll_ready = PTHREAD_COND_INITIALIZER;
 static int resync_requested, stopped, poll_count, revision_calls;
-static int fail_messages, failed, succeeded, fetching;
+static int fail_messages, failed, succeeded, fetching, unavailable;
 static long long baseline = 20;
 static int event_test, allowed_polls = 1, stop_test;
 static long long requested_revision;
@@ -63,7 +63,11 @@ void enil_progress_post(int step, int total, int n, int count, const char *messa
                         int error, const char *key, int indeterminate) {
   (void)n; (void)count; (void)message; (void)key; (void)indeterminate;
   if (error) failed++;
-  else if (step == total) succeeded++;
+  else if (step == total) {
+    succeeded++;
+    unavailable = key && !strcmp(key,"sync.attachments") ? n : 0;
+    if (unavailable) assert(strcmp(message,"Done"));
+  }
 }
 int enil_localized_collate(void *ctx, int an, const void *a, int bn, const void *b) {
   int cmp;
@@ -718,6 +722,8 @@ static void recover_missing_sticker(void) {
 static void media_recovery(void) {
   char dir[1024], original[1200], thumb[1200];
   sqlite3_stmt *row;
+  int histories, revisions, boxes, ranges;
+  cJSON *session;
   media_test=1;
   snprintf(dir,sizeof(dir),"%s",session_path); *strrchr(dir,'/')=0;
   snprintf(original,sizeof(original),"%s/media",dir); assert(mkdir(original,0700)==0);
@@ -728,24 +734,43 @@ static void media_recovery(void) {
   assert(sqlite3_exec(db,"INSERT INTO messages_v2(id,chat_id,contentType,media_path,thumb_path) VALUES('photo','chat',1,'media/chat/photo.jpg','media/chat/photo_t.jpg')",NULL,NULL,NULL)==SQLITE_OK);
   thumbnail_failure=1;
   assert(enil_account_sync_all(health,db,"synthetic","self",session_path));
-  assert(media_downloads==1);
+  assert(media_downloads==1 && unavailable==1);
   assert(sqlite3_prepare_v2(db,"SELECT media_path,thumb_path FROM messages_v2 WHERE id='photo'",-1,&row,NULL)==SQLITE_OK);
   assert(sqlite3_step(row)==SQLITE_ROW && sqlite3_column_type(row,0)==SQLITE_NULL && sqlite3_column_type(row,1)==SQLITE_NULL);
   sqlite3_finalize(row);
+  histories=history_calls; revisions=revision_calls; boxes=box_calls; ranges=read_range_calls;
+  assert(enil_db_set_local_rev(db,77)==SQLITE_OK);
+  session=enil_session_read(session_path);
+  cJSON_ReplaceItemInObject(session,"lastPartialFullSyncs",cJSON_Parse("{\"1\":\"99\"}"));
+  assert(enil_session_write(session_path,session)); cJSON_Delete(session);
   /* The valid original survives the failed thumbnail; retry needs no network. */
   unlink(thumb); thumbnail_failure=0; media_offline=1; fetching=0;
-  assert(enil_account_sync_all(health,db,"synthetic","self",session_path));
-  assert(media_downloads==1 && enil_image_validate(thumb,NULL,NULL)==0);
+  assert(enil_account_retry_attachments(health,db,"synthetic","self",session_path));
+  assert(media_downloads==1 && !unavailable && enil_image_validate(thumb,NULL,NULL)==0);
   assert(sqlite3_prepare_v2(db,"SELECT orig_width,thumb_width FROM messages_v2 WHERE id='photo' AND media_path IS NOT NULL AND thumb_path IS NOT NULL",-1,&row,NULL)==SQLITE_OK);
   assert(sqlite3_step(row)==SQLITE_ROW && sqlite3_column_int(row,0)==20 && sqlite3_column_int(row,1)==20);
   sqlite3_finalize(row);
   /* A vanished original with an offline server clears both completed paths. */
   unlink(original); fetching=0;
-  assert(enil_account_sync_all(health,db,"synthetic","self",session_path));
-  assert(media_downloads==2);
+  assert(enil_account_retry_attachments(health,db,"synthetic","self",session_path));
+  assert(media_downloads==2 && unavailable==1);
   assert(sqlite3_prepare_v2(db,"SELECT media_path,thumb_path FROM messages_v2 WHERE id='photo'",-1,&row,NULL)==SQLITE_OK);
   assert(sqlite3_step(row)==SQLITE_ROW && sqlite3_column_type(row,0)==SQLITE_NULL && sqlite3_column_type(row,1)==SQLITE_NULL);
   sqlite3_finalize(row);
+  assert(enil_db_get_local_rev(db)==77);
+  assert(history_calls==histories && revision_calls==revisions && box_calls==boxes && read_range_calls==ranges);
+  session=enil_session_read(session_path);
+  assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(session,"lastPartialFullSyncs"),"1")),"99"));
+  cJSON_Delete(session);
+  /* SQLite failure is fatal even though an ordinary offline attachment isn't. */
+  assert(sqlite3_exec(db,"CREATE TRIGGER reject_photo BEFORE UPDATE ON messages_v2 BEGIN SELECT RAISE(ABORT,'disk full'); END",NULL,NULL,NULL)==SQLITE_OK);
+  assert(!enil_account_retry_attachments(health,db,"synthetic","self",session_path));
+  assert(media_downloads==2 && enil_db_get_local_rev(db)==77);
+  assert(sqlite3_exec(db,"DROP TRIGGER reject_photo",NULL,NULL,NULL)==SQLITE_OK);
+  media_offline=0;
+  assert(enil_account_retry_attachments(health,db,"synthetic","self",session_path)==1);
+  assert(media_downloads==3 && !unavailable && enil_db_get_local_rev(db)==77);
+
 }
 
 static int reject_commit(void *unused) { (void)unused; return 1; }
