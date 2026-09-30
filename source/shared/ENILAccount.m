@@ -390,6 +390,7 @@ static void qr_status_trampoline(const char *msg, void *ctx)
   char *mid = NULL;
   BOOL ok = [result boolValue];
   syncRunning_ = NO;
+  syncRetryRequested_ = NO;
   if (ok) {
     sessionPath = [enilDir_ stringByAppendingPathComponent:@"session.json"];
     if (enil_session_validate([sessionPath fileSystemRepresentation], &token, &mid)) {
@@ -411,7 +412,9 @@ static void qr_status_trampoline(const char *msg, void *ctx)
 {
   NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
   NSString *sessionPath = [enilDir_ stringByAppendingPathComponent:@"session.json"];
-  int ok = enil_account_sync_all(health_, db_,
+  int (*runSync)(enil_health_t *, sqlite3 *, const char *, const char *, const char *) =
+    syncRetryRequested_ ? enil_account_retry_sync_all : enil_account_sync_all;
+  int ok = runSync(health_, db_,
                         [accessToken_ UTF8String],
                         myMid_ ? [myMid_ UTF8String] : NULL,
                         [sessionPath fileSystemRepresentation]);
@@ -421,6 +424,13 @@ static void qr_status_trampoline(const char *msg, void *ctx)
                          withObject:[NSNumber numberWithBool:ok != 0]
                       waitUntilDone:NO];
   [pool release];
+}
+
+- (void)retrySync;
+{
+  if (syncRunning_) return;
+  syncRetryRequested_ = YES;
+  [self startSync];
 }
 
 - (void)startSync;

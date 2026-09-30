@@ -231,7 +231,7 @@ enum {
 - (void)syncAction
 {
   @try {
-    [[self account] startSync];   /* bar reflects progress from the queue */
+    [[self account] retrySync];   /* explicit recovery; bar reflects progress */
   } @catch (NSException *exception) {
     ENILLog(@"ChatListViewController.syncAction", @"exception: %@", exception);
   }

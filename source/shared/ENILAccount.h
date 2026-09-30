@@ -63,6 +63,7 @@ typedef enum {
   enil_health_t       *health_;       /* per-account LINE failure gate */
   ENILSyncState        syncState_;
   BOOL                 syncRunning_; /* main-thread gate; only this account's completion clears it */
+  BOOL                 syncRetryRequested_; /* explicit user recovery, consumed after shutdown */
   BOOL                 sseStopping_; /* shutdown owns/retains this account until join completes */
   BOOL                 sseStartPending_; /* latest start request, applied after shutdown */
   BOOL                 syncWaitingForSSE_; /* full sync must not overlap the old event callback */
@@ -130,6 +131,8 @@ typedef enum {
 - (id)initWithAccountPath:(NSString *)path;
 - (BOOL)startWithError:(NSError **)outError;
 - (void)startSync;
+/* Full Sync button: retry a latched connection failure once. */
+- (void)retrySync;
 - (void)startSSE;
 /* Nonblocking: cancellation is immediate; cleanup joins in the background. */
 - (void)stopSSE;

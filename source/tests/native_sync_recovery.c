@@ -33,7 +33,7 @@ enum {
   CHAT_BAD_ENTRY, CHAT_DB_ERROR, CHAT_BAD_ARRAY, CHAT_BAD_BODY
 };
 static int chat_update_mode, chat_calls;
-static int cache_test, cache_download_attempts;
+static int cache_test, cache_download_attempts, retry_test;
 int __wrap_enil_curl_download_file_validated(const char *url, const char *dest,
                                              int (*validate)(const char *)) {
   (void)dest; (void)validate;
@@ -91,6 +91,10 @@ static ENILLineResponse response(const char *data) {
 ENILLineResponse __wrap_enil_line_post(const char *path, const char *body, const char *token) {
   const char *method = strrchr(path, '/') + 1;
   (void)body; (void)token;
+  if (retry_test && enil_health_any_failed()) {
+    ENILLineResponse blocked = {0, NULL};
+    return blocked;
+  }
   if (!strcmp(method, "getChats")) {
     chat_calls++;
     if (chat_update_mode == CHAT_HTTP_ERROR || chat_update_mode == CHAT_TRANSPORT_ERROR) {
@@ -635,6 +639,27 @@ static void chat_page_and_status_queries(void) {
   assert(enil_db_message_box_last_delivered_time(db, "missing") == 0);
 }
 
+static void retry_failed_worker(void) {
+  enil_health_t *other = enil_health_create("other");
+  assert(other);
+  retry_test = 1;
+  enil_health_bind(other);
+  enil_health_set_failure(ENIL_ERR_LINE, "other account remains failed");
+  enil_health_bind(health);
+  enil_health_set_failure(ENIL_ERR_LINE, "lost connection");
+  enil_health_set_failure(ENIL_ERR_WORKER, "lost connection");
+  /* Automatic sync cannot bypass latched errors. Explicit user recovery can. */
+  assert(!enil_account_sync_all(health, db, "synthetic", "self", session_path));
+  assert(enil_health_is_failed(ENIL_ERR_WORKER) && enil_health_is_failed(ENIL_ERR_LINE));
+  assert(enil_account_retry_sync_all(health, db, "synthetic", "self", session_path));
+  assert(!enil_health_any_failed());
+  assert(enil_db_get_local_rev(db) == baseline);
+  enil_health_bind(other);
+  assert(enil_health_is_failed(ENIL_ERR_LINE));
+  enil_health_destroy(other);
+  enil_health_bind(health);
+}
+
 static void recover_missing_sticker(void) {
   sqlite3_stmt *row = NULL;
   cache_test = 1;
@@ -675,7 +700,8 @@ int main(int argc, char **argv) {
   assert(enil_session_write(session_path, root));
   cJSON_Delete(root);
   if (argc == 4) {
-    if (!strcmp(argv[3], "cache")) recover_missing_sticker();
+    if (!strcmp(argv[3], "retry-worker")) retry_failed_worker();
+    else if (!strcmp(argv[3], "cache")) recover_missing_sticker();
     else if (!strcmp(argv[3], "chat-page")) chat_page_and_status_queries();
     else if (!strcmp(argv[3], "replay-synced")) replay_synced_messages();
     else if (!strcmp(argv[3], "idle-reset")) polling_failure_streak(0);

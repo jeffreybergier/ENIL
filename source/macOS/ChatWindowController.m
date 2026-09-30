@@ -356,7 +356,7 @@ static const CGFloat kSheetBtnPad = 12.0;
 
 - (void)enil_handleStartSync;
 {
-  [engine_ startSync];
+  [engine_ retrySync];
 }
 
 - (void)enil_handleSelectChatPayload:(NSDictionary *)payload;

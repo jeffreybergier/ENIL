@@ -93,3 +93,6 @@ class NativeSyncRecoveryTests(unittest.TestCase):
 
     def test_full_sync_retries_sticker_whose_cached_file_is_missing(self):
         self.run_recovery("cache")
+
+    def test_explicit_full_sync_retries_failed_worker_without_clearing_other_accounts(self):
+        self.run_recovery("retry-worker")

@@ -71,6 +71,18 @@ int enil_account_sync_all(enil_health_t *health, sqlite3 *db,
   return enil_sync_all(db, access_token, my_mid, session_path);
 }
 
+/* Explicit user recovery only. Run after the previous SSE thread has exited,
+ * so its final failure cannot re-latch the gate underneath the new attempt. */
+int enil_account_retry_sync_all(enil_health_t *health, sqlite3 *db,
+                                 const char *access_token, const char *my_mid,
+                                 const char *session_path)
+{
+  enil_health_bind(health);
+  enil_health_clear_failure(ENIL_ERR_WORKER);
+  enil_health_clear_failure(ENIL_ERR_LINE);
+  return enil_account_sync_all(health, db, access_token, my_mid, session_path);
+}
+
 enil_account_start_result_t enil_account_start_core(const char *enil_dir,
                                                     sqlite3 **db_io,
                                                     char **access_token_out,

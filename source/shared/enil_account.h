@@ -67,6 +67,12 @@ int enil_account_upsert_response_message(sqlite3 *db, const char *chat_id,
 int enil_account_sync_all(enil_health_t *health, sqlite3 *db,
                            const char *access_token, const char *my_mid,
                            const char *session_path);
+/* User-requested retry; clears the global Worker and this account's LINE gate.
+ * Automatic full-sync requests must continue using enil_account_sync_all. */
+int enil_account_retry_sync_all(enil_health_t *health, sqlite3 *db,
+                                 const char *access_token, const char *my_mid,
+                                 const char *session_path);
+
 
 enil_account_start_result_t enil_account_start_core(const char *enil_dir,
                                                     sqlite3 **db_io,

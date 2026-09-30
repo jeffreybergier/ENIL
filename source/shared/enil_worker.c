@@ -73,7 +73,7 @@ static char *worker_post(const char *path, const char *json_body,
   /* Sticky-failure gate. Once any worker call has failed (auth, transport,
    * or HTTP 5xx), every subsequent worker_post() returns NULL without
    * hitting the wire. The flag clears when the user re-saves credentials
-   * in Preferences or explicitly starts/retries login. Automatic key recovery
+   * in Preferences, taps Full Sync, or explicitly starts/retries login. Automatic key recovery
    * and requests within a login attempt never clear it.
    * This keeps us from hammering a broken worker — and, more importantly,
    * keeps us from issuing LINE API calls that will fail at the /sign step
@@ -133,7 +133,7 @@ static char *worker_post(const char *path, const char *json_body,
     ENIL_LOG("Worker.post", "transport error %s: %s",
              curl_easy_strerror(rc), path);
     snprintf(msg, sizeof(msg),
-             "cannot reach worker (%s). Re-save credentials in Preferences to retry.",
+             "cannot reach worker (%s). Tap Full Sync to retry.",
              curl_easy_strerror(rc));
     enil_health_set_failure(ENIL_ERR_WORKER, msg);
     enil_buf_free(&buf);
