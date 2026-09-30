@@ -156,7 +156,7 @@ done:
 
 int enil_image_jpeg_create(const char *src_path, const char *dst_path,
                            int max_px, ENILThumbInfo *info) {
-  int result = -1, fd;
+  int result = -1, fd, temporary_created = 0;
   char *temporary = NULL;
   CFURLRef src_url = NULL;
   CFURLRef dst_url = NULL;
@@ -173,6 +173,7 @@ int enil_image_jpeg_create(const char *src_path, const char *dst_path,
   sprintf(temporary, "%s.render-XXXXXX", dst_path);
   fd = mkstemp(temporary);
   if (fd < 0) goto done;
+  temporary_created = 1;
   if (close(fd) != 0) goto done;
   dst_url = url_from_path(temporary);
   if (!src_url || !dst_url) goto done;
@@ -205,7 +206,8 @@ done:
   if (isrc)    CFRelease(isrc);
   if (dst_url) CFRelease(dst_url);
   if (src_url) CFRelease(src_url);
-  if (temporary) { if (result != 0) unlink(temporary); free(temporary); }
+  if (temporary_created && result != 0) unlink(temporary);
+  free(temporary);
   if (result != 0) memset(info, 0, sizeof(*info));
   return result;
 }
