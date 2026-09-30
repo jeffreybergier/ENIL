@@ -1,3 +1,4 @@
+#include "enil_atomic.h"
 /* ============================================================================
  * Sticky failure gate. See enil_health.h for the contract.
  *
@@ -18,10 +19,7 @@ struct enil_health {
   char account_id[64]; /* logging only */
 };
 
-/* WORKER is shared infrastructure, so its gate is a single process-global
- * flag. A plain int is fine: reads/writes are atomic on every target arch and
- * the worst case of a stale read is one extra doomed call before the gate
- * kicks in — well inside the safety envelope. */
+/* Shared health gates use atomic access on every thread. */
 static int s_worker_failed = 0;
 
 /* Thread-local binding of the calling thread's current account health. Set by
@@ -61,15 +59,14 @@ void enil_health_destroy(enil_health_t *h) {
 /* ---- worker (global) ----------------------------------------------------- */
 
 static void worker_set_failure(const char *user_message) {
-  s_worker_failed = 1;
+  enil_atomic_store(&s_worker_failed, 1);
   ENIL_LOG("Health.set_failure", "[error.worker] Worker Error - %s",
            (user_message && *user_message) ? user_message : "unknown error");
   enil_status_post_error("error.worker", "Worker Error");
 }
 
 static void worker_clear_failure(void) {
-  int was = s_worker_failed;
-  s_worker_failed = 0;
+  int was = enil_atomic_exchange(&s_worker_failed, 0);
   if (was) {
     ENIL_LOG("Health.clear_failure", "[error.worker] cleared");
     enil_status_post("error.worker", "Reconnecting", 1);
@@ -81,7 +78,7 @@ static void worker_clear_failure(void) {
 static void line_set_failure(const char *user_message) {
   enil_health_t *h = current_health();
   if (!h) return; /* unbound thread (e.g. QR login): inert */
-  h->line_failed = 1;
+  enil_atomic_store(&h->line_failed, 1);
   ENIL_LOG("Health.set_failure", "[error.line] LINE Error (%s) - %s",
            h->account_id[0] ? h->account_id : "?",
            (user_message && *user_message) ? user_message : "unknown error");
@@ -92,8 +89,7 @@ static void line_clear_failure(void) {
   enil_health_t *h = current_health();
   int was;
   if (!h) return;
-  was = h->line_failed;
-  h->line_failed = 0;
+  was = enil_atomic_exchange(&h->line_failed, 0);
   if (was) {
     ENIL_LOG("Health.clear_failure", "[error.line] (%s) cleared",
              h->account_id[0] ? h->account_id : "?");
@@ -114,15 +110,15 @@ void enil_health_clear_failure(enil_err_source_t src) {
 }
 
 int enil_health_is_failed(enil_err_source_t src) {
-  if (src == ENIL_ERR_WORKER) return s_worker_failed;
+  if (src == ENIL_ERR_WORKER) return enil_atomic_load(&s_worker_failed);
   if (src == ENIL_ERR_LINE) {
     enil_health_t *h = current_health();
-    return h ? h->line_failed : 0;
+    return h ? enil_atomic_load(&h->line_failed) : 0;
   }
   return 0;
 }
 
 int enil_health_any_failed(void) {
   enil_health_t *h = current_health();
-  return s_worker_failed || (h && h->line_failed);
+  return enil_atomic_load(&s_worker_failed) || (h && enil_atomic_load(&h->line_failed));
 }

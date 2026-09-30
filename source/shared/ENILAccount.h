@@ -99,6 +99,7 @@ typedef enum {
                 observer:(id <ENILQRLoginObserver>)observer
               cancelFlag:(const volatile int *)cancelFlag;
 /* Local recovery choices; restart retains the failed attempt for diagnosis. */
++ (void)setCancellationFlag:(volatile int *)flag cancelled:(BOOL)cancelled;
 + (BOOL)canRestartQRLoginAtPath:(NSString *)accountDir;
 + (BOOL)restartQRLoginAtPath:(NSString *)accountDir;
 /* Caller stops the account engine before atomically installing the session. */

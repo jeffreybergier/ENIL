@@ -1,4 +1,5 @@
 #include "enil_http.h"
+#include "enil_atomic.h"
 #include "enil_identity.h"
 #include "enil_png.h"
 #include <string.h>
@@ -13,7 +14,7 @@ static volatile int cancelled;
 static void *cancel_later(void *unused) {
   (void)unused;
   usleep(200000);
-  cancelled = 1;
+  enil_atomic_store(&cancelled, 1);
   return NULL;
 }
 static int validate_png(const char *path) { return enil_png_info(path, NULL, NULL); }

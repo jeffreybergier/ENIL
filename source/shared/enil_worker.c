@@ -1,3 +1,4 @@
+#include "enil_atomic.h"
 /* ============================================================================
  * Cloudflare worker client — /sign for HMAC, /e2ee/encrypt-user-v2,
  * /e2ee/encrypt-group-v2, and /e2ee/decrypt with workerRestoreState plumbing.
@@ -51,7 +52,7 @@ void enil_worker_set_credentials(const char *url, const char *secret) {
 
 static int worker_cancel(void *ctx, curl_off_t a, curl_off_t b, curl_off_t c, curl_off_t d) {
   (void)a; (void)b; (void)c; (void)d;
-  return ctx && *(const volatile int *)ctx;
+  return ctx && enil_atomic_load((const volatile int *)ctx);
 }
 
 static char *worker_post(const char *path, const char *json_body,
@@ -64,7 +65,7 @@ static char *worker_post(const char *path, const char *json_body,
   CURLcode rc;
   long status = 0;
 
-  if (cancel && *cancel) return NULL;
+  if (cancel && enil_atomic_load(cancel)) return NULL;
   if (!g_worker_url || !g_worker_secret) {
     LOG("worker_post", "credentials not configured");
     return NULL;
@@ -122,7 +123,7 @@ static char *worker_post(const char *path, const char *json_body,
   curl_slist_free_all(hdrs);
   curl_easy_cleanup(curl);
 
-  if (cancel && *cancel) {
+  if (cancel && enil_atomic_load(cancel)) {
     ENIL_LOG("Worker.post", "cancelled: %s", path);
     enil_buf_free(&buf);
     return NULL;

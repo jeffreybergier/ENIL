@@ -1,3 +1,4 @@
+#include "enil_atomic.h"
 /* Native Thrift operation polling; shares only the event callback and cursor. */
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,7 +20,7 @@ static int native_dispatch(ENILSSEClient *c, const char *type, cJSON *data) {
     return 0;
   ev.type = type;
   ev.data = json;
-  if ((c->fn && !c->fn(&ev, c->ctx)) || enil_health_any_failed() || c->stop) {
+  if ((c->fn && !c->fn(&ev, c->ctx)) || enil_health_any_failed() || enil_atomic_load(&c->stop)) {
     free(json);
     return 0;
   }
@@ -35,7 +36,7 @@ static int native_dispatch(ENILSSEClient *c, const char *type, cJSON *data) {
 }
 void enil_native_poll(ENILSSEClient *c) {
   int failures = 0;
-  while (!c->stop && !enil_health_any_failed()) {
+  while (!enil_atomic_load(&c->stop) && !enil_health_any_failed()) {
     cJSON *saved, *args, *req;
     cJSON *v, *root = NULL, *data, *ops, *op, *patch = NULL;
     char revision[32], *body = NULL;
@@ -44,9 +45,9 @@ void enil_native_poll(ENILSSEClient *c) {
     int ok = 1, delay = 1, i, resync = 0;
     /* Clear a completed kick before the next request. A concurrent stop is
      * sticky and must be checked after clearing the request's cancel flag. */
-    c->reconnect = 0;
-    c->interrupt = 0;
-    if (c->stop) break;
+    enil_atomic_store(&c->reconnect, 0);
+    enil_atomic_store(&c->interrupt, 0);
+    if (enil_atomic_load(&c->stop)) break;
     if (!enil_session_continue_identity(c->session_path)) break;
     saved = enil_session_read(c->session_path);
     args = cJSON_CreateArray();
@@ -75,10 +76,10 @@ void enil_native_poll(ENILSSEClient *c) {
     body = cJSON_PrintUnformatted(args);
     if (body)
       response = enil_line_post_ex("/native/sync", body, token, NULL, 0, 35000, &c->interrupt);
-    if (response.status == 204 || c->reconnect || c->stop) {
+    if (response.status == 204 || enil_atomic_load(&c->reconnect) || enil_atomic_load(&c->stop)) {
       /* A completed idle poll breaks the failure streak just like a reply.
        * A user cancellation alone is not evidence of a healthy connection. */
-      if (response.status == 204 && !c->reconnect && !c->stop)
+      if (response.status == 204 && !enil_atomic_load(&c->reconnect) && !enil_atomic_load(&c->stop))
         failures = 0;
       cJSON_Delete(saved);
       cJSON_Delete(args);
@@ -151,7 +152,7 @@ release_response:
                               "Native event polling failed repeatedly; restart to retry.");
       break;
     }
-    for (i = 0; i < delay && !c->stop && !c->reconnect; i++)
+    for (i = 0; i < delay && !enil_atomic_load(&c->stop) && !enil_atomic_load(&c->reconnect); i++)
       sleep(1);
   }
 }

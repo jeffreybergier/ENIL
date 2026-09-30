@@ -186,7 +186,7 @@ typedef enum {
     /* Native Back can reveal the choices immediately, but they stay disabled
      * until the old worker has acknowledged cancellation. Cancel stays usable. */
     [self setGoingBack:YES];
-    cancelFlag_ = 1;
+    [ENILAccount setCancellationFlag:&cancelFlag_ cancelled:YES];
     [self setQrImage:nil];
     [self setPin:nil];
     [self setStatusMessage:NSLocalizedString(@"Stopping login…", nil)];
@@ -392,7 +392,7 @@ typedef enum {
 {
   (void)sender;
   if ([self running] || [self done]) return;
-  cancelFlag_ = 0;
+  [ENILAccount setCancellationFlag:&cancelFlag_ cancelled:NO];
   [self setLoginState:ENILLoginRunning];
   [self setQrImage:nil];
   [self setPin:nil];
@@ -463,7 +463,7 @@ typedef enum {
   if ([self done]) return;
   if ([self goingBack]) {
     [self setGoingBack:NO];
-    cancelFlag_ = 0;
+    [ENILAccount setCancellationFlag:&cancelFlag_ cancelled:NO];
     if (![result boolValue]) {
       [self setLoginState:ENILLoginChoosingClient];
       [self setStatusMessage:nil];
@@ -506,7 +506,7 @@ typedef enum {
 {
   if ([self done]) return;
   [self setLoginState:ENILLoginFinished];
-  cancelFlag_ = 1;
+  [ENILAccount setCancellationFlag:&cancelFlag_ cancelled:YES];
   [[self delegate] qrLoginViewControllerDidFail:self];
 }
 

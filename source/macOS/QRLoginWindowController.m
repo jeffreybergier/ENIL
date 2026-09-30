@@ -280,7 +280,7 @@ static const CGFloat kVerificationPageHeight = 300;
     /* Wait for finishWithResult: before resetting cancellation or changing
      * staging. A late success still follows the normal activation path. */
     goingBack_ = YES;
-    cancelFlag_ = 1;
+    [ENILAccount setCancellationFlag:&cancelFlag_ cancelled:YES];
     [backButton_ setEnabled:NO];
     [qrImageView_ setImage:nil];
     [pinField_ setHidden:YES];
@@ -363,7 +363,7 @@ static const CGFloat kVerificationPageHeight = 300;
 {
   (void)sender;
   if (running_ || done_) return;
-  cancelFlag_ = 0;
+  [ENILAccount setCancellationFlag:&cancelFlag_ cancelled:NO];
   running_ = YES;
   [qrImageView_ setImage:nil];
   [pinField_ setHidden:YES];
@@ -451,7 +451,7 @@ static const CGFloat kVerificationPageHeight = 300;
   if (done_) return;
   if (goingBack_) {
     goingBack_ = NO;
-    cancelFlag_ = 0;
+    [ENILAccount setCancellationFlag:&cancelFlag_ cancelled:NO];
     if (![result boolValue]) {
       [selectionStatusField_ setStringValue:@""];
       [self showPage:clientPage_];
@@ -559,7 +559,7 @@ static const CGFloat kVerificationPageHeight = 300;
   (void)note;
   if (done_) return;
   done_ = YES;
-  cancelFlag_ = 1;
+  [ENILAccount setCancellationFlag:&cancelFlag_ cancelled:YES];
   [delegate_ qrLoginWindowControllerDidFail:self];
 }
 

@@ -1,3 +1,4 @@
+#include "enil_atomic.h"
 /* Windows native transport. The Worker performs crypto; only ENIL calls LINE. */
 #include "enil_native.h"
 #include "enil_b64.h"
@@ -19,7 +20,7 @@ static int cancel_request(void *p, curl_off_t a, curl_off_t b, curl_off_t c, cur
   (void)b;
   (void)c;
   (void)d;
-  return p && *(const volatile int *)p;
+  return p && enil_atomic_load((const volatile int *)p);
 }
 static void append_header(struct curl_slist **hs, const char *name, const char *value) {
   size_t n;
@@ -72,7 +73,7 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
   int len, encrypted, contacts = 0;
   if (!identity || strcmp(identity->transport, "native-thrift") || !path || !body || !token)
     return out;
-  if (cancel && *cancel)
+  if (cancel && enil_atomic_load(cancel))
     return out;
   if (enil_session_bound_access_token(&bound_token) < 0) {
     ENIL_LOG("Native.post", "bound login is no longer available");
@@ -143,7 +144,7 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
     payload = NULL;
     free(base64);
     base64 = NULL;
-    if ((cancel && *cancel) || !json_string(encoded, "body") || !json_string(encoded, "key") || !json_string(encoded, "xLcs"))
+    if ((cancel && enil_atomic_load(cancel)) || !json_string(encoded, "body") || !json_string(encoded, "key") || !json_string(encoded, "xLcs"))
       goto done;
     len = enil_b64_decode_alloc(json_string(encoded, "body"), &wire);
     if (len < 0)

@@ -16,7 +16,7 @@ struct ENILSSEClient {
   volatile int   reconnect;
   volatile int   interrupt;
   int            delivery_failed;
-  volatile time_t last_activity;
+  time_t         last_activity; /* confined to the SSE thread and its curl callbacks */
   ENILSSEEventFn fn;
   void          *ctx;
   pthread_t      thread;

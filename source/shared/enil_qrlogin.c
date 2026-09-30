@@ -1,3 +1,4 @@
+#include "enil_atomic.h"
 /* ============================================================================
  * QR-code login flow — clean-room port of cloud/client/src/login.js and
  * postlogin.js. Protocol knowledge only (RPC paths, body shapes, ordering);
@@ -33,7 +34,7 @@ static void emit_status(const enil_qrlogin_callbacks_t *cb, const char *m) {
 /* Cooperative cancel: 1 once the caller (e.g. closed login window) asks the
  * flow to abandon. Checked at every step/poll boundary. */
 static int cancelled(const enil_qrlogin_callbacks_t *cb) {
-  return cb && cb->cancel && *cb->cancel;
+  return cb && cb->cancel && enil_atomic_load(cb->cancel);
 }
 
 /* TEMPORARY (QR-login bring-up): on a non-200 LINE response, dump the thrift

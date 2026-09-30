@@ -1,3 +1,4 @@
+#include "enil_atomic.h"
 /* ============================================================================
  * libcurl wrapper — synchronous GET/POST, file downloads, and CA bundle setup.
  * ==========================================================================*/
@@ -32,12 +33,12 @@ const volatile int *enil_http_cancel_flag(void) {
 }
 int enil_http_cancelled(void) {
   const volatile int *cancel = enil_http_cancel_flag();
-  return cancel && *cancel;
+  return cancel && enil_atomic_load(cancel);
 }
 static int download_cancel(void *ctx, curl_off_t a, curl_off_t b,
                            curl_off_t c, curl_off_t d) {
   (void)a; (void)b; (void)c; (void)d;
-  return ctx && *(const volatile int *)ctx;
+  return ctx && enil_atomic_load((const volatile int *)ctx);
 }
 static void apply_download_cancel(CURL *curl) {
   const volatile int *cancel = enil_http_cancel_flag();

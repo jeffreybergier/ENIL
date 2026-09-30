@@ -9,6 +9,7 @@
 #import "XPFoundation.h"
 #import <AltivecCore/AltivecCore.h>
 #include "enil_account.h"
+#include "enil_atomic.h"
 #import "enil_db.h"
 #include "enil_html.h"
 #include "enil_http.h"
@@ -154,6 +155,12 @@ static void qr_status_trampoline(const char *msg, void *ctx)
 }
 
 @implementation ENILAccount
+
++ (void)setCancellationFlag:(volatile int *)flag cancelled:(BOOL)cancelled;
+{
+  if (flag) enil_atomic_store(flag, cancelled ? 1 : 0);
+}
+
 
 - (id)initWithAccountPath:(NSString *)path;
 {

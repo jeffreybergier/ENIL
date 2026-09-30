@@ -1,3 +1,4 @@
+#include "enil_atomic.h"
 /* Chrome gateway signed JSON request and its transport-specific health rules. */
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,7 +29,7 @@ static int cancel_xferinfo(void *clientp,
 {
   const volatile int *cancel = (const volatile int *)clientp;
   (void)dltotal; (void)dlnow; (void)ultotal; (void)ulnow;
-  return (cancel && *cancel) ? 1 : 0;
+  return (cancel && enil_atomic_load(cancel)) ? 1 : 0;
 }
 
 ENILLineResponse enil_chrome_gateway_post(

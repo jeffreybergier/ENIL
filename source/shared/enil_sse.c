@@ -1,3 +1,4 @@
+#include "enil_atomic.h"
 /* ============================================================================
  * Event client lifecycle and Chrome SSE stream. Native operation polling
  * lives in enil_native_poll.c and uses the same event callback and cursor.
@@ -130,7 +131,7 @@ static void dispatch_event(ENILSSEState *s)
 
   ENIL_LOG("Sse.dispatchEvent", "%s (%lu bytes)", ev.type, (unsigned long)s->data_len);
 
-  if ((c->fn && !c->fn(&ev, c->ctx)) || enil_health_any_failed() || c->stop) {
+  if ((c->fn && !c->fn(&ev, c->ctx)) || enil_health_any_failed() || enil_atomic_load(&c->stop)) {
     c->delivery_failed = 1;
     return;
   }
@@ -138,14 +139,14 @@ static void dispatch_event(ENILSSEState *s)
   if (strcmp(ev.type, "fullSync") == 0) {
     /* The account schedules a data sync. Keep the old cursor until that
      * succeeds, including when the app exits or the sync fails. */
-    c->stop = 1;
+    enil_atomic_store(&c->stop, 1);
   } else {
     rev = enil_sse_event_revision(ev.type, ev.data);
     if (!enil_sse_save_local_rev(c, rev)) c->delivery_failed = 1;
   }
 
   if (strcmp(ev.type, "reconnect") == 0) {
-    c->reconnect = 1;
+    enil_atomic_store(&c->reconnect, 1);
   }
 
   s->event_type[0] = '\0';
@@ -205,7 +206,7 @@ static size_t write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
       if (s->line_buf) s->line_buf[s->line_len] = '\0';
       process_line(s);
       s->line_len = 0;
-      if (s->client->stop || s->client->reconnect || s->client->delivery_failed) return 0;
+      if (enil_atomic_load(&s->client->stop) || enil_atomic_load(&s->client->reconnect) || s->client->delivery_failed) return 0;
     } else if (!append_sse(s, &s->line_buf, &s->line_len, &s->line_cap,
                             &c, 1, SSE_MAX_LINE_SIZE)) {
       return 0;
@@ -213,7 +214,7 @@ static size_t write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
   }
 
   /* Returning 0 aborts the transfer — used for reconnect and stop */
-  if (s->client->reconnect || s->client->stop) return 0;
+  if (enil_atomic_load(&s->client->reconnect) || enil_atomic_load(&s->client->stop)) return 0;
   return total;
 }
 
@@ -225,7 +226,7 @@ static int progress_cb(void *userdata, double dltotal, double dlnow,
   (void)dltotal; (void)dlnow; (void)ultotal; (void)ulnow;
 
   /* Stop / explicit kick: abort now. */
-  if (c->stop || c->reconnect) return 1;
+  if (enil_atomic_load(&c->stop) || enil_atomic_load(&c->reconnect)) return 1;
 
   /* Idle watchdog. libcurl invokes this callback ~once per second even while
    * blocked waiting for data, so a dead socket is caught within
@@ -237,7 +238,7 @@ static int progress_cb(void *userdata, double dltotal, double dlnow,
     ENIL_LOG("Sse.progress",
              "idle %lds (>%ds) — forcing reconnect",
              (long)(time(NULL) - c->last_activity), SSE_IDLE_TIMEOUT);
-    c->reconnect = 1;
+    enil_atomic_store(&c->reconnect, 1);
     return 1;
   }
   return 0;
@@ -274,7 +275,7 @@ static void *sse_thread(void *arg)
   snprintf(version_header, sizeof(version_header), "X-Line-Chrome-Version: %s",
            identity.gateway_version);
 
-  while (!c->stop) {
+  while (!enil_atomic_load(&c->stop)) {
     /* Top-of-loop health gate. If a previous event handler (or any other
      * thread) put either subsystem into the failed state, do NOT reconnect.
      * Per user policy SSE stays closed until the user explicitly recovers
@@ -389,10 +390,10 @@ static void *sse_thread(void *arg)
     free(access_hdr); access_hdr = NULL;
     free(cookie_hdr); cookie_hdr = NULL;
 
-    if (c->stop) break;
+    if (enil_atomic_load(&c->stop)) break;
 
-    if (c->reconnect) {
-      c->reconnect = 0;
+    if (enil_atomic_load(&c->reconnect)) {
+      enil_atomic_store(&c->reconnect, 0);
       /* reconnect immediately with updated localRev */
       continue;
     }
@@ -440,7 +441,7 @@ int enil_sse_start(ENILSSEClient *c, ENILSSEEventFn fn, void *ctx)
   if (!c || !fn) return 0;
   c->fn   = fn;
   c->ctx  = ctx;
-  c->stop = 0;
+  enil_atomic_store(&c->stop, 0);
   rc = pthread_create(&c->thread, NULL, sse_thread, c);
   c->thread_started = (rc == 0);
   if (rc != 0)
@@ -456,12 +457,12 @@ int enil_sse_start(ENILSSEClient *c, ENILSSEEventFn fn, void *ctx)
  * instant recovery on system wake instead of stopSSE+startSSE, which would
  * pthread_join a possibly-wedged worker thread on the caller's thread.
  * Safe to call on NULL or a not-yet-started client. Safe from any thread —
- * reconnect is a volatile int, written/read without a lock like stop. */
+ * the shared flags use atomic loads and stores. */
 void enil_sse_kick(ENILSSEClient *c)
 {
   if (!c) return;
-  c->reconnect = 1;
-  c->interrupt = 1;
+  enil_atomic_store(&c->reconnect, 1);
+  enil_atomic_store(&c->interrupt, 1);
 }
 
 /* ============================================================================
@@ -470,8 +471,8 @@ void enil_sse_kick(ENILSSEClient *c)
 void enil_sse_request_stop(ENILSSEClient *c)
 {
   if (!c) return;
-  c->stop = 1;
-  c->interrupt = 1;
+  enil_atomic_store(&c->stop, 1);
+  enil_atomic_store(&c->interrupt, 1);
 }
 
 void enil_sse_free(ENILSSEClient *c)

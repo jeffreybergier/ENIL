@@ -1,3 +1,4 @@
+#include "enil_atomic.h"
 /* Compact Thrift QR protocol, reference: LINEJS ef6c3d9, base/login/mod.ts.
  * No extension code. E2EE operations stay in the existing crypto Worker.
  * Shared native QR flow; account activation is handled by ENILAccount. */
@@ -50,7 +51,7 @@ static void status(NativeLogin *p, const char *message) {
   if (p->cb && p->cb->on_status)
     p->cb->on_status(message, p->cb->ctx);
 }
-static int cancelled(NativeLogin *p) { return p->cb && p->cb->cancel && *p->cb->cancel; }
+static int cancelled(NativeLogin *p) { return p->cb && p->cb->cancel && enil_atomic_load(p->cb->cancel); }
 static int fail(NativeLogin *p, const char *message) {
   p->failed = 1;
   status(p, message);
