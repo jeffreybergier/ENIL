@@ -19,12 +19,13 @@ class DownloadTests(unittest.TestCase):
         flags = shlex.split(subprocess.check_output(
             ["pkg-config", "--cflags", "--libs", "libcurl", "libcjson"], text=True))
         subprocess.run(["cc", "-std=gnu99", "-Wall", "-Wextra", "-Werror",
+                        "-DENIL_HTTP_TIMEOUT_SECONDS=2L", "-DENIL_HTTP_STALL_SECONDS=1L",
                         "-I" + str(REPO / "source/shared"),
                         str(REPO / "source/tests/native_download.c"),
                         str(REPO / "source/shared/enil_http.c"),
                         "-pthread", *flags, "-o", str(cls.binary)], check=True)
 
-    def transfer(self, mode, existing=None, kill=False):
+    def transfer(self, mode, existing=None, kill=False, cancel=False):
         ready, release = threading.Event(), threading.Event()
 
         class Handler(BaseHTTPRequestHandler):
@@ -50,7 +51,8 @@ class DownloadTests(unittest.TestCase):
                 if existing is not None:
                     dest.write_bytes(existing)
                 proc = subprocess.Popen([str(self.binary),
-                    f"http://127.0.0.1:{server.server_port}/image", str(dest)])
+                    f"http://127.0.0.1:{server.server_port}/image", str(dest),
+                    *(["cancel"] if cancel else [])])
                 try:
                     self.assertTrue(ready.wait(5))
                     if kill:
@@ -88,3 +90,9 @@ class DownloadTests(unittest.TestCase):
         for existing in (None, b"previous"):
             with self.subTest(existing=existing):
                 self.transfer("stall", existing, kill=True)
+
+    def test_stalled_download_times_out_without_poisoning_cache(self):
+        self.transfer("stall")
+
+    def test_cancelled_download_preserves_cached_file(self):
+        self.transfer("stall", b"previous", cancel=True)

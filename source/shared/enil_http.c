@@ -11,6 +11,42 @@
 #include "enil_identity.h"
 #include "enil_cocoa_log.h"
 
+/* Finite requests must eventually yield even on a dead mobile socket.
+ * Streaming callers explicitly opt out of the total/low-speed limits. */
+#ifndef ENIL_HTTP_TIMEOUT_SECONDS
+#define ENIL_HTTP_TIMEOUT_SECONDS 120L
+#endif
+#ifndef ENIL_HTTP_STALL_SECONDS
+#define ENIL_HTTP_STALL_SECONDS 30L
+#endif
+static pthread_key_t s_cancel_key;
+static pthread_once_t s_cancel_once = PTHREAD_ONCE_INIT;
+static void cancel_key_create(void) { (void)pthread_key_create(&s_cancel_key, NULL); }
+void enil_http_bind_cancel(const volatile int *cancel) {
+  pthread_once(&s_cancel_once, cancel_key_create);
+  pthread_setspecific(s_cancel_key, (void *)cancel);
+}
+const volatile int *enil_http_cancel_flag(void) {
+  pthread_once(&s_cancel_once, cancel_key_create);
+  return (const volatile int *)pthread_getspecific(s_cancel_key);
+}
+int enil_http_cancelled(void) {
+  const volatile int *cancel = enil_http_cancel_flag();
+  return cancel && *cancel;
+}
+static int download_cancel(void *ctx, curl_off_t a, curl_off_t b,
+                           curl_off_t c, curl_off_t d) {
+  (void)a; (void)b; (void)c; (void)d;
+  return ctx && *(const volatile int *)ctx;
+}
+static void apply_download_cancel(CURL *curl) {
+  const volatile int *cancel = enil_http_cancel_flag();
+  if (!cancel) return;
+  curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+  curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, download_cancel);
+  curl_easy_setopt(curl, CURLOPT_XFERINFODATA, (void *)cancel);
+}
+
 static char *s_cainfo = NULL;
 static pthread_once_t s_curl_once = PTHREAD_ONCE_INIT;
 
@@ -56,6 +92,11 @@ CURL *enil_curl_new_raw(void) {
   ensure_curl_ready();
   curl = curl_easy_init();
   if (!curl) return NULL;
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+  curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, ENIL_HTTP_TIMEOUT_SECONDS);
+  curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
+  curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, ENIL_HTTP_STALL_SECONDS);
   if (s_cainfo && s_cainfo[0])
     curl_easy_setopt(curl, CURLOPT_CAINFO, s_cainfo);
   return curl;
@@ -91,13 +132,14 @@ char *enil_curl_get(const char *url) {
   CURL *curl;
   long  status = 0;
   CURLcode rc;
-  if (!url) return NULL;
+  if (!url || enil_http_cancelled()) return NULL;
   curl = enil_curl_new(&buf);
   if (!curl) { ENIL_LOG("Http.get", "curl init failed: %s", url); return NULL; }
   if (enil_identity_current())
     curl_easy_setopt(curl, CURLOPT_USERAGENT, enil_identity_current()->user_agent);
   curl_easy_setopt(curl, CURLOPT_URL, url);
   curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+  apply_download_cancel(curl);
   rc = curl_easy_perform(curl);
   curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
   curl_easy_cleanup(curl);
@@ -125,7 +167,7 @@ int enil_curl_download_file(const char *url, const char *dest_path) {
   long status = 0;
   CURLcode rc;
 
-  if (!url || !dest_path) return -1;
+  if (!url || !dest_path || enil_http_cancelled()) return -1;
   temporary = malloc(strlen(dest_path) + sizeof(".download-XXXXXX"));
   if (!temporary) return -1;
   sprintf(temporary, "%s.download-XXXXXX", dest_path);
@@ -141,6 +183,7 @@ int enil_curl_download_file(const char *url, const char *dest_path) {
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, NULL);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, f);
   curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+  apply_download_cancel(curl);
 
   rc = curl_easy_perform(curl);
   curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);

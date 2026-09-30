@@ -19,6 +19,13 @@ CURL *enil_curl_new_raw(void);
 CURL *enil_curl_new(ENILBuf *buf);
 void  enil_buf_free(ENILBuf *buf);
 
+/* Optional cancellation for asset GET/download work on this thread. The owner
+ * keeps the flag alive until this thread and its download children have joined.
+ * Child threads must explicitly inherit the binding. NULL clears it. */
+void enil_http_bind_cancel(const volatile int *cancel);
+const volatile int *enil_http_cancel_flag(void);
+int enil_http_cancelled(void);
+
 /* GET url and write body to dest_path. Returns 0 on success (HTTP 200). */
 int   enil_curl_download_file(const char *url, const char *dest_path);
 

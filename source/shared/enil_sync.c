@@ -631,6 +631,7 @@ typedef struct {
   int error;
   int started;
   enil_identity_t identity;
+  const volatile int *cancel;
 } ENILStickerDownloadJob;
 
 static int download_if_missing(const char *url, const char *dest_path,
@@ -803,6 +804,7 @@ static int run_sticonshop_download(ENILStickerDownloadJob *job) {
 static void *sticker_download_thread(void *arg) {
   ENILStickerDownloadJob *job = (ENILStickerDownloadJob *)arg;
   if (!job || !job->sticker_id || !job->package_id || !job->shop) return NULL;
+  enil_http_bind_cancel(job->cancel);
   if (!enil_identity_bind(&job->identity)) { job->error = 1; return NULL; }
   mkdir(job->pkg_dir, 0755);
   if (strcmp(job->shop, "stickershop") == 0)
@@ -909,7 +911,7 @@ static int download_sticker_list(sqlite3 *db, const char *session_path,
 
   sqlite3_exec(db, "BEGIN", NULL, NULL, NULL);
 
-  for (i = 0; i < total; i++) {
+  for (i = 0; i < total && !enil_http_cancelled(); i++) {
     ENILStickerDownloadJob jobs[STICKER_CDN_BATCH_SIZE];
     pthread_t threads[STICKER_CDN_BATCH_SIZE];
     int thread_started[STICKER_CDN_BATCH_SIZE];
@@ -918,6 +920,7 @@ static int download_sticker_list(sqlite3 *db, const char *session_path,
     while (i < total && batch_count < STICKER_CDN_BATCH_SIZE) {
       cJSON *entry = cJSON_GetArrayItem(pending, i);
       if (init_sticker_job(&jobs[batch_count], entry, stk_dir)) {
+        jobs[batch_count].cancel = enil_http_cancel_flag();
         int rc = pthread_create(&threads[batch_count], NULL,
                                 sticker_download_thread, &jobs[batch_count]);
         thread_started[batch_count] = rc == 0;

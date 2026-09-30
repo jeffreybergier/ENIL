@@ -262,6 +262,7 @@ static void *sse_thread(void *arg)
   /* Bind this account's health so the reconnect gate below and any LINE work
    * the event callback drives are scoped to this account, not the process. */
   enil_health_bind(c->health);
+  enil_http_bind_cancel(&c->stop);
   if (!enil_session_bind_identity(c->session_path)) {
     enil_health_set_failure(ENIL_ERR_LINE, "Cannot load client identity");
     return NULL;
@@ -343,7 +344,9 @@ static void *sse_thread(void *arg)
     curl_easy_setopt(curl, CURLOPT_PROGRESSFUNCTION, progress_cb);
     curl_easy_setopt(curl, CURLOPT_PROGRESSDATA,     c);
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS,       0L);
-    /* SSE is long-lived. Do not set total transfer timeout. */
+    /* Override finite-request defaults: SSE has its own idle watchdog. */
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT,          0L);
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME,   0L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT,   20L);
     /* Defense in depth alongside the idle watchdog: let the kernel probe a
      * silent peer so a dead connection (sleep/wake, app pause) is noticed at
