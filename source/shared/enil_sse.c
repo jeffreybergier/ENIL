@@ -467,11 +467,17 @@ void enil_sse_kick(ENILSSEClient *c)
 /* ============================================================================
  * Stop the SSE thread, join it, and release the client. Safe to call on NULL.
  * ==========================================================================*/
-void enil_sse_free(ENILSSEClient *c)
+void enil_sse_request_stop(ENILSSEClient *c)
 {
   if (!c) return;
   c->stop = 1;
   c->interrupt = 1;
+}
+
+void enil_sse_free(ENILSSEClient *c)
+{
+  if (!c) return;
+  enil_sse_request_stop(c);
   if (c->thread_started) pthread_join(c->thread, NULL);
   free(c->access_token);
   free(c->session_path);

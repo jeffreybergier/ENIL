@@ -50,3 +50,6 @@ class SSEStreamTests(unittest.TestCase):
 
     def test_failed_delivery_retries_without_advancing_cursor(self):
         self.check_stream("retry")
+
+    def test_stop_request_does_not_join_a_stalled_callback(self):
+        self.check_stream("shutdown", (1,))

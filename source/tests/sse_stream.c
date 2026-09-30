@@ -42,6 +42,55 @@ static int feed(ENILSSEState *state, const char *wire, size_t size, size_t chunk
   return 1;
 }
 
+/* A stalled event callback deliberately ignores cancellation until released.
+ * Requesting stop must still return; only the background reaper may wait. */
+static pthread_mutex_t stop_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t stop_cond = PTHREAD_COND_INITIALIZER;
+static int callback_ready, release_callback, reaper_ready, reaper_done;
+static void *stalled_callback(void *unused) {
+  (void)unused;
+  pthread_mutex_lock(&stop_mutex);
+  callback_ready = 1;
+  pthread_cond_broadcast(&stop_cond);
+  while (!release_callback) pthread_cond_wait(&stop_cond, &stop_mutex);
+  pthread_mutex_unlock(&stop_mutex);
+  return NULL;
+}
+static void *reap_client(void *arg) {
+  pthread_mutex_lock(&stop_mutex);
+  reaper_ready = 1;
+  pthread_cond_broadcast(&stop_cond);
+  pthread_mutex_unlock(&stop_mutex);
+  enil_sse_free(arg);
+  pthread_mutex_lock(&stop_mutex);
+  reaper_done = 1;
+  pthread_mutex_unlock(&stop_mutex);
+  return NULL;
+}
+static void nonblocking_shutdown(void) {
+  ENILSSEClient *client = calloc(1, sizeof(*client));
+  pthread_t reaper;
+  assert(client);
+  assert(pthread_create(&client->thread, NULL, stalled_callback, NULL) == 0);
+  client->thread_started = 1;
+  pthread_mutex_lock(&stop_mutex);
+  while (!callback_ready) pthread_cond_wait(&stop_cond, &stop_mutex);
+  pthread_mutex_unlock(&stop_mutex);
+  enil_sse_request_stop(NULL);
+  enil_sse_request_stop(client);
+  enil_sse_request_stop(client);
+  assert(client->stop && client->interrupt);
+  assert(pthread_create(&reaper, NULL, reap_client, client) == 0);
+  pthread_mutex_lock(&stop_mutex);
+  while (!reaper_ready) pthread_cond_wait(&stop_cond, &stop_mutex);
+  assert(!reaper_done);
+  release_callback = 1;
+  pthread_cond_broadcast(&stop_cond);
+  pthread_mutex_unlock(&stop_mutex);
+  pthread_join(reaper, NULL);
+  assert(reaper_done);
+}
+
 int main(int argc, char **argv) {
   ENILSSEClient client = {0};
   ENILSSEState state = {0};
@@ -50,6 +99,7 @@ int main(int argc, char **argv) {
   char *text, *wire;
   int multiline, oversize, interrupted, retry;
   assert(argc == 3);
+  if (!strcmp(argv[1], "shutdown")) { nonblocking_shutdown(); return 0; }
   multiline = !strcmp(argv[1], "multiline");
   oversize = !strncmp(argv[1], "oversize", 8);
   interrupted = !strcmp(argv[1], "interrupted");

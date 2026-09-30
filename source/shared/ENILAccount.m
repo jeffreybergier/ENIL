@@ -105,6 +105,8 @@ static NSString *first_pending_temp_for_chat(NSMutableDictionary *map, NSString 
 - (void)flushCoalescedSSE;
 - (void)syncDidFinish:(NSNumber *)result;
 - (void)syncInBackground;
+- (void)stopSSEInBackground:(NSValue *)client;
+- (void)sseDidStop;
 - (void)sendTextInBackground:(NSDictionary *)params;
 - (void)sendInlineSticons_BG:(NSDictionary *)params;
 - (void)sendStickerInBackground:(NSDictionary *)params;
@@ -234,13 +236,8 @@ static void qr_status_trampoline(const char *msg, void *ctx)
   if (action == ENIL_ACCOUNT_SSE_TALK_ACTION_REFRESH_RECONNECT) {
     ENILLog(@"ENILAccount.handleSSETalkException",
             @"code=%d -> refresh+reconnect", code);
-    /* The SSE stream has already been freed (should_stop_sse) by the time we
-     * get here. Reflect that the live connection is GONE while the async
-     * refresh runs, otherwise the bar keeps claiming "Syncing Live" for a
-     * stream that no longer exists — and if the refresh stalls (e.g. a wedged
-     * worker socket across an iOS background/resume) it sits on that lie until
-     * the refresh finally fails. -tokenRefreshDidFinish: restores Live on
-     * success or drops to Error on failure, so this state is always transient. */
+    /* Shutdown is already requested. Announce reconnecting while token
+     * refresh runs; startSSE defers a new stream until the old one exits. */
     [self setSyncState:ENILSyncStateReconnecting];
     [self cancelTokenRefreshTimer];
     [NSThread detachNewThreadSelector:@selector(tokenRefreshInBackground)
@@ -430,11 +427,15 @@ static void qr_status_trampoline(const char *msg, void *ctx)
 {
   if (syncRunning_) return;
   syncRunning_ = YES;
+  syncWaitingForSSE_ = YES;
   [self stopSSE];
   [self setSyncState:ENILSyncStateSyncing];
-  [NSThread detachNewThreadSelector:@selector(syncInBackground)
-                           toTarget:self
-                         withObject:nil];
+  if (!sseStopping_) {
+    syncWaitingForSSE_ = NO;
+    [NSThread detachNewThreadSelector:@selector(syncInBackground)
+                             toTarget:self
+                           withObject:nil];
+  }
 }
 
 - (NSDictionary *)profile;
@@ -1675,9 +1676,11 @@ static int sse_event_cb(const ENILSSEEvent *ev, void *ctx)
   /* Token refresh, wake, and link toggles must not resume polling while a
    * full sync is still rebuilding the data behind the saved cursor. */
   if (syncRunning_) return;
-  if (sseClient_) {
-    enil_sse_free(sseClient_);
-    sseClient_ = NULL;
+  if (sseClient_) [self stopSSE];
+  if (sseStopping_) {
+    sseStartPending_ = YES;
+    if (sseEnabled_) [self setSyncState:ENILSyncStateReconnecting];
+    return;
   }
   /* The user's persisted "link off" choice wins over every reconnect trigger
    * (launch, post-sync, wake). Reflect it as Offline and make no connection. */
@@ -1722,10 +1725,46 @@ static int sse_event_cb(const ENILSSEEvent *ev, void *ctx)
 
 - (void)stopSSE;
 {
+  ENILSSEClient *client;
+  /* A later explicit stop cancels a queued restart (e.g. rapid link toggles).
+   * All lifecycle fields are read/written on the main thread. */
+  sseStartPending_ = NO;
   if (!sseClient_) return;
-  enil_sse_free(sseClient_);
+  client = sseClient_;
   sseClient_ = NULL;
+  sseStopping_ = YES;
+  enil_sse_request_stop(client);
+  /* NSThread retains its target and argument. Keep the account, database,
+   * health object and callback context alive until the old thread has exited. */
+  [NSThread detachNewThreadSelector:@selector(stopSSEInBackground:)
+                           toTarget:self
+                         withObject:[NSValue valueWithPointer:client]];
+}
+
+- (void)stopSSEInBackground:(NSValue *)client;
+{
+  NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+  enil_sse_free((ENILSSEClient *)[client pointerValue]);
+  [self performSelectorOnMainThread:@selector(sseDidStop)
+                         withObject:nil
+                      waitUntilDone:NO];
+  [pool release];
+}
+
+- (void)sseDidStop;
+{
+  sseStopping_ = NO;
   ENILLog(@"ENILAccount.stopSSE", @"stopped");
+  if (syncWaitingForSSE_) {
+    syncWaitingForSSE_ = NO;
+    sseStartPending_ = NO;
+    [NSThread detachNewThreadSelector:@selector(syncInBackground)
+                             toTarget:self
+                           withObject:nil];
+  } else if (sseStartPending_) {
+    sseStartPending_ = NO;
+    [self startSSE];
+  }
 }
 
 /* Instant recovery hook for system wake / network change. If a stream is

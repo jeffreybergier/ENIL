@@ -28,6 +28,10 @@ int            enil_sse_start(ENILSSEClient *c, ENILSSEEventFn fn, void *ctx);
 /* Force an immediate reconnect of a running stream. Non-blocking; safe on NULL
  * and from any thread. See enil_sse.c for the rationale (wake recovery). */
 void           enil_sse_kick(ENILSSEClient *c);
+/* Signal cancellation without joining. The client and callback context must
+ * remain alive until enil_sse_free completes on a background thread. */
+void           enil_sse_request_stop(ENILSSEClient *c);
+/* Joins the thread: never call from a UI action or the SSE callback itself. */
 void           enil_sse_free(ENILSSEClient *c);
 
 #endif

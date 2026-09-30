@@ -41,6 +41,10 @@ static int download_cancel(void *ctx, curl_off_t a, curl_off_t b,
 }
 static void apply_download_cancel(CURL *curl) {
   const volatile int *cancel = enil_http_cancel_flag();
+  /* Asset fetches must make progress, but a LINE long-poll may legitimately
+   * stay silent longer than this. Do not impose low-speed limits globally. */
+  curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
+  curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, ENIL_HTTP_STALL_SECONDS);
   if (!cancel) return;
   curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
   curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, download_cancel);
@@ -95,8 +99,6 @@ CURL *enil_curl_new_raw(void) {
   curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
   curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
   curl_easy_setopt(curl, CURLOPT_TIMEOUT, ENIL_HTTP_TIMEOUT_SECONDS);
-  curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
-  curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, ENIL_HTTP_STALL_SECONDS);
   if (s_cainfo && s_cainfo[0])
     curl_easy_setopt(curl, CURLOPT_CAINFO, s_cainfo);
   return curl;

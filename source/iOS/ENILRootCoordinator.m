@@ -274,9 +274,9 @@ static NSString * const kENILLastActiveAccountKey = @"ENILLastActiveAccountMid";
   return out;
 }
 
-/* Release the live engine after stopping its SSE stream. The old chat list
- * still holds a strong ref until the nav root is swapped, but stopSSE has
- * already torn the network thread down so the overlap is inert. */
+/* Request shutdown before releasing the engine. The background reaper keeps
+ * the old account and its database alive until its last callback has exited;
+ * the old chat list also retains it until the navigation root is swapped. */
 - (void)teardownActiveEngine
 {
   if ([self activeAccount] == nil) return;
@@ -284,7 +284,7 @@ static NSString * const kENILLastActiveAccountKey = @"ENILLastActiveAccountMid";
   [self setActiveAccount:nil];
   [self setActiveAccountPath:nil];
   /* Drop the cached picker so the next account builds its own against the new
-   * engine — the old one still holds the torn-down account's ENILAccount. */
+   * engine — the old one still holds the old account's ENILAccount. */
   [self setStickerPicker:nil];
 }
 
