@@ -22,8 +22,8 @@ tested.
 Native outputs live in `build/<platform>/<configuration>/Intermediates` and
 the surrounding configuration directory. `BUILD_ROOT` overrides the root.
 Use platform-prefixed root targets (`macOS-debug`, `iOS-release`, etc.) for
-individual builds. Child source lists and flags live in `build.mk`; the
-platform `Makefile` files forward through `source/make/native-targets.mk`.
+individual builds. Platform `Makefile` files declare products, sources, flags, and resources;
+Altivec owns build and packaging mechanics through its common entry points.
 Run `make test-host` for the build-system and Worker tests hosted on Linux.
 
 The native clients must not execute LINE extension code. They call the Worker
