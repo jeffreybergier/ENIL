@@ -1,6 +1,8 @@
-PROJECT_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
-ENIL_PROJECT_ROOT := $(PROJECT_ROOT)
 ALTIVEC_ROOT ?= /altivec
+include $(ALTIVEC_ROOT)/make/entry.mk
+ifeq ($(_altivec_relocated),)
+PROJECT_ROOT := $(abspath $(dir $(firstword $(MAKEFILE_LIST))))
+ENIL_PROJECT_ROOT := $(PROJECT_ROOT)
 PLATFORMS = macOS iOS
 PROJECT_macOS_DIR = source/macOS
 PROJECT_iOS_DIR = source/iOS
@@ -24,3 +26,4 @@ test-client-identity:
 
 test-build-system:
 	@python3 -B -m unittest discover -s "$(ENIL_PROJECT_ROOT)/source/tests" -p 'test_build_system.py' -v
+endif

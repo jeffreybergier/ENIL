@@ -23,6 +23,16 @@ class BuildSystemTests(unittest.TestCase):
                 self.assertEqual(self.config(REPO, platform + "-print-config", *args),
                                  self.config(REPO / "source" / platform, "print-config", *args))
 
+    def test_foreign_workdir(self):
+        for entry in (REPO / 'Makefile', REPO / 'source/macOS/Makefile'):
+            target = 'macOS-print-config' if entry.parent == REPO else 'print-config'
+            result = subprocess.run(['make', '--no-print-directory', '-C', str(REPO.parent),
+                '-f', str(entry), target, f'ALTIVEC_ROOT={ENGINE}', 'BUILD_ROOT=custom'],
+                capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn(f'project={REPO}', result.stdout)
+            self.assertIn(f'output={REPO}/custom/macOS/release', result.stdout)
+
     def test_no_private_engine_recipes(self):
         for platform in ("macOS", "iOS"):
             text = (REPO / "source" / platform / "Makefile").read_text()

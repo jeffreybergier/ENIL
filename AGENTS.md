@@ -19,7 +19,7 @@ Inspect compiler warnings and errors. A container cross-build does not establish
 that the app launches on a Mac or iOS device; report separately whether that was
 tested.
 
-Native outputs live in `build/<platform>/<configuration>/Intermediates` and
+Native outputs live in `build/<platform>/<configuration>/<product>/Intermediates` and
 the surrounding configuration directory. `BUILD_ROOT` overrides the root.
 Use platform-prefixed root targets (`macOS-debug`, `iOS-release`, etc.) for
 individual builds. Platform `Makefile` files declare products, sources, flags, and resources;

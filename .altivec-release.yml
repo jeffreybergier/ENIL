@@ -19,7 +19,7 @@ targets:
     build:
       - make macOS-clean
       - make macOS-release
-    artifact: build/macOS/release/ENIL.zip
+    artifact: build/macOS/release/ENIL/ENIL.zip
     asset_name: ENIL-{version}-macOS.zip
 
   - name: iOS
@@ -27,5 +27,5 @@ targets:
     build:
       - make iOS-clean
       - make iOS-release
-    artifact: build/iOS/release/ENIL.ipa
+    artifact: build/iOS/release/ENIL/ENIL.ipa
     asset_name: ENIL-{version}-iOS.ipa

@@ -1,3 +1,7 @@
+ALTIVEC_ROOT ?= /altivec
+include $(ALTIVEC_ROOT)/make/entry.mk
+ifeq ($(_altivec_relocated),)
+PROJECT_ROOT := $(abspath $(dir $(firstword $(MAKEFILE_LIST)))/../..)
 GROUP_ui_SOURCES = main.m AppDelegate.m ENILRootCoordinator.m ChatListViewController.m \
           SyncMiniBarView.m \
           MessageListViewController.m MessageSendViewController.m \
@@ -25,7 +29,6 @@ LIBS_IPHONE = -framework ImageIO -framework Security -framework CoreFoundation \
 
 BUNDLE_LOCALIZATION_DIRS = $(SHARED_DIR)/Resources
 
-PROJECT_ROOT := $(abspath ../..)
 PRODUCTS = ENIL
 ENIL_TYPE = app
 ENIL_GROUPS = ui shared
@@ -41,5 +44,5 @@ ENIL_FLAGS += -Wno-gnu-zero-variadic-macro-arguments
 ENIL_LDFLAGS = -framework UIKit -framework Foundation -framework CoreGraphics $(LIBS_IPHONE)
 ENIL_ENTITLEMENTS = Entitlements.plist
 ENIL_SANDBOX = container
-ALTIVEC_ROOT ?= /altivec
 include $(ALTIVEC_ROOT)/altivec_common_phone.mk
+endif
