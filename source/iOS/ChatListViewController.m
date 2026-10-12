@@ -47,6 +47,19 @@ enum {
 @end
 
 @implementation ChatListViewController
+- (NSArray *)collectionIdentifiersForSection:(NSInteger)section
+{
+  if (section == kSectionAccount) return [self profile] ? @[@"account"] : @[];
+  NSArray *rows = section == kSectionChats ? [self chats] : [self contacts];
+  if ([rows count] > AICollectionIdentityLimit) return nil;
+  NSMutableArray *identifiers = [NSMutableArray array];
+  for (NSDictionary *row in rows) {
+    id key = [row objectForKey:section == kSectionChats ? @"chatMid" : @"mid"];
+    if (!key) return nil;
+    [identifiers addObject:key];
+  }
+  return identifiers;
+}
 
 - (instancetype)initWithAccount:(ENILAccount *)account
                     coordinator:(ENILRootCoordinator *)coordinator
@@ -223,7 +236,7 @@ enum {
     [self setChats:[NSArray array]];
     [self setContacts:[NSArray array]];
   }
-  [[self tableView] reloadData];
+  [self refreshCollection];
 }
 
 #pragma mark - Sync
@@ -363,8 +376,7 @@ enum {
   }
 
   [self setChats:mut]; /* copy -> immutable snapshot, matching -reloadData */
-  [[self tableView] reloadSections:[NSIndexSet indexSetWithIndex:kSectionChats]
-                withRowAnimation:UITableViewRowAnimationNone];
+  [self refreshCollection];
 }
 
 #pragma mark - Row data

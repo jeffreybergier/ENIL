@@ -1,7 +1,9 @@
+#import <AltivecCocoa/AICollectionTableAdapter.h>
 #import "XPAppKit.h"
 
 // --- KeyValueTableView Interface ---
 @interface KeyValueTableView : NSView <XPTableViewDataSource, XPTableViewDelegate> {
+  AICollectionTableAdapter *tableView_collection_;
  @private
   NSScrollView *scrollView_;
   NSTableView *tableView_;

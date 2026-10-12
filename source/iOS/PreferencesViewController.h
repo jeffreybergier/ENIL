@@ -1,3 +1,4 @@
+#import <AltivecCocoa/AICollectionTableViewController.h>
 //
 //  PreferencesViewController.h
 //  ENIL
@@ -25,7 +26,7 @@
  * Used both as the credential gate / empty-state (nav root, no Done button) and
  * presented modally from the chat list's Accounts button. The account verbs are
  * delegated to `coordinator`; without one the Accounts section is hidden. */
-@interface PreferencesViewController : UITableViewController
+@interface PreferencesViewController : AICollectionTableViewController
 /* Back-pointer (assign/unsafe_unretained per the 4.3 floor — no zeroing weak).
  * The coordinator outlives every Preferences instance it owns. */
 @property (nonatomic, assign) ENILRootCoordinator *coordinator;

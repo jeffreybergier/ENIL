@@ -1,3 +1,4 @@
+#import <AltivecCocoa/AICollectionTableViewController.h>
 //
 //  ChatListViewController.h
 //  ENIL
@@ -12,7 +13,7 @@
  * one pushes the message thread. The left nav button presents the settings /
  * account switcher (PreferencesViewController). The macOS peer is the sidebar
  * pane (source/macOS/ChatListViewController). */
-@interface ChatListViewController : UITableViewController
+@interface ChatListViewController : AICollectionTableViewController
 - (instancetype)initWithAccount:(ENILAccount *)account
                     coordinator:(ENILRootCoordinator *)coordinator;
 @end

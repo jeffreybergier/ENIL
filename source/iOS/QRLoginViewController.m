@@ -4,6 +4,7 @@
 //
 
 #import "QRLoginViewController.h"
+#import <AltivecCocoa/AICollectionTableAdapter.h>
 #import "ENILQRImage.h"
 #import "ENILAccount.h"
 #import "XPFoundation.h"
@@ -64,6 +65,26 @@ typedef enum {
 @implementation QRLoginViewController
 {
   volatile int cancelFlag_;
+  AICollectionTableAdapter *clientCollection_;
+  AICollectionTableAdapter *loginCollection_;
+}
+
+- (void)refreshTable:(UITableView *)table
+{
+  if (!table) return;
+  AICollectionTableAdapter *adapter;
+  if (table == [self tableView]) {
+    if (!clientCollection_) clientCollection_ = [[AICollectionTableAdapter alloc] initWithTableView:table];
+    adapter = clientCollection_;
+  } else {
+    if (!loginCollection_) loginCollection_ = [[AICollectionTableAdapter alloc] initWithTableView:table];
+    adapter = loginCollection_;
+  }
+  NSMutableArray *ids = [NSMutableArray array];
+  NSInteger count = [self tableView:table numberOfRowsInSection:0];
+  for (NSInteger row = 0; row < count; ++row)
+    [ids addObject:[NSString stringWithFormat:@"%ld:%ld", (long)[self pageForTableView:table], (long)row]];
+  [adapter applyRowCount:(NSUInteger)count identifiers:ids];
 }
 
 - (instancetype)initWithAccountDir:(NSString *)accountDir
@@ -104,6 +125,7 @@ typedef enum {
 - (void)viewWillAppear:(BOOL)animated
 {
   [super viewWillAppear:animated];
+  [self refreshTable:[self tableView]];
   [[self navigationController] setDelegate:self];
   [[self navigationController] setToolbarHidden:YES animated:NO];
 }
@@ -137,7 +159,7 @@ typedef enum {
   BOOL changed = [self page] != page;
   [self setPage:page];
   if (page == ENILLoginClientPage) {
-    [[self tableView] reloadData];
+    [self refreshTable:[self tableView]];
     if ([[self navigationController] topViewController] != self) {
       [self setNavigationTransition:YES];
       [[self navigationController] popToViewController:self animated:YES];
@@ -163,7 +185,7 @@ typedef enum {
       ? NSLocalizedString(@"PIN Code", nil)
       : (page == ENILLoginRecoveryPage ? NSLocalizedString(@"Recovery", nil)
                                        : NSLocalizedString(@"QR Code", nil))];
-    [table reloadData];
+    [self refreshTable:table];
     if (changed) [table setContentOffset:CGPointZero animated:NO];
     if ([[self navigationController] topViewController] != [self loginPageController]) {
       [self setNavigationTransition:YES];
@@ -194,7 +216,7 @@ typedef enum {
     [self setLoginState:ENILLoginChoosingClient];
     [self setStatusMessage:nil];
   }
-  [[self tableView] reloadData];
+  [self refreshTable:[self tableView]];
   [self updateNavigation];
 }
 
@@ -359,7 +381,7 @@ typedef enum {
       if (![[NSFileManager defaultManager] XP_createDirectoryAtPath:path
           withIntermediateDirectories:NO attributes:nil error:NULL]) {
         [self setStatusMessage:NSLocalizedString(@"Could not save client identity", nil)];
-        [[self currentTableView] reloadData];
+        [self refreshTable:[self currentTableView]];
         return;
       }
       [[self stagingPaths] addObject:path];
@@ -367,7 +389,7 @@ typedef enum {
     if (![ENILAccount prepareQRLoginAtPath:path clientProfile:profile
                       reauthenticatingMid:[self expectedMid]]) {
       [self setStatusMessage:NSLocalizedString(@"Could not save client identity", nil)];
-      [[self currentTableView] reloadData];
+      [self refreshTable:[self currentTableView]];
       return;
     }
     [[self preparedPaths] setObject:path forKey:key];
@@ -382,7 +404,7 @@ typedef enum {
   if ([self running] || [self done]) return;
   if (![ENILAccount restartQRLoginAtPath:[self accountDir]]) {
     [self setStatusMessage:NSLocalizedString(@"Could not save login recovery", nil)];
-    [[self currentTableView] reloadData];
+    [self refreshTable:[self currentTableView]];
     return;
   }
   [self retrySavedLogin:nil];
@@ -422,7 +444,7 @@ typedef enum {
   if (![self running] || [self goingBack] || ![url length]) return;
   [self setQrImage:[ENILQRImage imageForString:url pixelSize:kQRPixels]];
   [self setStatusMessage:NSLocalizedString(@"Scan with LINE on your phone", nil)];
-  [[self currentTableView] reloadData];
+  [self refreshTable:[self currentTableView]];
 }
 
 - (void)qrLoginDidEmitPIN:(NSString *)pin
@@ -451,7 +473,7 @@ typedef enum {
   }
   /* A page change can be queued behind a native push/pop animation. Reload
    * the current table's own shape instead of assuming a QR/PIN row exists. */
-  [[self currentTableView] reloadData];
+  [self refreshTable:[self currentTableView]];
 }
 
 #pragma mark - Terminal handling
@@ -512,6 +534,7 @@ typedef enum {
 
 - (void)dealloc
 {
+  [clientCollection_ invalidate]; [loginCollection_ invalidate];
   if ([_loginPageController isViewLoaded]) {
     [[_loginPageController tableView] setDataSource:nil];
     [[_loginPageController tableView] setDelegate:nil];

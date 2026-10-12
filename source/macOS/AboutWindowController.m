@@ -7,6 +7,13 @@ static const CGFloat kKVColWidthValue = 252.0;
 #pragma mark - KeyValueTableView Implementation
 
 @implementation KeyValueTableView
+- (void)refreshTableCollection;
+{
+  if (!tableView_) return;
+  if (!tableView_collection_) tableView_collection_ = [[AICollectionTableAdapter alloc] initWithTableView:tableView_];
+  [tableView_collection_ applyRowCount:(NSUInteger)[self numberOfRowsInTableView:tableView_] identifiers:([self numberOfRowsInTableView:tableView_] <= (NSInteger)AICollectionIdentityLimit ? sortedKeys_ : nil)];
+}
+
 
 - (id)initWithFrame:(NSRect)frame;
 {
@@ -50,7 +57,7 @@ static const CGFloat kKVColWidthValue = 252.0;
   [sortedKeys_ autorelease];
   sortedKeys_ = [[[data_ allKeys]
     sortedArrayUsingSelector:@selector(compare:)] retain];
-  [tableView_ reloadData];
+  [self refreshTableCollection];
 }
 
 - (NSDictionary *)data { return data_; }
@@ -73,6 +80,7 @@ static const CGFloat kKVColWidthValue = 252.0;
 
 - (void)dealloc;
 {
+  [tableView_collection_ invalidate]; [tableView_collection_ release];
   [scrollView_ release];
   [tableView_ release];
   [data_ release];

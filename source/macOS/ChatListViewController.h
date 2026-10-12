@@ -1,3 +1,4 @@
+#import <AltivecCocoa/AICollectionTableAdapter.h>
 #import <AppKit/AppKit.h>
 #import "AICookieCutterWindowController.h"
 #import "ENILAccount.h"
@@ -13,6 +14,7 @@
  @private
   NSScrollView         *scrollView_;
   NSTableView          *tableView_;
+  AICollectionTableAdapter *collectionAdapter_;
   NSArray              *rows_;
   NSString             *selectedChatId_;
   NSMenu               *contextMenu_;

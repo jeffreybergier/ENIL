@@ -23,6 +23,22 @@
 @end
 
 @implementation PreferencesViewController
+- (id)collectionIdentifierForSection:(NSInteger)section
+{
+  if (section == [self workerSection]) return @"worker";
+  if (section == [self librariesSection]) return @"libraries";
+  return @"accounts";
+}
+- (NSArray *)collectionIdentifiersForSection:(NSInteger)section
+{
+  if (section == [self workerSection]) return [self collectionFixedIdentifiersForSection:section];
+  if (section == [self librariesSection]) return [self sortedLibraryKeys];
+  NSMutableArray *ids = [[[self accounts] valueForKey:@"path"] mutableCopy];
+  if (!ids) ids = [NSMutableArray array];
+  if ([self hasActiveAccount]) [ids addObject:@"reauthenticate"];
+  [ids addObject:@"add-account"];
+  return ids;
+}
 
 - (instancetype)init
 {
@@ -313,7 +329,7 @@ forRowAtIndexPath:(NSIndexPath *)indexPath
    * was removed in place, so refresh the list. */
   if (![[self coordinator] logOutAccountAtPath:path]) {
     [self reloadAccounts];
-    [tableView reloadData];
+    [self refreshCollection];
   }
 }
 
@@ -440,7 +456,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 - (void)setStatusMessageAndReload:(NSString *)message
 {
   [self setStatusMessage:message];
-  [[self tableView] reloadData];
+  [self refreshCollection];
 }
 
 - (BOOL)envOverrideActive

@@ -256,6 +256,23 @@ static NSMutableDictionary *chatRowFromSummary(NSDictionary *chat) {
   [avatarCache_ removeAllObjects];
 }
 
+- (void)refreshCollection;
+{
+  if (!collectionAdapter_) collectionAdapter_ = [[AICollectionTableAdapter alloc] initWithTableView:tableView_];
+  NSMutableArray *ids = nil;
+  if ([rows_ count] <= AICollectionIdentityLimit) {
+    ids = [NSMutableArray array];
+    NSEnumerator *enumerator = [rows_ objectEnumerator]; NSDictionary *row;
+    while ((row = [enumerator nextObject])) {
+      NSString *type = [row objectForKey:@"row_type"];
+      NSString *key = [row objectForKey:@"chatMid"] ?: [row objectForKey:@"mid"] ?: [row objectForKey:@"section_title"];
+      if (!type || !key) { ids = nil; break; }
+      [ids addObject:[NSString stringWithFormat:@"%@:%@", type, key]];
+    }
+  }
+  [collectionAdapter_ applyRowCount:[rows_ count] identifiers:ids];
+}
+
 - (NSArray *)buildRows;
 {
   NSMutableArray *rows = [NSMutableArray array];
@@ -444,7 +461,7 @@ static NSMutableDictionary *chatRowFromSummary(NSDictionary *chat) {
 - (void)reloadData {
   [rows_ autorelease];
   rows_ = [[self buildRows] retain];
-  [tableView_ reloadData];
+  [self refreshCollection];
   [self selectStoredChat];
 }
 
@@ -508,7 +525,7 @@ static NSMutableDictionary *chatRowFromSummary(NSDictionary *chat) {
 
   [rows_ autorelease];
   rows_ = [mut copy]; /* immutable snapshot, matching -reloadData's contract */
-  [tableView_ reloadData];
+  [self refreshCollection];
   [self selectStoredChat];
 }
 
@@ -669,6 +686,7 @@ static NSMutableDictionary *chatRowFromSummary(NSDictionary *chat) {
 
 - (void)dealloc;
 {
+  [collectionAdapter_ invalidate]; [collectionAdapter_ release];
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [scrollView_ release];
   [tableView_ release];
