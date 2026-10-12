@@ -1,3 +1,4 @@
+@class AICoalescedCallback;
 #import <Foundation/Foundation.h>
 #include "enil_db.h"
 #include "enil_sse.h"
@@ -76,8 +77,7 @@ typedef enum {
   long long            tokenRefreshBackoffMs_; /* current retry delay; 0 = back to policy initial */
   NSMutableArray      *coalescedJS_;   /* SSE-driven {chat_id, js} awaiting a batched flush */
   NSMutableArray      *coalescedSSE_;  /* SSE event userInfos awaiting a batched flush */
-  NSTimer             *coalesceTimer_; /* resetting debounce timer; see -coalesceMessageJS: */
-  NSTimeInterval       coalesceDeadline_; /* abs time the batch MUST flush (max-wait cap); 0 = idle */
+  AICoalescedCallback  *coalesceCallback_;
 }
 
 /* QR-code module grid for `string` — a clean ObjC wrapper over the qrcodegen

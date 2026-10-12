@@ -1,3 +1,4 @@
+#import <AICoalescedCallback.h>
 /* ENILAccount — public ObjC facade. View controllers import ENILAccount.h
  * only; the data layer (enil_db.h, ENILDictionary.h, enil_html.h) lives here. */
 
@@ -181,8 +182,8 @@ static void qr_status_trampoline(const char *msg, void *ctx)
   if (sseClient_) enil_sse_free(sseClient_); /* joins SSE thread (uses health_) */
   enil_health_destroy(health_);              /* safe: SSE thread now joined */
   health_ = NULL;
-  [coalesceTimer_ invalidate];               /* SSE thread joined: no new arms */
-  [coalesceTimer_ release];
+  [coalesceCallback_ invalidate];
+  [coalesceCallback_ release];
   [coalescedJS_ release];
   [coalescedSSE_ release];
   enil_db_close(db_);
@@ -1430,31 +1431,19 @@ static const NSTimeInterval kCoalesceMaxWait = 8.0; /* ...but never hold a batch
   [self bumpCoalesceTimer];
 }
 
-/* (Re)schedule the flush kCoalesceIdle out, clamped so it never lands later
- * than coalesceDeadline_ (first-item + kCoalesceMaxWait). */
+/* Keep the domain event ordering here; Altivec owns debounce lifetime. */
 - (void)bumpCoalesceTimer;
 {
-  NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
-  NSTimeInterval delay = kCoalesceIdle;
-  if (coalesceDeadline_ == 0.0) coalesceDeadline_ = now + kCoalesceMaxWait;
-  if (now + delay > coalesceDeadline_) delay = coalesceDeadline_ - now;
-  if (delay < 0.0) delay = 0.0;
-  [coalesceTimer_ invalidate];
-  [coalesceTimer_ release];
-  coalesceTimer_ = [[NSTimer scheduledTimerWithTimeInterval:delay
-                                                     target:self
-                                                   selector:@selector(flushCoalescedUI:)
-                                                   userInfo:nil
-                                                    repeats:NO] retain];
+  if (!coalesceCallback_) coalesceCallback_ = [[AICoalescedCallback alloc]
+    initWithTarget:self selector:@selector(flushCoalescedUI:)
+    idleDelay:kCoalesceIdle maximumDelay:kCoalesceMaxWait];
+  [coalesceCallback_ schedule];
 }
 
-- (void)flushCoalescedUI:(NSTimer *)timer;
+- (void)flushCoalescedUI:(id)ignored;
 {
-  (void)timer;
-  [coalesceTimer_ invalidate];
-  [coalesceTimer_ release];
-  coalesceTimer_ = nil;
-  coalesceDeadline_ = 0.0;
+  (void)ignored;
+  [coalesceCallback_ cancel];
   [self flushCoalescedJS];
   [self flushCoalescedSSE];
 }
