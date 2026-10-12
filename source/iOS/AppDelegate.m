@@ -1,3 +1,4 @@
+#import <AILocalNotificationCenter.h>
 //
 //  AppDelegate.m
 //  ENIL
@@ -41,6 +42,10 @@
   [[self window] makeKeyAndVisible];
 
   [self setupNotifications];
+  UILocalNotification *launchNote =
+      [launchOptions objectForKey:UIApplicationLaunchOptionsLocalNotificationKey];
+  [[AILocalNotificationCenter defaultCenter]
+      activateWithUserInfo:[launchNote userInfo]];
   [self registerVoIPKeepAlive];
   ENILLog(@"AppDelegate.didFinishLaunching", @"launched cause=%@",
           ([application applicationState] == UIApplicationStateBackground)
@@ -54,8 +59,8 @@
 // so they must not gate registration. The wrapper is a no-op before iOS 8.
 - (void)setupNotifications
 {
-  XPUserNotificationCenter *center = [XPUserNotificationCenter defaultCenter];
-  XPNotificationAuthStatus status = [center authorizationStatus];
+  AILocalNotificationCenter *center = [AILocalNotificationCenter defaultCenter];
+  AINotificationAuthorizationStatus status = [center authorizationStatus];
   ENILLog(@"AppDelegate.setupNotifications", @"authorization status: %d", (int)status);
   [center requestAuthorization];
   [[NSNotificationCenter defaultCenter] addObserver:self
@@ -80,16 +85,13 @@
     ENILAccount *account = [note object];
     if (![account isKindOfClass:[ENILAccount class]]) return;
 
-    XPUserNotificationCenter *center = [XPUserNotificationCenter defaultCenter];
-    XPNotificationAuthStatus status = [center authorizationStatus];
+    AILocalNotificationCenter *center = [AILocalNotificationCenter defaultCenter];
     NSDictionary *payload = [account notificationForSSEMessageData:[info objectForKey:@"data"]];
-    if (payload != nil && status != XPNotificationAuthStatusDenied) {
+    if (payload != nil) {
       ENILLog(@"AppDelegate.sseEvent", @"posting notification: %@",
               [payload objectForKey:@"title"]);
       [center postNotificationWithTitle:[payload objectForKey:@"title"]
-                                   body:[payload objectForKey:@"body"]];
-    } else if (payload != nil) {
-      ENILLog(@"AppDelegate.sseEvent", @"notifications denied; skipping post");
+                                   body:[payload objectForKey:@"body"] userInfo:nil];
     }
     [center setBadgeCount:[account totalUnreadCount]];
   } @catch (NSException *exception) {
@@ -105,7 +107,7 @@
 
 - (void)refreshBadgeCount
 {
-  [[XPUserNotificationCenter defaultCenter] setBadgeCount:[[self coordinator] activeUnreadCount]];
+  [[AILocalNotificationCenter defaultCenter] setBadgeCount:[[self coordinator] activeUnreadCount]];
 }
 
 - (void)dealloc
@@ -166,7 +168,6 @@
 - (void)applicationDidEnterBackground:(UIApplication *)application
 {
   ENILLog(@"AppDelegate.applicationDidEnterBackground", @"entered background");
-  [[XPUserNotificationCenter defaultCenter] setBadgeCount:0];
   [self beginBackgroundAssertion];
 }
 
@@ -176,18 +177,12 @@
   [self endBackgroundAssertion];
 }
 
-// Best-effort notification clear when the app becomes active: cold launch (e.g.
-// tapped a banner after the app was killed), return from background, and after
-// any transient interruption. didBecomeActive is broader than
-// willEnterForeground, which skips cold launch. -XP_cancelAllLocalNotifications
-// only cancels *scheduled* notifications; setting the badge to 0 is the trick
-// that also clears the *delivered* tray (and our app-icon badge), so the count
-// resets whenever the user is here to read.
-- (void)applicationDidBecomeActive:(UIApplication *)application
+- (void)application:(UIApplication *)application
+    didReceiveLocalNotification:(UILocalNotification *)notification
 {
-  ENILLog(@"AppDelegate.applicationDidBecomeActive", @"became active; clearing notifications");
-  [application XP_cancelAllLocalNotifications];
-  [[XPUserNotificationCenter defaultCenter] setBadgeCount:0];
+  if ([application applicationState] == UIApplicationStateInactive)
+    [[AILocalNotificationCenter defaultCenter]
+        activateWithUserInfo:[notification userInfo]];
 }
 
 - (void)applicationWillTerminate:(UIApplication *)application

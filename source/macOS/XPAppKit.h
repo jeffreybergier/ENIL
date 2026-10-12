@@ -283,26 +283,3 @@ static inline NSString *_XP_NSToolbarSeparatorItemIdentifier(void) {
 @interface NSImage (XPAppKit)
 - (void)XP_drawInRect:(NSRect)rect respectingFlippedView:(BOOL)viewIsFlipped;
 @end
-
-/* Instant local notifications via NSUserNotification (macOS 10.8+), the legacy
- * API. UNUserNotificationCenter is intentionally NOT used: on modern macOS it
- * silently refuses to deliver without a trusted code signature, which the
- * OSXCross build lacks. Every deprecated NSUserNotification* call is dispatched
- * through typed objc_msgSend inside the .m, so no deprecation warning reaches a
- * call site and the file still compiles against the 10.5 SDK (ppc/x86 slices),
- * where the classes are absent — there it no-ops at runtime (NSClassFromString
- * is nil on Tiger/Leopard, which never had notifications). NSUserNotification
- * has no permission prompt, so there is nothing to request up front. */
-@interface XPUserNotificationCenter : NSObject
-+ (XPUserNotificationCenter *)defaultCenter;
-- (void)postNotificationWithTitle:(NSString *)title body:(NSString *)body;
-/* Clear every banner this app has placed in Notification Center. Called when
- * ENIL comes to the front, since banners only accrue while it isn't frontmost. */
-- (void)removeAllDelivered;
-/* Set the Dock-tile badge to `count` (0 clears it). Separate from the
- * notification API: NSUserNotification has no badge concept on macOS — the
- * badge is the Dock tile's string label (NSDockTile, 10.5+). No-ops on Tiger
- * (10.4), which predates NSDockTile; pre-10.5 apps badged by compositing onto
- * -[NSApplication setApplicationIconImage:] instead. */
-- (void)setBadgeCount:(int)count;
-@end

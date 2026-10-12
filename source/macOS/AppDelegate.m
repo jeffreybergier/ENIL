@@ -1,3 +1,4 @@
+#import <AILocalNotificationCenter.h>
 #import "AppDelegate.h"
 #import "XPFoundation.h"
 #import "ENILKeychain.h"
@@ -327,12 +328,13 @@
   }
 }
 
-// Incoming-message notifications. NSUserNotification (via XPUserNotificationCenter)
+// Incoming-message notifications. NSUserNotification (via AILocalNotificationCenter)
 // has no permission prompt, so there is nothing to request — just observe SSE
 // events app-wide (object:nil covers every open account); the posting account is
 // read from -[note object] in -sseEvent:, which decides what's notifiable.
 - (void)setupNotifications;
 {
+  [AILocalNotificationCenter defaultCenter];
   [[NSNotificationCenter defaultCenter] addObserver:self
                                            selector:@selector(sseEvent:)
                                                name:ENILSSEEventNotification
@@ -358,12 +360,12 @@
     if (![account isKindOfClass:[ENILAccount class]]) return;
 
     NSDictionary *payload = [account notificationForSSEMessageData:[info objectForKey:@"data"]];
-    XPUserNotificationCenter *center = [XPUserNotificationCenter defaultCenter];
+    AILocalNotificationCenter *center = [AILocalNotificationCenter defaultCenter];
     if (payload != nil) {
       ENILLog(@"AppDelegate.sseEvent", @"posting notification: %@",
               [payload objectForKey:@"title"]);
       [center postNotificationWithTitle:[payload objectForKey:@"title"]
-                                   body:[payload objectForKey:@"body"]];
+                                   body:[payload objectForKey:@"body"] userInfo:nil];
     }
     [self refreshBadgeCount];
   } @catch (NSException *exception) {
@@ -381,7 +383,7 @@
 {
   /* One Dock icon, many windows: badge the app-wide total, not just the
      account that posted. */
-  [[XPUserNotificationCenter defaultCenter] setBadgeCount:[self totalUnreadAcrossAccounts]];
+  [[AILocalNotificationCenter defaultCenter] setBadgeCount:[self totalUnreadAcrossAccounts]];
 }
 
 // Sum unread across every open account — the Dock badge is app-scoped.
@@ -396,23 +398,6 @@
   return total;
 }
 
-// Wipe delivered banners when ENIL comes to the front. The center's default
-// presentation rule only banners while we're NOT frontmost, so reactivation is
-// the natural point to clear what the user is now here to read. Fires on launch
-// and on every reactivation. Option-1 clearing: all-or-nothing, no per-chat
-// targeting (see notes in XPUserNotificationCenter).
-- (void)applicationDidBecomeActive:(NSNotification *)aNotification;
-{
-  (void)aNotification;
-  [[XPUserNotificationCenter defaultCenter] removeAllDelivered];
-  [[XPUserNotificationCenter defaultCenter] setBadgeCount:0];
-}
-
-- (void)applicationDidResignActive:(NSNotification *)aNotification;
-{
-  (void)aNotification;
-  [[XPUserNotificationCenter defaultCenter] setBadgeCount:0];
-}
 
 - (void)pushKeychainToWorker;
 {
