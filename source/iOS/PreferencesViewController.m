@@ -76,8 +76,10 @@
 
 - (void)viewWillAppear:(BOOL)animated
 {
-  [super viewWillAppear:animated];
+  /* The superclass snapshots row counts and schedules incremental updates.
+   * Load the account model first so its snapshot matches the data source. */
   [self reloadAccounts];   /* refresh after an add / background log out */
+  [super viewWillAppear:animated];
 }
 
 - (void)viewDidAppear:(BOOL)animated
