@@ -88,7 +88,7 @@ Required libraries: `cJSON`, `libcurl`, `sqlite`.
 - Preserve `source/deps/qrcodegen` as a pinned submodule.
 - Research archives and captured fixtures live separately in ENIL-extras.
   They are not native or Worker build inputs.
-- Native release packaging is configured in `.altivec-release.yml`; GitHub
+- Native release packaging is configured in `.altivec-release.json`; GitHub
   release automation is in `.github/workflows/release.yml`.
   
 ### C and Objective-C boundary
