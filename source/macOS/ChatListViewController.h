@@ -30,9 +30,7 @@
 }
 - (id)initWithEngine:(ENILAccount *)engine;
 - (void)reloadData;
-/* Surgical single-chat refresh: re-reads one chat summary and re-seats its row
- * (or drops it) without the full-roster rebuild -reloadData performs. Driven by
- * ENILSSEEventNotification's @"chat_id" so an incoming message touches one row. */
+/* Refresh count/identity snapshots after an SSE event without loading the roster. */
 - (void)updateChatId:(NSString *)chatId;
 /* Drop every cached avatar so the next draw re-reads from disk. Call after a
  * sync that may have downloaded new/updated avatar files. */

@@ -51,14 +51,7 @@ enum {
 {
   if (section == kSectionAccount) return [self profile] ? @[@"account"] : @[];
   NSArray *rows = section == kSectionChats ? [self chats] : [self contacts];
-  if ([rows count] > AICollectionIdentityLimit) return nil;
-  NSMutableArray *identifiers = [NSMutableArray array];
-  for (NSDictionary *row in rows) {
-    id key = [row objectForKey:section == kSectionChats ? @"chatMid" : @"mid"];
-    if (!key) return nil;
-    [identifiers addObject:key];
-  }
-  return identifiers;
+  return [rows isKindOfClass:[ENILRosterRows class]] ? [(ENILRosterRows *)rows collectionIdentifiers] : nil;
 }
 
 - (instancetype)initWithAccount:(ENILAccount *)account
@@ -228,8 +221,8 @@ enum {
 {
   @try {
     [self setProfile:[[self account] profile]];
-    [self setChats:[[self account] chats]];
-    [self setContacts:[[self account] contacts]];
+    [self setChats:[[self account] chatRows]];
+    [self setContacts:[[self account] contactRows]];
   } @catch (NSException *exception) {
     ENILLog(@"ChatListViewController.reloadData", @"exception: %@", exception);
     [self setProfile:nil];
@@ -301,7 +294,7 @@ enum {
  * so the list must update here to pick up new unreadCount / lastDeliveredTime —
  * otherwise the unseen dot won't appear until the next full sync. Mirrors
  * -[ChatWindowController sseEvent:]: a message event moves at most one chat, so
- * apply a surgical single-row update; only rare structural events full-reload. */
+ * replace the chat source; only structural events also replace the friend source. */
 - (void)sseEvent:(NSNotification *)note
 {
   NSDictionary *userInfo = [note userInfo];
@@ -325,57 +318,12 @@ enum {
   [self reloadData];
 }
 
-/* Surgical single-chat refresh for live SSE updates: re-reads ONE chat summary
- * and re-seats its row in the Chats section, instead of -reloadData's full
- * rebuild (profile + every contact + every chat). The Chats section is sorted
- * lastDeliveredTime DESC, so we drop the chat's old row and re-insert it at the
- * position that keeps that order — a new message floats to the top; a read
- * receipt (unchanged timestamp) lands back in place. A nil summary means the
- * chat lost its message box (deleted) and just drops out. Only the Chats section
- * reloads, leaving the Account/Friends rows and their warm avatar cache alone.
- * The summary is the same ENILStructDict shape as -[ENILAccount chats] rows, so
- * it goes straight into self.chats — no transform needed. */
+/* Replace the count/identity snapshot after a committed chat change. Display
+ * payloads remain bounded and are resolved only for requested rows. */
 - (void)updateChatId:(NSString *)chatId
 {
-  NSMutableArray *mut;
-  NSDictionary *summary = nil;
-  NSUInteger i;
-
-  if (![chatId isKindOfClass:[NSString class]] || ![chatId length]) return;
-
-  mut = [NSMutableArray arrayWithArray:[self chats]];
-
-  /* Drop the chat's existing row, if any (chatMid is unique within Chats). */
-  for (i = 0; i < [mut count]; i++) {
-    if ([[[mut objectAtIndex:i] objectForKey:@"chatMid"] isEqualToString:chatId]) {
-      [mut removeObjectAtIndex:i];
-      break;
-    }
-  }
-
-  @try {
-    summary = [[self account] chatSummaryForId:chatId];
-  } @catch (NSException *exception) {
-    ENILLog(@"ChatListViewController.updateChatId", @"exception: %@", exception);
-    [self reloadData];
-    return;
-  }
-
-  /* Re-insert at the sorted slot: skip rows newer-or-equal, insert before the
-   * first older one. nil summary => chat is gone; the removal above suffices. */
-  if (summary != nil) {
-    long long ts = [[summary objectForKey:@"lastDeliveredTime"] longLongValue];
-    NSUInteger insertAt = 0;
-    while (insertAt < [mut count]) {
-      long long rowTs =
-        [[[mut objectAtIndex:insertAt] objectForKey:@"lastDeliveredTime"] longLongValue];
-      if (rowTs < ts) break;
-      insertAt++;
-    }
-    [mut insertObject:summary atIndex:insertAt];
-  }
-
-  [self setChats:mut]; /* copy -> immutable snapshot, matching -reloadData */
+  if(![chatId length]) return;
+  [self setChats:[[self account] chatRows]];
   [self refreshCollection];
 }
 

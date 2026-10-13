@@ -27,6 +27,8 @@ static NSString * const kENILLastActiveAccountKey = @"ENILLastActiveAccountMid";
 @property (nonatomic, strong) StickerViewController *stickerPicker; /* per-account, lazy */
 @end
 
+NSString *const ENILAccountsDidChangeNotification = @"ENILAccountsDidChangeNotification";
+
 @implementation ENILRootCoordinator
 
 - (instancetype)initWithWindow:(UIWindow *)window
@@ -225,6 +227,7 @@ static NSString * const kENILLastActiveAccountKey = @"ENILLastActiveAccountMid";
   }
   [self setActiveAccount:engine];
   [self setActiveAccountPath:path];
+  [[NSNotificationCenter defaultCenter] postNotificationName:ENILAccountsDidChangeNotification object:self];
 
   /* Mirror macOS ChatWindowController: bring up SSE as soon as the account is
    * active. -startSSE self-gates on enil_db_has_local_rev, so an already-synced
@@ -302,6 +305,7 @@ static NSString * const kENILLastActiveAccountKey = @"ENILLastActiveAccountMid";
 - (void)syncDidFinishReloadPicker:(NSNotification *)note
 {
   (void)note;
+  [[NSNotificationCenter defaultCenter] postNotificationName:ENILAccountsDidChangeNotification object:self];
   [[self stickerPicker] setNeedsReload];  /* no-op when never built */
 }
 
@@ -347,6 +351,7 @@ static NSString * const kENILLastActiveAccountKey = @"ENILLastActiveAccountMid";
     ENILLog(@"ENILRootCoordinator.logOutAccountAtPath", @"FAILED to remove %@",
             path);
   }
+  [[NSNotificationCenter defaultCenter] postNotificationName:ENILAccountsDidChangeNotification object:self];
   if (!wasActive) return NO;   /* a background account; the list just reloads */
 
   /* The live account is gone: promote the next one, or fall back to the

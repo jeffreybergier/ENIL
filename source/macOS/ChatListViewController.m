@@ -221,6 +221,74 @@ static NSMutableDictionary *chatRowFromSummary(NSDictionary *chat) {
 // ChatListViewController
 // ============================================================
 
+/* Flat AppKit sections map counts to paged sources without copying the roster. */
+@interface ENILChatTableRows : NSArray {
+  NSDictionary *profile_;
+  ENILRosterRows *chats_, *contacts_;
+}
+- (id)initWithAccount:(ENILAccount *)account;
+- (BOOL)isSelectableAtIndex:(NSUInteger)index;
+- (BOOL)isSectionAtIndex:(NSUInteger)index;
+- (NSUInteger)indexForMid:(NSString *)mid;
+- (NSArray *)collectionIdentifiers;
+@end
+@implementation ENILChatTableRows
+- (id)initWithAccount:(ENILAccount *)account;
+{
+  self=[super init]; if(self) {
+    @try { profile_=[[account profile] retain]; chats_=[[account chatRows] retain]; contacts_=[[account contactRows] retain]; }
+    @catch(id exception) { [self release]; @throw; }
+  }
+  return self;
+}
+- (void)dealloc; { [profile_ release]; [chats_ release]; [contacts_ release]; [super dealloc]; }
+- (NSUInteger)count; { return 3+(profile_?1:0)+[chats_ count]+[contacts_ count]; }
+- (id)copyWithZone:(NSZone *)zone; { (void)zone; return [self retain]; }
+- (BOOL)isSelectableAtIndex:(NSUInteger)index;
+{ return index>1+(profile_?1:0) && index<[self count] && ![self isSectionAtIndex:index]; }
+- (BOOL)isSectionAtIndex:(NSUInteger)index;
+{ return index==0 || index==1+(profile_?1:0) || index==2+(profile_?1:0)+[chats_ count]; }
+- (id)objectAtIndex:(NSUInteger)index;
+{
+  if(index>=[self count]) [NSException raise:NSRangeException format:@"Roster row outside snapshot"];
+  NSUInteger chatHeader=1+(profile_?1:0), friendHeader=chatHeader+1+[chats_ count];
+  if([self isSectionAtIndex:index]) return sectionRow(index==0 ? NSLocalizedString(@"Account",nil) :
+      (index==chatHeader ? NSLocalizedString(@"Chats",nil) : NSLocalizedString(@"Friends",nil)));
+  if(index>chatHeader && index<friendHeader) return chatRowFromSummary([chats_ objectAtIndex:index-chatHeader-1]);
+  NSDictionary *source=index<chatHeader ? profile_ : [contacts_ objectAtIndex:index-friendHeader-1];
+  NSMutableDictionary *row=[NSMutableDictionary dictionary];
+  NSEnumerator *keys=[source keyEnumerator]; NSString *key;
+  while((key=[keys nextObject])) { id value=[source objectForKey:key]; if(value) [row setObject:value forKey:key]; }
+  NSString *name=index<chatHeader ? nil : [source objectForKey:@"displayNameOverridden"];
+  if(![name length]) name=[source objectForKey:@"displayName"];
+  [row setObject:[name length] ? name : NSLocalizedString(@"(unknown)",nil) forKey:@"displayName"];
+  [row setObject:index<chatHeader ? @"account" : kRowTypeContact forKey:@"row_type"];
+  if([source objectForKey:@"mid"]) [row setObject:[source objectForKey:@"mid"] forKey:@"avatar_mid"];
+  return row;
+}
+- (NSUInteger)indexForMid:(NSString *)mid;
+{
+  NSUInteger index=[chats_ indexForMid:mid];
+  if(index!=NSNotFound) return 2+(profile_?1:0)+index;
+  index=[contacts_ indexForMid:mid];
+  return index==NSNotFound ? NSNotFound : 3+(profile_?1:0)+[chats_ count]+index;
+}
+- (NSArray *)collectionIdentifiers;
+{
+  if([self count]>AICollectionIdentityLimit) return nil;
+  NSArray *chats=[chats_ collectionIdentifiers], *contacts=[contacts_ collectionIdentifiers];
+  if(!chats || !contacts) return nil;
+  NSMutableArray *ids=[NSMutableArray arrayWithObject:@"section:account"];
+  if(profile_) [ids addObject:@"account"];
+  [ids addObject:@"section:chats"];
+  NSEnumerator *enumerator=[chats objectEnumerator]; NSString *mid;
+  while((mid=[enumerator nextObject])) [ids addObject:[@"chat:" stringByAppendingString:mid]];
+  [ids addObject:@"section:friends"]; enumerator=[contacts objectEnumerator];
+  while((mid=[enumerator nextObject])) [ids addObject:[@"friend:" stringByAppendingString:mid]];
+  return ids;
+}
+@end
+
 @implementation ChatListViewController
 
 - (NSImage *)avatarForMid:(NSString *)mid;
@@ -259,93 +327,16 @@ static NSMutableDictionary *chatRowFromSummary(NSDictionary *chat) {
 - (void)refreshCollection;
 {
   if (!collectionAdapter_) collectionAdapter_ = [[AICollectionTableAdapter alloc] initWithTableView:tableView_];
-  NSMutableArray *ids = nil;
-  if ([rows_ count] <= AICollectionIdentityLimit) {
-    ids = [NSMutableArray array];
-    NSEnumerator *enumerator = [rows_ objectEnumerator]; NSDictionary *row;
-    while ((row = [enumerator nextObject])) {
-      NSString *type = [row objectForKey:@"row_type"];
-      NSString *key = [row objectForKey:@"chatMid"] ?: [row objectForKey:@"mid"] ?: [row objectForKey:@"section_title"];
-      if (!type || !key) { ids = nil; break; }
-      [ids addObject:[NSString stringWithFormat:@"%@:%@", type, key]];
-    }
-  }
-  [collectionAdapter_ applyRowCount:[rows_ count] identifiers:ids];
+  [collectionAdapter_ applyRowCount:[rows_ count] identifiers:[(ENILChatTableRows *)rows_ collectionIdentifiers]];
 }
 
 - (NSArray *)buildRows;
-{
-  NSMutableArray *rows = [NSMutableArray array];
-  NSDictionary *profile;
-  NSArray *chats, *contacts;
-  NSUInteger i;
-
-  [rows addObject:sectionRow(NSLocalizedString(@"Account", nil))];
-  profile = [engine_ profile];
-  if (profile) {
-    NSMutableDictionary *row = [NSMutableDictionary dictionary];
-    NSString *mid = [profile objectForKey:@"mid"];
-    NSString *displayName = [profile objectForKey:@"displayName"];
-    [row setObject:@"account" forKey:@"row_type"];
-    if (mid) [row setObject:mid forKey:@"mid"];
-    /* Same fallback as iOS -configureAccountCell:: name -> "(unknown)". */
-    if (![displayName length]) displayName = NSLocalizedString(@"(unknown)", nil);
-    [row setObject:displayName forKey:@"displayName"];
-    /* Defer the JPEG decode to draw time (see cachedAvatarForMid:). */
-    if (mid) [row setObject:mid forKey:@"avatar_mid"];
-    [rows addObject:row];
-  }
-
-  contacts = [engine_ contacts];
-
-  [rows addObject:sectionRow(NSLocalizedString(@"Chats", nil))];
-  chats = [engine_ chats];
-  for (i = 0; i < [chats count]; i++)
-    [rows addObject:chatRowFromSummary([chats objectAtIndex:i])];
-
-  [rows addObject:sectionRow(NSLocalizedString(@"Friends", nil))];
-  for (i = 0; i < [contacts count]; i++) {
-    NSDictionary *contact = [contacts objectAtIndex:i];
-    NSMutableDictionary *row = [NSMutableDictionary dictionary];
-    NSEnumerator *ke = [contact keyEnumerator];
-    NSString *k;
-    while ((k = [ke nextObject])) {
-      id v = [contact objectForKey:k];
-      if (v) [row setObject:v forKey:k];
-    }
-    /* Same fallback chain as iOS -displayNameForContact:: override -> name ->
-     * "(unknown)". */
-    NSString *name = [contact objectForKey:@"displayNameOverridden"];
-    if (![name length]) name = [contact objectForKey:@"displayName"];
-    if (![name length]) name = NSLocalizedString(@"(unknown)", nil);
-    [row setObject:name forKey:@"displayName"];
-    [row setObject:kRowTypeContact forKey:@"row_type"];
-    /* Decoded lazily at draw time (see cachedAvatarForMid:). */
-    NSString *cmid = [contact objectForKey:@"mid"];
-    if (cmid) [row setObject:cmid forKey:@"avatar_mid"];
-    [rows addObject:row];
-  }
-
-  return rows;
-}
+{ return [[[ENILChatTableRows alloc] initWithAccount:engine_] autorelease]; }
 
 - (NSInteger)rowForChatId:(NSString *)chatId;
 {
-  NSUInteger i;
-  NSInteger contactMatch = -1;
-  if (![chatId isKindOfClass:[NSString class]] || ![chatId length]) return -1;
-  /* Prefer the Chats-section row; fall back to the Friends row so a
-   * never-messaged 1:1 stays highlighted until its chat row materializes. */
-  for (i = 0; i < [rows_ count]; i++) {
-    NSDictionary *row = [rows_ objectAtIndex:i];
-    NSString *type = [row objectForKey:@"row_type"];
-    if ([type isEqualToString:kRowTypeChat]) {
-      if ([[row objectForKey:@"chatMid"] isEqualToString:chatId]) return (NSInteger)i;
-    } else if (contactMatch < 0 && [type isEqualToString:kRowTypeContact]) {
-      if ([[row objectForKey:@"mid"] isEqualToString:chatId]) contactMatch = (NSInteger)i;
-    }
-  }
-  return contactMatch;
+  NSUInteger index=[(ENILChatTableRows *)rows_ indexForMid:chatId];
+  return !rows_ || index==NSNotFound ? -1 : (NSInteger)index;
 }
 
 - (void)selectStoredChat;
@@ -459,74 +450,15 @@ static NSMutableDictionary *chatRowFromSummary(NSDictionary *chat) {
 }
 
 - (void)reloadData {
-  [rows_ autorelease];
-  rows_ = [[self buildRows] retain];
+  NSArray *next=[[self buildRows] retain];
+  [rows_ release]; rows_=next;
   [self refreshCollection];
   [self selectStoredChat];
 }
 
-/* Surgical single-chat refresh for live SSE updates: re-reads ONE chat summary
- * and re-seats its row, instead of -reloadData's full rebuild (which re-queries
- * profile + every contact + every chat on every incoming message). The Chats
- * section is sorted lastDeliveredTime DESC, so we drop the chat's old row and
- * re-insert it at the position that keeps that order — a new message floats to
- * the top; a read receipt (unchanged timestamp) lands back in place. A nil
- * summary means the chat lost its message box (deleted) and just drops out.
- * Falls back to a full -reloadData only for the unexpected (model not built
- * yet, or section layout not the expected Account/Chats/Friends shape). */
+/* Replace count/identity snapshots after a committed event; payloads stay lazy. */
 - (void)updateChatId:(NSString *)chatId {
-  NSMutableArray *mut;
-  NSDictionary *summary;
-  NSUInteger i, sect = 0, chatsHeader = NSNotFound, scan;
-
-  if (![chatId isKindOfClass:[NSString class]] || ![chatId length]) return;
-  if (!rows_) { [self reloadData]; return; }
-
-  mut = [[rows_ mutableCopy] autorelease];
-
-  /* Locate the Chats section header — the 2nd of three headers built by
-   * -buildRows in fixed order: Account, Chats, Friends. */
-  for (i = 0; i < [mut count]; i++) {
-    if ([[[mut objectAtIndex:i] objectForKey:@"row_type"]
-          isEqualToString:kRowTypeSection]) {
-      if (++sect == 2) { chatsHeader = i; break; }
-    }
-  }
-  if (chatsHeader == NSNotFound) { [self reloadData]; return; }
-
-  /* Drop the chat's existing row, if any, scanning only the contiguous Chats
-   * section (stops at the Friends header). */
-  scan = chatsHeader + 1;
-  while (scan < [mut count]) {
-    NSDictionary *r = [mut objectAtIndex:scan];
-    if (![[r objectForKey:@"row_type"] isEqualToString:kRowTypeChat]) break;
-    if ([[r objectForKey:@"chatMid"] isEqualToString:chatId]) {
-      [mut removeObjectAtIndex:scan];
-      continue; /* row shifted into scan; re-test without advancing */
-    }
-    scan++;
-  }
-
-  /* Re-insert at the sorted position (skip rows newer-or-equal, insert before
-   * the first older one). nil summary => chat is gone; removal above suffices. */
-  summary = [engine_ chatSummaryForId:chatId];
-  if (summary) {
-    NSMutableDictionary *row = chatRowFromSummary(summary);
-    long long ts = [[row objectForKey:@"lastDeliveredTime"] longLongValue];
-    NSUInteger insertAt = chatsHeader + 1;
-    while (insertAt < [mut count]) {
-      NSDictionary *r = [mut objectAtIndex:insertAt];
-      if (![[r objectForKey:@"row_type"] isEqualToString:kRowTypeChat]) break;
-      if ([[r objectForKey:@"lastDeliveredTime"] longLongValue] < ts) break;
-      insertAt++;
-    }
-    [mut insertObject:row atIndex:insertAt];
-  }
-
-  [rows_ autorelease];
-  rows_ = [mut copy]; /* immutable snapshot, matching -reloadData's contract */
-  [self refreshCollection];
-  [self selectStoredChat];
+  if([chatId length]) [self reloadData];
 }
 
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView {
@@ -544,29 +476,14 @@ static NSMutableDictionary *chatRowFromSummary(NSDictionary *chat) {
 - (BOOL)tableView:(NSTableView *)tableView isGroupRow:(NSInteger)row;
 {
   (void)tableView;
-  if (row < 0 || row >= (NSInteger)[rows_ count]) return NO;
-  NSDictionary *rowData = [rows_ objectAtIndex:(NSUInteger)row];
-  return [[rowData objectForKey:@"row_type"] isEqualToString:kRowTypeSection];
+  return row>=0 && (NSUInteger)row<[rows_ count] && [(ENILChatTableRows *)rows_ isSectionAtIndex:(NSUInteger)row];
 }
-
 - (CGFloat)tableView:(NSTableView *)tableView heightOfRow:(NSInteger)row;
-{
-  (void)tableView;
-  if (row >= 0 && row < (NSInteger)[rows_ count]) {
-    NSDictionary *rowData = [rows_ objectAtIndex:(NSUInteger)row];
-    if ([[rowData objectForKey:@"row_type"] isEqualToString:kRowTypeSection])
-      return kRowHeight / 2.0;
-  }
-  return kRowHeight;
-}
-
+{ return [self tableView:tableView isGroupRow:row] ? kRowHeight/2.0 : kRowHeight; }
 - (BOOL)tableView:(NSTableView *)tableView shouldSelectRow:(NSInteger)row;
 {
   (void)tableView;
-  NSDictionary *rowData;
-  if (row < 0 || row >= (NSInteger)[rows_ count]) return NO;
-  rowData = [rows_ objectAtIndex:(NSUInteger)row];
-  return selectableMid(rowData) != nil;
+  return row>=0 && [(ENILChatTableRows *)rows_ isSelectableAtIndex:(NSUInteger)row];
 }
 
 - (void)setDelegate:(id<ChatListViewControllerDelegate>)delegate;

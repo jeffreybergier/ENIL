@@ -73,7 +73,7 @@ static const char * const kSQL_UpsertContact =
 static const char * const kSQL_GetContacts =
   "SELECT mid, displayName, displayNameOverridden, statusMessage, picturePath"
   " FROM contacts_v2 WHERE registered = 1"
-  " ORDER BY COALESCE(displayNameOverridden, displayName) COLLATE LOCALIZED";
+  " ORDER BY COALESCE(displayNameOverridden, displayName) COLLATE LOCALIZED, mid";
 
 static const char * const kSQL_CreateChatsV2 =
   "CREATE TABLE IF NOT EXISTS chats_v2 ("
@@ -176,7 +176,7 @@ static const char * const kSQL_GetMessageBoxesV2 =
   " LEFT JOIN contacts_v2 f ON f.mid     = mb.id"
 
 static const char * const kSQL_GetChatSummaries =
-  SQL_CHAT_SUMMARY_SELECT " ORDER BY mb.lastDeliveredTime DESC";
+  SQL_CHAT_SUMMARY_SELECT " ORDER BY mb.lastDeliveredTime DESC, mb.id";
 
 /* Single-row sibling: same projection, one chat by message-box id. Drives the
  * surgical chat-list update on SSE message events (no full-roster rebuild). */
@@ -842,6 +842,8 @@ void enil_db_close(sqlite3 *db) {
  *  - messages_v2(chat_id, createdTime) serves newest/older chat pages in
  *    timestamp order without scanning and sorting the full message table. */
 static const char * const kSQL_CreateIndexes =
+  "CREATE INDEX IF NOT EXISTS idx_roster_chats ON message_boxes_v2(lastDeliveredTime DESC,id);"
+  "CREATE INDEX IF NOT EXISTS idx_roster_contacts ON contacts_v2(registered,COALESCE(displayNameOverridden,displayName) COLLATE LOCALIZED,mid);"
   "CREATE INDEX IF NOT EXISTS idx_sticons_package"
   " ON sticons_v2 (package_id, alt_text);"
   "CREATE INDEX IF NOT EXISTS idx_stickers_image_path"
@@ -1418,6 +1420,64 @@ int enil_db_talk_contact_get_all(sqlite3 *db, talk_contact_t **out, int *out_cou
   /* GetContacts filters to registered = 1 already. */
   for (i = 0; i < *out_count; i++) (*out)[i].registered = 1;
   return 0;
+}
+
+/* A retained read transaction keeps count, ordering and lazy pages consistent
+ * while the sync writer commits new data on its own connection. */
+sqlite3 *enil_db_roster_open(const char *path) {
+  sqlite3 *db=NULL;
+  if(sqlite3_open_v2(path,&db,SQLITE_OPEN_READONLY|SQLITE_OPEN_FULLMUTEX,NULL)!=SQLITE_OK ||
+     sqlite3_create_collation(db,"LOCALIZED",SQLITE_UTF8,NULL,enil_localized_collate)!=SQLITE_OK ||
+     sqlite3_exec(db,"BEGIN",NULL,NULL,NULL)!=SQLITE_OK) {
+    sqlite3_close(db); return NULL;
+  }
+  return db;
+}
+int enil_db_roster_count(sqlite3 *db,int contacts,sqlite3_int64 *count) {
+  sqlite3_stmt *stmt=NULL; int ok=0;
+  if(db && sqlite3_prepare_v2(db,contacts ? "SELECT count(*) FROM contacts_v2 WHERE registered=1" :
+      "SELECT count(*) FROM message_boxes_v2",-1,&stmt,NULL)==SQLITE_OK && sqlite3_step(stmt)==SQLITE_ROW) {
+    *count=sqlite3_column_int64(stmt,0); ok=1;
+  }
+  sqlite3_finalize(stmt); return ok ? 0 : -1;
+}
+int enil_db_roster_page(sqlite3 *db,int contacts,sqlite3_int64 offset,int limit,void **out,int *count) {
+  sqlite3_stmt *stmt=NULL; int rc;
+  *out=NULL; *count=0;
+  if(!db || offset<0 || limit<1 || limit>32) return -1;
+  char *sql=sqlite3_mprintf("%s LIMIT ? OFFSET ?",contacts ? kSQL_GetContacts : kSQL_GetChatSummaries);
+  if(!sql) return -1;
+  rc=sqlite3_prepare_v2(db,sql,-1,&stmt,NULL); sqlite3_free(sql);
+  if(rc!=SQLITE_OK) return -1;
+  sqlite3_bind_int(stmt,1,limit); sqlite3_bind_int64(stmt,2,offset);
+  /* The bounded collector reports step errors rather than publishing partial data. */
+  size_t size=contacts ? sizeof(talk_contact_t) : sizeof(chat_summary_t);
+  void *rows=calloc((size_t)limit,size);
+  if(!rows) { sqlite3_finalize(stmt); return -1; }
+  int n=0;
+  while((rc=sqlite3_step(stmt))==SQLITE_ROW && n<limit) {
+    void *row=(char *)rows+(size_t)n*size;
+    read_fields(stmt,row,contacts ? talk_contact_fields : chat_summary_fields,
+        contacts ? talk_contact_fields_count : chat_summary_fields_count,1);
+    if(contacts) ((talk_contact_t *)row)->registered=1;
+    ++n;
+  }
+  sqlite3_finalize(stmt);
+  if(rc!=SQLITE_DONE) {
+    int i; for(i=0;i<n;++i) {
+      if(contacts) talk_contact_free(&((talk_contact_t *)rows)[i]);
+      else chat_summary_free(&((chat_summary_t *)rows)[i]);
+    }
+    free(rows); return -1;
+  }
+  *out=rows; *count=n; return 0;
+}
+sqlite3_stmt *enil_db_roster_identities(sqlite3 *db,int contacts) {
+  sqlite3_stmt *stmt=NULL;
+  const char *sql=contacts ? "SELECT mid FROM contacts_v2 WHERE registered=1 ORDER BY COALESCE(displayNameOverridden,displayName) COLLATE LOCALIZED,mid" :
+      "SELECT id FROM message_boxes_v2 ORDER BY lastDeliveredTime DESC,id";
+  if(sqlite3_prepare_v2(db,sql,-1,&stmt,NULL)!=SQLITE_OK) { sqlite3_finalize(stmt); return NULL; }
+  return stmt;
 }
 
 /* Generic single-key existence probe. Returns 1 if a row matches, 0 if not.

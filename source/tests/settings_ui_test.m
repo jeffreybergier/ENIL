@@ -5,6 +5,8 @@
 #import "../iOS/PreferencesViewController.h"
 #import "../shared/ENILKeychain.h"
 #include <assert.h>
+#import "../iOS/ENILRootCoordinator.h"
+#import "roster_test.h"
 static void Result(NSString *text)
 {
   [text writeToFile:[NSHomeDirectory() stringByAppendingPathComponent:
@@ -50,7 +52,7 @@ static void Failed(NSException *exception)
   assert([[[[self settings] collectionTableAdapter] snapshot] countInSection:0] == expected);
   assert((NSUInteger)[[self settings] tableView:table numberOfRowsInSection:0] == expected);
   if ([self stage] == 2) {
-    Result(@"PASS: active, empty, and multiple accounts match table and snapshot after appearance\n");
+    Result(@"PASS: active, empty, and multiple accounts match table and snapshot after explicit account changes\n");
     return;
   }
   [self setStage:[self stage] + 1];
@@ -58,13 +60,17 @@ static void Failed(NSException *exception)
       @{@"path":@"fixture-a", @"displayName":@"A", @"active":@YES},
       @{@"path":@"fixture-b", @"displayName":@"B", @"active":@NO}]];
   /* Exercise returning to an existing settings controller after account changes. */
+  [[NSNotificationCenter defaultCenter] postNotificationName:ENILAccountsDidChangeNotification object:[self coordinator]];
+  id snapshot=[[[self settings] collectionTableAdapter] snapshot];
   [[self settings] viewWillAppear:NO];
+  assert([[[self settings] collectionTableAdapter] snapshot]==snapshot);
   [self performSelector:@selector(check) withObject:nil afterDelay:0.5];
 }
 - (BOOL)application:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)options;
 {
   (void)app; (void)options;
   Result(@"RUNNING\n");
+  TestRosterRows([NSHomeDirectory() stringByAppendingPathComponent:@"Documents/roster.sqlite"]);
   NSSetUncaughtExceptionHandler(Failed);
   method_setImplementation(class_getClassMethod([ENILKeychain class], @selector(sharedKeychain)),
       method_getImplementation(class_getClassMethod([FakeKeychain class], @selector(sharedKeychain))));

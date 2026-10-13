@@ -14,6 +14,8 @@
  * active at a time (the "one active account + switcher" decision in
  * PLAN.IOS.md). The switcher is folded into PreferencesViewController's
  * Accounts section rather than a standalone AccountSwitcherViewController. */
+extern NSString *const ENILAccountsDidChangeNotification;
+
 @interface ENILRootCoordinator : NSObject
 
 /* window must be non-nil; the coordinator installs its navigation controller as

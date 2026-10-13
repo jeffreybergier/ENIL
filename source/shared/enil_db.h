@@ -33,6 +33,13 @@ int    enil_db_talk_profile_upsert(sqlite3 *db, const talk_profile_t *p);
 int    enil_db_talk_profile_get(sqlite3 *db, talk_profile_t *out);
 
 int    enil_db_talk_contact_upsert(sqlite3 *db, const talk_contact_t *c);
+/* Immutable UI roster readers: count and identity metadata never load payloads.
+ * Page returns at most limit contact/chat structs, freed with their usual free fn. */
+sqlite3 *enil_db_roster_open(const char *path);
+int enil_db_roster_count(sqlite3 *db, int contacts, sqlite3_int64 *count);
+int enil_db_roster_page(sqlite3 *db, int contacts, sqlite3_int64 offset, int limit,
+                        void **out, int *count);
+sqlite3_stmt *enil_db_roster_identities(sqlite3 *db, int contacts);
 int    enil_db_talk_contact_get_all(sqlite3 *db, talk_contact_t **out, int *out_count);
 /* 1 if a row exists for the mid (or on error), 0 if definitively absent. */
 int    enil_db_chat_exists(sqlite3 *db, const char *chat_mid);

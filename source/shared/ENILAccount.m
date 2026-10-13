@@ -1,4 +1,5 @@
 #import <AICoalescedCallback.h>
+#import <AICollectionSnapshot.h>
 /* ENILAccount — public ObjC facade. View controllers import ENILAccount.h
  * only; the data layer (enil_db.h, ENILDictionary.h, enil_html.h) lives here. */
 
@@ -155,6 +156,76 @@ static void qr_status_trampoline(const char *msg, void *ctx)
                             withObject:s
                          waitUntilDone:NO];
 }
+
+@implementation ENILRosterRows
+- (id)initWithPath:(NSString *)path contacts:(BOOL)contacts;
+{
+  self=[super init]; if(!self) return nil;
+  readerLock_=[[NSRecursiveLock alloc] init];
+  contacts_=contacts; reader_=enil_db_roster_open([path fileSystemRepresentation]);
+  sqlite3_int64 count=0;
+  if(!reader_ || enil_db_roster_count(reader_,contacts_,&count)!=0) {
+    [self release];
+    [NSException raise:@"ENILRosterRead" format:@"Could not read the saved chat list."];
+    return nil;
+  }
+  rowCount_=(NSUInteger)count; return self;
+}
+- (NSUInteger)count; { return rowCount_; }
+- (id)copyWithZone:(NSZone *)zone; { (void)zone; return [self retain]; }
+- (NSArray *)pageAtOffset:(NSUInteger)offset error:(NSError **)error;
+{
+  void *rows=NULL; int count=0, i;
+  [readerLock_ lock];
+  int result=enil_db_roster_page(reader_,contacts_,offset,32,&rows,&count);
+  [readerLock_ unlock];
+  if(result!=0) {
+    if(error) *error=[NSError errorWithDomain:ENILErrorDomain code:1 userInfo:
+        [NSDictionary dictionaryWithObject:@"Could not read the saved chat list." forKey:NSLocalizedDescriptionKey]];
+    return nil;
+  }
+  NSMutableArray *page=[NSMutableArray arrayWithCapacity:count];
+  size_t size=contacts_ ? sizeof(talk_contact_t) : sizeof(chat_summary_t);
+  for(i=0;i<count;++i) {
+    void *row=malloc(size);
+    if(!row) {
+      if(contacts_) talk_contact_free(&((talk_contact_t *)rows)[i]);
+      else chat_summary_free(&((chat_summary_t *)rows)[i]);
+      continue;
+    }
+    memcpy(row,(char *)rows+(size_t)i*size,size);
+    ENILDictionary *item=[[ENILDictionary alloc] initWithBase:row
+        fields:contacts_ ? talk_contact_fields : chat_summary_fields
+        count:contacts_ ? talk_contact_fields_count : chat_summary_fields_count
+        freeFn:contacts_ ? (enil_struct_free_fn)talk_contact_free : (enil_struct_free_fn)chat_summary_free];
+    [page addObject:item]; [item release];
+  }
+  free(rows); return page;
+}
+- (NSArray *)collectionIdentifiers;
+{
+  if(rowCount_>AICollectionIdentityLimit) return nil;
+  NSMutableArray *ids=[NSMutableArray array];
+  [readerLock_ lock];
+  sqlite3_stmt *stmt=enil_db_roster_identities(reader_,contacts_); int rc;
+  while(stmt && (rc=sqlite3_step(stmt))==SQLITE_ROW)
+    [ids addObject:[NSString stringWithUTF8String:(const char *)sqlite3_column_text(stmt,0)]];
+  sqlite3_finalize(stmt); [readerLock_ unlock];
+  return [ids count]==rowCount_ ? ids : nil;
+}
+- (NSUInteger)indexForMid:(NSString *)mid;
+{
+  if(![mid length]) return NSNotFound;
+  NSUInteger index=0, found=NSNotFound;
+  [readerLock_ lock]; sqlite3_stmt *stmt=enil_db_roster_identities(reader_,contacts_);
+  while(stmt && sqlite3_step(stmt)==SQLITE_ROW) {
+    if(!strcmp((const char *)sqlite3_column_text(stmt,0),[mid UTF8String])) { found=index; break; }
+    ++index;
+  }
+  sqlite3_finalize(stmt); [readerLock_ unlock]; return found;
+}
+- (void)dealloc; { enil_db_close(reader_); [readerLock_ release]; [super dealloc]; }
+@end
 
 @implementation ENILAccount
 
@@ -485,6 +556,11 @@ static void qr_status_trampoline(const char *msg, void *ctx)
                    count:talk_profile_fields_count
                   freeFn:(enil_struct_free_fn)talk_profile_free] autorelease];
 }
+
+- (ENILRosterRows *)contactRows;
+{ return [[[ENILRosterRows alloc] initWithPath:[enilDir_ stringByAppendingPathComponent:@"enil.sqlite"] contacts:YES] autorelease]; }
+- (ENILRosterRows *)chatRows;
+{ return [[[ENILRosterRows alloc] initWithPath:[enilDir_ stringByAppendingPathComponent:@"enil.sqlite"] contacts:NO] autorelease]; }
 
 - (NSArray *)contacts;
 {

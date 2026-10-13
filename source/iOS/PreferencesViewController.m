@@ -70,16 +70,17 @@
                                                   action:@selector(doneAction)]];
   [[[self navigationItem] rightBarButtonItem] setEnabled:[self dismissesOnDone]];
 
+  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(accountsDidChange:)
+      name:ENILAccountsDidChangeNotification object:[self coordinator]];
+  [self reloadAccounts];
   [self setLibraryVersions:[self linkedLibraryVersions]];
   [self setSortedLibraryKeys:[[[self libraryVersions] allKeys] sortedArrayUsingSelector:@selector(compare:)]];
+  [self refreshCollection];
 }
 
-- (void)viewWillAppear:(BOOL)animated
+- (void)accountsDidChange:(NSNotification *)note
 {
-  /* The superclass snapshots row counts and schedules incremental updates.
-   * Load the account model first so its snapshot matches the data source. */
-  [self reloadAccounts];   /* refresh after an add / background log out */
-  [super viewWillAppear:animated];
+  (void)note; [self reloadAccounts]; [self refreshCollection];
 }
 
 - (void)viewDidAppear:(BOOL)animated
@@ -470,6 +471,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 
 - (void)dealloc
 {
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
   [_urlField setDelegate:nil];
   [_secretField setDelegate:nil];
 }

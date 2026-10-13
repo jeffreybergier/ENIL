@@ -1,5 +1,6 @@
 @class AICoalescedCallback;
 #import <Foundation/Foundation.h>
+#import <AIPagedRows.h>
 #include "enil_db.h"
 #include "enil_sse.h"
 
@@ -53,6 +54,18 @@ typedef enum {
                                     "Syncing Live" while the stream is actually
                                     down. Not persisted. */
 } ENILSyncState;
+
+/* Count-first, bounded presentation source. Copies retain the same read snapshot. */
+@interface ENILRosterRows : AIPagedRows {
+  sqlite3 *reader_;
+  NSRecursiveLock *readerLock_;
+  NSUInteger rowCount_;
+  BOOL contacts_;
+}
+- (id)initWithPath:(NSString *)path contacts:(BOOL)contacts;
+- (NSArray *)collectionIdentifiers;
+- (NSUInteger)indexForMid:(NSString *)mid;
+@end
 
 @interface ENILAccount : NSObject {
  @private
@@ -162,6 +175,8 @@ typedef enum {
 - (NSDictionary *)notificationForSSEMessageData:(NSString *)data;
 - (NSDictionary *)profile;
 - (NSArray *)contacts;
+- (ENILRosterRows *)contactRows;
+- (ENILRosterRows *)chatRows;
 - (NSArray *)chats;
 /* One chat-list row by mid; nil when the chat has no message box. The surgical
  * counterpart to -chats for live single-chat updates (see ENILSSEEventNotification's
