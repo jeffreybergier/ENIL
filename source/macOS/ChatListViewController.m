@@ -289,6 +289,10 @@ static NSMutableDictionary *chatRowFromSummary(NSDictionary *chat) {
 }
 @end
 
+@interface ChatListViewController (CollectionPrivate)
+- (void)selectStoredChat;
+@end
+
 @implementation ChatListViewController
 
 - (NSImage *)avatarForMid:(NSString *)mid;
@@ -324,10 +328,17 @@ static NSMutableDictionary *chatRowFromSummary(NSDictionary *chat) {
   [avatarCache_ removeAllObjects];
 }
 
-- (void)refreshCollection;
+- (void)rosterPrepared:(NSDictionary *)result;
 {
-  if (!collectionAdapter_) collectionAdapter_ = [[AICollectionTableAdapter alloc] initWithTableView:tableView_];
-  [collectionAdapter_ applyRowCount:[rows_ count] identifiers:[(ENILChatTableRows *)rows_ collectionIdentifiers]];
+  if ([result objectForKey:@"error"]) {
+    NSLog(@"Roster comparison failed: %@", [result objectForKey:@"error"]);
+    return;
+  }
+  if ([diffController_ prepareResult:result snapshotKey:@"collection"
+      previousSnapshot:[collectionAdapter_ snapshot]]) return;
+  [rows_ release]; rows_ = [[result objectForKey:@"rows"] retain];
+  [collectionAdapter_ applySnapshot:[result objectForKey:@"collection"]];
+  [self selectStoredChat];
 }
 
 - (NSArray *)buildRows;
@@ -449,11 +460,22 @@ static NSMutableDictionary *chatRowFromSummary(NSDictionary *chat) {
   [[statusController_ view] setFrame:NSMakeRect(0, 0, w, kBarHeight)];
 }
 
-- (void)reloadData {
-  NSArray *next=[[self buildRows] retain];
-  [rows_ release]; rows_=next;
-  [self refreshCollection];
-  [self selectStoredChat];
+- (void)reloadData;
+{
+  if (!collectionAdapter_) collectionAdapter_ = [[AICollectionTableAdapter alloc]
+      initWithTableView:tableView_];
+  if (!diffController_) diffController_ = [[AICollectionController alloc]
+      initWithTarget:self selector:@selector(rosterPrepared:) builder:Nil];
+  [diffController_ cancel];
+  NSArray *next = [self buildRows];
+  NSMutableDictionary *section = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+      @"rows", @"id", next, @"rows", nil];
+  NSArray *ids = [(ENILChatTableRows *)next collectionIdentifiers];
+  if (ids) [section setObject:ids forKey:@"identifiers"];
+  AICollectionSnapshot *snapshot = [[[AICollectionSnapshot alloc]
+      initWithSections:[NSArray arrayWithObject:section]] autorelease];
+  [self rosterPrepared:[NSDictionary dictionaryWithObjectsAndKeys:
+      next, @"rows", snapshot, @"collection", nil]];
 }
 
 /* Replace count/identity snapshots after a committed event; payloads stay lazy. */
@@ -603,6 +625,7 @@ static NSMutableDictionary *chatRowFromSummary(NSDictionary *chat) {
 
 - (void)dealloc;
 {
+  [diffController_ invalidate]; [diffController_ release];
   [collectionAdapter_ invalidate]; [collectionAdapter_ release];
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [scrollView_ release];

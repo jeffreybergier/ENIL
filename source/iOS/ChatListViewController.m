@@ -1,3 +1,4 @@
+#import <AltivecCocoa/AICollectionController.h>
 //
 //  ChatListViewController.m
 //  ENIL
@@ -28,6 +29,7 @@ enum {
 
 @interface ChatListViewController () <UIActionSheetDelegate>
 @property (nonatomic, strong) ENILAccount *account;
+@property (nonatomic, strong) AICollectionController *diffController;
 @property (nonatomic, assign) ENILRootCoordinator *coordinator; /* back-pointer (4.3 floor) */
 @property (nonatomic, strong) NSDictionary *profile; /* account row (ENILStructDict) */
 @property (nonatomic, copy)   NSArray *chats;
@@ -217,19 +219,56 @@ enum {
  * (profile -> Account, chats -> Chats, contacts -> Friends). Every [account *]
  * accessor returns ENILStructDict rows; read keys individually and never
  * -dictionaryWithDictionary: one, which crashes on its nil optionals (AGENTS.md). */
-- (void)reloadData
+- (void)rosterPrepared:(NSDictionary *)result;
 {
+  if ([result objectForKey:@"error"]) {
+    NSLog(@"Roster comparison failed: %@", [result objectForKey:@"error"]);
+    return;
+  }
+  if ([[self diffController] prepareResult:result snapshotKey:@"collection"
+      previousSnapshot:[[self collectionTableAdapter] snapshot]]) return;
+  [self setProfile:[result objectForKey:@"profile"]];
+  [self setChats:[result objectForKey:@"chats"]];
+  [self setContacts:[result objectForKey:@"contacts"]];
+  [[self collectionTableAdapter] applySnapshot:[result objectForKey:@"collection"]];
+}
+
+- (void)reloadData;
+{
+  if (![self diffController]) [self setDiffController:[[AICollectionController alloc]
+      initWithTarget:self selector:@selector(rosterPrepared:) builder:Nil]];
+  [[self diffController] cancel];
+  NSDictionary *profile = nil;
+  NSArray *chats = nil, *contacts = nil;
   @try {
-    [self setProfile:[[self account] profile]];
-    [self setChats:[[self account] chatRows]];
-    [self setContacts:[[self account] contactRows]];
+    profile = [[self account] profile];
+    chats = [[self account] chatRows];
+    contacts = [[self account] contactRows];
   } @catch (NSException *exception) {
     ENILLog(@"ChatListViewController.reloadData", @"exception: %@", exception);
-    [self setProfile:nil];
-    [self setChats:[NSArray array]];
-    [self setContacts:[NSArray array]];
+    profile = nil; chats = [NSArray array]; contacts = [NSArray array];
   }
-  [self refreshCollection];
+  NSMutableArray *sections = [NSMutableArray array];
+  NSArray *sources = [NSArray arrayWithObjects:
+      profile ? [NSArray arrayWithObject:profile] : [NSArray array],
+      chats, contacts, nil];
+  NSInteger index;
+  for (index = 0; index < kSectionCount; ++index) {
+    NSArray *rows = [sources objectAtIndex:(NSUInteger)index];
+    NSMutableDictionary *section = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+        [NSNumber numberWithInteger:index], @"id", rows, @"rows",
+        [self tableView:[self tableView] titleForHeaderInSection:index], @"title", nil];
+    NSArray *ids = index == kSectionAccount ? (profile ? @[@"account"] : @[]) :
+        ([rows isKindOfClass:[ENILRosterRows class]] ?
+          [(ENILRosterRows *)rows collectionIdentifiers] : nil);
+    if (ids) [section setObject:ids forKey:@"identifiers"];
+    [sections addObject:section];
+  }
+  AICollectionSnapshot *snapshot = [[AICollectionSnapshot alloc] initWithSections:sections];
+  NSMutableDictionary *result = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+      chats, @"chats", contacts, @"contacts", snapshot, @"collection", nil];
+  if (profile) [result setObject:profile forKey:@"profile"];
+  [self rosterPrepared:result];
 }
 
 #pragma mark - Sync
@@ -323,8 +362,7 @@ enum {
 - (void)updateChatId:(NSString *)chatId
 {
   if(![chatId length]) return;
-  [self setChats:[[self account] chatRows]];
-  [self refreshCollection];
+  [self reloadData];
 }
 
 #pragma mark - Row data
@@ -664,6 +702,7 @@ clickedButtonAtIndex:(NSInteger)buttonIndex
 
 - (void)dealloc
 {
+  [[self diffController] invalidate];
   [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
