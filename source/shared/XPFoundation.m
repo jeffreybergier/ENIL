@@ -1,3 +1,4 @@
+#import <AltivecCocoa/AIKeychainStore.h>
 #import "XPFoundation.h"
 #import <TargetConditionals.h>
 #if TARGET_OS_IPHONE
@@ -271,283 +272,70 @@ static NSError *XP_fileError(NSInteger code, NSString *description) {
 
 @end
 
-/* ============================================================================
- * XPKeychain — internet-password storage with one entry per account name.
- * The URL is stored in the item's server/protocol/port/path attributes so
- * Keychain Access.app shows it as a normal "internet password" entry.
- * ==========================================================================*/
-
-#if TARGET_OS_IPHONE
-
-static NSString *xpkc_iosSchemeForProto(NSString *proto) {
-  return ([proto isEqual:(id)kSecAttrProtocolHTTP]) ? @"http" : @"https";
-}
-
-static NSString *xpkc_iosProtoForScheme(NSString *scheme) {
-  return [scheme isEqualToString:@"http"]
-    ? (NSString *)kSecAttrProtocolHTTP
-    : (NSString *)kSecAttrProtocolHTTPS;
-}
-
+/* App-owned account-only discovery and URL replacement policy. */
 @implementation XPKeychain
 
 + (BOOL)findInternetPasswordForAccount:(NSString *)account
-                                outURL:(NSString **)outURL
-                           outPassword:(NSString **)outPassword;
+                              outURL:(NSString **)outURL
+                         outPassword:(NSString **)outPassword;
 {
-  if (![account length]) return NO;
-  NSDictionary *q = [NSDictionary dictionaryWithObjectsAndKeys:
-    (id)kSecClassInternetPassword, (id)kSecClass,
-    account,                       (id)kSecAttrAccount,
-    (id)kCFBooleanTrue,            (id)kSecReturnAttributes,
-    (id)kCFBooleanTrue,            (id)kSecReturnData,
-    (id)kSecMatchLimitOne,         (id)kSecMatchLimit, nil];
-  CFTypeRef cf = NULL;
-  OSStatus s = SecItemCopyMatching((CFDictionaryRef)q, &cf);
-  if (s != errSecSuccess || !cf) {
-    if (s != errSecItemNotFound)
-      ENILLog(@"XPKeychain.findInternetPasswordForAccount",
-              @"SecItemCopyMatching status=%d account=%@", (int)s, account);
-    return NO;
-  }
-  NSDictionary *r = (NSDictionary *)cf;
-  NSString *server = [r objectForKey:(id)kSecAttrServer];
-  NSString *path   = [r objectForKey:(id)kSecAttrPath];
-  NSNumber *port   = [r objectForKey:(id)kSecAttrPort];
-  NSString *proto  = [r objectForKey:(id)kSecAttrProtocol];
-  NSData   *pwData = [r objectForKey:(id)kSecValueData];
-  if (outURL) {
-    NSMutableString *u = [NSMutableString stringWithFormat:@"%@://%@",
-                          xpkc_iosSchemeForProto(proto), server ? server : @""];
-    if ([port intValue] > 0) [u appendFormat:@":%d", [port intValue]];
-    if ([path length])       [u appendString:path];
-    *outURL = u;
-  }
-  if (outPassword) {
-    *outPassword = [[[NSString alloc] initWithData:pwData
-                                          encoding:NSUTF8StringEncoding] autorelease];
-  }
-  CFRelease(cf);
+  AIKeychainStore *store = [AIKeychainStore internetPasswordStoreForKey:account
+                                                              error:NULL];
+  NSString *password;
+  if (outURL) *outURL = nil;
+  if (outPassword) *outPassword = nil;
+  if (!store) return NO;
+  password = [store stringForKey:account error:NULL];
+  if (!password) return NO;
+  if (outURL) *outURL = [store serverURLString];
+  if (outPassword) *outPassword = password;
   return YES;
 }
 
 + (BOOL)deleteInternetPasswordForAccount:(NSString *)account;
 {
-  if (![account length]) return NO;
-  NSDictionary *q = [NSDictionary dictionaryWithObjectsAndKeys:
-    (id)kSecClassInternetPassword, (id)kSecClass,
-    account,                       (id)kSecAttrAccount, nil];
-  OSStatus s = SecItemDelete((CFDictionaryRef)q);
-  return (s == errSecSuccess || s == errSecItemNotFound);
-}
-
-+ (BOOL)setInternetPasswordForAccount:(NSString *)account
-                                  URL:(NSString *)url
-                             password:(NSString *)password;
-{
-  if (![account length] || ![url length] || !password) return NO;
-  NSURL *parsed = [NSURL URLWithString:url];
-  if (!parsed || ![[parsed host] length]) {
-    ENILLog(@"XPKeychain.setInternetPasswordForAccount",
-            @"invalid URL: %@", url);
-    return NO;
-  }
-  [self deleteInternetPasswordForAccount:account];
-  NSMutableDictionary *q = [NSMutableDictionary dictionary];
-  [q setObject:(id)kSecClassInternetPassword forKey:(id)kSecClass];
-  [q setObject:account                       forKey:(id)kSecAttrAccount];
-  [q setObject:xpkc_iosProtoForScheme([parsed scheme]) forKey:(id)kSecAttrProtocol];
-  [q setObject:[parsed host]                 forKey:(id)kSecAttrServer];
-  if ([[parsed path] length]) [q setObject:[parsed path] forKey:(id)kSecAttrPath];
-  if ([parsed port])          [q setObject:[parsed port] forKey:(id)kSecAttrPort];
-  [q setObject:[password dataUsingEncoding:NSUTF8StringEncoding]
-        forKey:(id)kSecValueData];
-  OSStatus s = SecItemAdd((CFDictionaryRef)q, NULL);
-  if (s != errSecSuccess) {
-    ENILLog(@"XPKeychain.setInternetPasswordForAccount",
-            @"SecItemAdd status=%d account=%@", (int)s, account);
-    return NO;
-  }
-  return YES;
-}
-
-@end
-
-#else /* !TARGET_OS_IPHONE — Mac path, Tiger+ via SecKeychain* */
-
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+  unsigned int attempt;
+  for (attempt = 0; attempt < 128; attempt++) {
+    NSError *error = nil;
+    AIKeychainStore *store = [AIKeychainStore internetPasswordStoreForKey:account
+                                                                error:&error];
+    if (!store) return [error code] == errSecItemNotFound;
+    if (![store removeItemForKey:account error:&error] &&
+        [error code] != errSecItemNotFound) return NO;
+#if !TARGET_OS_IPHONE
+    /* Preserve the old Mac first-match policy; iOS removed all account matches. */
+    return YES;
 #endif
-
-static SecProtocolType xpkc_macProtoForScheme(NSString *scheme) {
-  if ([scheme isEqualToString:@"http"]) return kSecProtocolTypeHTTP;
-  return kSecProtocolTypeHTTPS;
-}
-
-static NSString *xpkc_macSchemeForProto(SecProtocolType p) {
-  return (p == kSecProtocolTypeHTTP) ? @"http" : @"https";
-}
-
-static NSString *xpkc_macAttrString(SecKeychainAttribute *a) {
-  if (!a || !a->data || a->length == 0) return @"";
-  return [[[NSString alloc] initWithBytes:a->data
-                                   length:a->length
-                                 encoding:NSUTF8StringEncoding] autorelease];
-}
-
-static NSString *xpkc_macReadURLForItem(SecKeychainItemRef item) {
-  UInt32 tags[4] = { kSecServerItemAttr, kSecPathItemAttr,
-                     kSecPortItemAttr,   kSecProtocolItemAttr };
-  UInt32 fmts[4] = { CSSM_DB_ATTRIBUTE_FORMAT_STRING,
-                     CSSM_DB_ATTRIBUTE_FORMAT_STRING,
-                     CSSM_DB_ATTRIBUTE_FORMAT_UINT32,
-                     CSSM_DB_ATTRIBUTE_FORMAT_UINT32 };
-  SecKeychainAttributeInfo info;
-  SecKeychainAttributeList *attrs = NULL;
-  NSString *server = @"", *path = @"";
-  UInt16 port = 0;
-  SecProtocolType proto = kSecProtocolTypeHTTPS;
-  UInt32 i;
-
-  info.count = 4; info.tag = tags; info.format = fmts;
-  if (SecKeychainItemCopyAttributesAndData(item, &info, NULL, &attrs,
-                                            NULL, NULL) != errSecSuccess) {
-    return nil;
   }
-  for (i = 0; i < attrs->count; i++) {
-    SecKeychainAttribute *a = &attrs->attr[i];
-    if (a->tag == kSecServerItemAttr)   server = xpkc_macAttrString(a);
-    else if (a->tag == kSecPathItemAttr) path  = xpkc_macAttrString(a);
-    else if (a->tag == kSecPortItemAttr && a->length >= sizeof(UInt32))
-      port = (UInt16)(*(UInt32 *)a->data);
-    else if (a->tag == kSecProtocolItemAttr && a->length >= sizeof(SecProtocolType))
-      proto = *(SecProtocolType *)a->data;
-  }
-  SecKeychainItemFreeAttributesAndData(attrs, NULL);
-
-  NSMutableString *u = [NSMutableString stringWithFormat:@"%@://%@",
-                        xpkc_macSchemeForProto(proto), server];
-  if (port > 0)      [u appendFormat:@":%d", (int)port];
-  if ([path length]) [u appendString:path];
-  return u;
-}
-
-@implementation XPKeychain
-
-+ (BOOL)findInternetPasswordForAccount:(NSString *)account
-                                outURL:(NSString **)outURL
-                           outPassword:(NSString **)outPassword;
-{
-  const char *acct;
-  UInt32 acctLen, pwLen = 0;
-  void *pwData = NULL;
-  SecKeychainItemRef item = NULL;
-  OSStatus s;
-
-  if (![account length]) return NO;
-  acct    = [account UTF8String];
-  acctLen = (UInt32)strlen(acct);
-  s = SecKeychainFindInternetPassword(NULL, 0, NULL, 0, NULL,
-                                       acctLen, acct, 0, NULL, 0, 0, 0,
-                                       &pwLen, &pwData, &item);
-  if (s != errSecSuccess) {
-    if (s != errSecItemNotFound)
-      ENILLog(@"XPKeychain.findInternetPasswordForAccount",
-              @"status=%d account=%@", (int)s, account);
-    return NO;
-  }
-  if (outPassword) {
-    *outPassword = [[[NSString alloc] initWithBytes:pwData
-                                             length:pwLen
-                                           encoding:NSUTF8StringEncoding] autorelease];
-  }
-  SecKeychainItemFreeContent(NULL, pwData);
-  if (outURL && item) *outURL = xpkc_macReadURLForItem(item);
-  if (item) CFRelease(item);
-  return YES;
-}
-
-+ (BOOL)deleteInternetPasswordForAccount:(NSString *)account;
-{
-  const char *acct;
-  UInt32 acctLen;
-  SecKeychainItemRef item = NULL;
-  OSStatus s;
-
-  if (![account length]) return NO;
-  acct    = [account UTF8String];
-  acctLen = (UInt32)strlen(acct);
-  s = SecKeychainFindInternetPassword(NULL, 0, NULL, 0, NULL,
-                                       acctLen, acct, 0, NULL, 0, 0, 0,
-                                       NULL, NULL, &item);
-  if (s == errSecItemNotFound) return YES;
-  if (s != errSecSuccess || !item) {
-    ENILLog(@"XPKeychain.deleteInternetPasswordForAccount",
-            @"find status=%d account=%@", (int)s, account);
-    return NO;
-  }
-  s = SecKeychainItemDelete(item);
-  CFRelease(item);
-  if (s != errSecSuccess) {
-    ENILLog(@"XPKeychain.deleteInternetPasswordForAccount",
-            @"delete status=%d account=%@", (int)s, account);
-    return NO;
-  }
-  return YES;
+  return NO; /* Bound concurrent delete/recreate races. */
 }
 
 + (BOOL)setInternetPasswordForAccount:(NSString *)account
-                                  URL:(NSString *)url
-                             password:(NSString *)password;
+                                URL:(NSString *)url
+                           password:(NSString *)password;
 {
   NSURL *parsed;
-  const char *acct, *server, *path, *pw;
-  UInt32 acctLen, serverLen, pathLen, pwLen;
-  UInt16 port;
-  SecProtocolType proto;
-  OSStatus s;
-
+  AIKeychainAuthentication authentication;
+  AIKeychainStore *store;
   if (![account length] || ![url length] || !password) return NO;
   parsed = [NSURL URLWithString:url];
-  if (!parsed || ![[parsed host] length]) {
-    ENILLog(@"XPKeychain.setInternetPasswordForAccount",
-            @"invalid URL: %@", url);
-    return NO;
-  }
-  [self deleteInternetPasswordForAccount:account];
-
-  acct      = [account UTF8String];
-  server    = [[parsed host] UTF8String];
-  path      = [[parsed path] length] ? [[parsed path] UTF8String] : "";
-  pw        = [password UTF8String];
-  acctLen   = (UInt32)strlen(acct);
-  serverLen = (UInt32)strlen(server);
-  pathLen   = (UInt32)strlen(path);
-  pwLen     = (UInt32)strlen(pw);
-  port      = [[parsed port] unsignedShortValue];
-  proto     = xpkc_macProtoForScheme([parsed scheme]);
-
-  s = SecKeychainAddInternetPassword(NULL,
-        serverLen, server,
-        0, NULL,
-        acctLen, acct,
-        pathLen, path,
-        port, proto, 0,
-        pwLen, pw, NULL);
-  if (s != errSecSuccess) {
-    ENILLog(@"XPKeychain.setInternetPasswordForAccount",
-            @"SecKeychainAddInternetPassword status=%d account=%@",
-            (int)s, account);
-    return NO;
-  }
-  return YES;
+  if (![[parsed host] length]) return NO;
+#if TARGET_OS_IPHONE
+  authentication = AIKeychainAuthenticationDefault;
+#else
+  authentication = AIKeychainAuthenticationUnspecified;
+#endif
+  store = [[[AIKeychainStore alloc] initWithServer:parsed
+      protocolType:[[parsed scheme] isEqualToString:@"http"] ?
+          AIKeychainProtocolHTTP : AIKeychainProtocolHTTPS
+      authenticationType:authentication securityDomain:nil] autorelease];
+  if (!store) return NO;
+  /* URL replacement is the existing app policy, not a library migration.
+   * Keep exact-scope updates in place whenever the account already lives here. */
+  if ([store containsKey:account error:NULL])
+    return [store setString:password forKey:account error:NULL];
+  if (![self deleteInternetPasswordForAccount:account]) return NO;
+  return [store setString:password forKey:account error:NULL];
 }
 
 @end
-
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-
-#endif /* TARGET_OS_IPHONE */
