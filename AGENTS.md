@@ -130,9 +130,10 @@ MRC throughout.)
 - No `__bridge` casts are needed: the C↔Objective-C layering rule (below)
   already keeps `enil_*` / `cJSON` / `sqlite` / `qrcodegen` pointers out of UI
   files, so iOS UI code never holds a raw C pointer.
-- Deployment floor is iOS 4.3, where zeroing `__weak` is unavailable. Use
-  `assign` / `__unsafe_unretained` for delegate back-pointers; reserve `weak`
-  for if/when the floor rises to iOS 5+.
+- Deployment floors are iOS 5.0 on armv7 and iOS 7.0 on arm64. Keep
+  existing `assign` / `__unsafe_unretained` delegate back-pointers consistent
+  with their explicit teardown contracts; this floor correction does not
+  change ownership or establish native device coverage.
 
 ### Objective-C coding preferences
 

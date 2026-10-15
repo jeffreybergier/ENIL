@@ -69,4 +69,4 @@ tasks in this file; partial implementations are called out below.
 - [ ] **Show actual sticon images in the iOS compose field.** The current
       `UITextView` uses marker characters and `sticonRuns` to send inline
       sticons but does not display their images while editing. An editable
-      `UIWebView` is a candidate; check its behavior on the iOS 4.3 floor.
+      `UIWebView` is a candidate; check its behavior on the iOS 5.0 armv7 floor.
