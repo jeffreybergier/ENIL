@@ -16,7 +16,7 @@ SHARED_DIR = ../shared
 SOURCE_DIRS = $(QRCODEGEN_DIR) $(SHARED_DIR)
 EXTRA_FLAGS = -I$(ALTIVECCORE_DIR)/include -I$(ALTIVECCOCOA_DIR)/include \
               -I$(QRCODEGEN_DIR) -I$(SHARED_DIR)
-GROUP_shared_SOURCES = qrcodegen.c enil_http.c enil_png.c enil_asset_cache.c enil_worker.c enil_health.c \
+GROUP_shared_SOURCES = qrcodegen.c enil_http.c enil_jpeg.c enil_png.c enil_asset_cache.c enil_worker.c enil_health.c \
                 enil_session.c enil_identity.c enil_b64.c enil_line.c enil_chrome_gateway.c enil_qrlogin.c enil_native_login.c enil_login_store.c enil_native.c enil_native_poll.c enil_thrift.c \
                 enil_api_json.c enil_api_call.c enil_talkserv.c enil_db.c \
                 enil_sync.c enil_obs.c enil_crypto.c enil_cocoa.m \

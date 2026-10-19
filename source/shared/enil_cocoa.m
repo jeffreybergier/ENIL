@@ -33,6 +33,8 @@
 
 #import  "XPFoundation.h"   /* ENILLog macro (used by the progress logger below) */
 #include "enil_cocoa_image.h"
+#include "enil_jpeg.h"
+#include "enil_png.h"
 #include "enil_cocoa_date.h"
 #include "enil_cocoa_collate.h"
 #include "enil_cocoa_log.h"
@@ -114,6 +116,26 @@ static int write_jpeg(CGImageRef img, CFURLRef dst_url) {
   return rc;
 }
 
+/* Consult only after decoding: legacy per-image status is not eager. */
+static int image_source_complete(CGImageSourceRef src, const char *path) {
+  if (CGImageSourceGetStatus(src) != kCGImageStatusComplete) return 0;
+  if (CGImageSourceGetStatusAtIndex(src, 0) != kCGImageStatusComplete) {
+    CFStringRef type = CGImageSourceGetType(src);
+    /* Legacy ImageIO can remain Incomplete after decoding a complete file.
+     * It also tolerates truncated payloads: require independent container
+     * completeness before accepting that specific status. Other errors and
+     * formats retain the strict ImageIO check. */
+    if (CGImageSourceGetStatusAtIndex(src, 0) != kCGImageStatusIncomplete ||
+        !type) return 0;
+    if (CFEqual(type, CFSTR("public.jpeg"))) {
+      if (!enil_jpeg_complete(path)) return 0;
+    } else if (CFEqual(type, CFSTR("public.png"))) {
+      if (!enil_png_info(path, NULL, NULL)) return 0;
+    } else return 0;
+  }
+  return 1;
+}
+
 /* ============================================================================
  * Transcode src_path to JPEG at dst_path. Behavior of max_px:
  *   max_px > 0 → thumbnail bounded by max_px on longest edge
@@ -134,8 +156,8 @@ int enil_image_validate(const char *path, int *width, int *height) {
   src = CGImageSourceCreateWithURL(url, NULL);
   CFRelease(url);
   if (!src) return -1;
-  if (CGImageSourceGetStatus(src) != kCGImageStatusComplete ||
-      CGImageSourceGetStatusAtIndex(src, 0) != kCGImageStatusComplete) goto done;
+  /* Per-image status is lazy on Tiger/Leopard. Decode before consulting it. */
+  if (CGImageSourceGetStatus(src) != kCGImageStatusComplete) goto done;
   props = CGImageSourceCopyPropertiesAtIndex(src, 0, NULL);
   if (!props) goto done;
   w = cf_int(props, kCGImagePropertyPixelWidth);
@@ -143,7 +165,8 @@ int enil_image_validate(const char *path, int *width, int *height) {
   if (w <= 0 || h <= 0) goto done;
   image = build_source_image(src, THUMB_MAX_PX);
   if (!image || !CGImageGetWidth(image) || !CGImageGetHeight(image) ||
-      CGImageSourceGetStatusAtIndex(src, 0) != kCGImageStatusComplete) goto done;
+      CGImageSourceGetStatus(src) != kCGImageStatusComplete) goto done;
+  if (!image_source_complete(src, path)) goto done;
   if (width) *width = w;
   if (height) *height = h;
   result = 0;
@@ -179,8 +202,7 @@ int enil_image_jpeg_create(const char *src_path, const char *dst_path,
   if (!src_url || !dst_url) goto done;
 
   isrc = CGImageSourceCreateWithURL(src_url, NULL);
-  if (!isrc || CGImageSourceGetStatus(isrc) != kCGImageStatusComplete ||
-      CGImageSourceGetStatusAtIndex(isrc, 0) != kCGImageStatusComplete) goto done;
+  if (!isrc || CGImageSourceGetStatus(isrc) != kCGImageStatusComplete) goto done;
 
   props = CGImageSourceCopyPropertiesAtIndex(isrc, 0, NULL);
   if (props) {
@@ -190,7 +212,7 @@ int enil_image_jpeg_create(const char *src_path, const char *dst_path,
 
   if (info->orig_width <= 0 || info->orig_height <= 0) goto done;
   img = build_source_image(isrc, max_px);
-  if (!img) goto done;
+  if (!img || !image_source_complete(isrc, src_path)) goto done;
 
   info->thumb_width  = (int)CGImageGetWidth(img);
   info->thumb_height = (int)CGImageGetHeight(img);
