@@ -3,6 +3,10 @@
 Checked against the current source on 2026-09-26. These are the remaining
 tasks in this file; partial implementations are called out below.
 
+- [ ] **Finish native testing of the image sync fix.** See
+      [the image validation handoff](AGENTS.HANDOFF.md) for commit `063793b`,
+      saved private fixtures, completed checks, and production-device limits.
+
 - [ ] **Handle SSE `talkException` code 89 as LSOFF, if observed.** The SSE
       path already records exceptions, stops the stream, marks code 117 for
       reauthentication, refreshes/reconnects on 119 or 10051, treats code 8
