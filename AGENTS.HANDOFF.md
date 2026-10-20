@@ -1,13 +1,33 @@
 # Image sync fix handoff
 
-Updated 2026-10-20. The image validation fix is implemented and committed as
-`063793b` (`fix: validate cached images on legacy ImageIO`). That build is
-installed on `imac-rsa`; the user ran sync and confirmed 30 unavailable images.
-The additional encrypted-size fix (`e2aec94`) recovers 15 more images in offline
-native testing and is now installed on `imac-rsa`, left closed. The phone has
-not been updated. Remaining work is the user's live-sync confirmation,
-investigating 15 missing originals, and any published release. Nothing is pushed.
+Updated 2026-10-20. Both image fixes (`063793b` and `e2aec94`) are now
+installed on imac-rsa and gomadango. The user confirmed the Mac's missing count
+dropped to 15 after live sync and deferred investigation of those missing files.
+The phone's fresh release IPA is installed; no app launch or live sync was run
+by the agent. Phone recovery count and camera-roll behavior await user testing.
+Nothing is pushed.
 Read `AGENTS.md` before continuing.
+
+## October 20 iOS release installation
+
+The user explicitly authorized installing the fresh release IPA on gomadango,
+superseding the earlier phone-install restriction below. `make iOS-release
+ iOS-validate-package` passed. The normal 1.1.1 IPA includes both image fixes.
+`appinst` reported successful installation; installed executable SHA256 matches
+the local release executable. ENIL was not launched and no live sync ran.
+
+Stage: `~/tmp_altivec/enil-image-fix-20261020` on gomadango, containing the IPA,
+installer log, account checksums, and `previous-container.tar` (full prior app
+container backup). iOS relocated the container from
+`BCBDC1A2-E6FF-49EF-BC52-9F6A2C61F26F` to
+`FECC5C94-9D7F-4E78-974C-87A8971705FD` under `/var/mobile/Applications`.
+Database, WAL, SHM, and session.json checksums all match after relocation.
+
+- IPA SHA256: `108db809c8a7a103c09b5a617598f4ad8856fc5fef3d6b460cc53356d0240d45`
+- Executable SHA256: `6e8a23ebd005ca7d476671bf0a6e0a6e99cee9da079b68fabba82f858a2bc8d3`
+
+Camera-roll sends use shared image processing, so the validation fix may also
+resolve that reported failure; this has not yet been verified on the phone.
 
 ## Production boundaries
 
@@ -319,7 +339,7 @@ Native fixtures, harness, and logs remain under
    `thumbnail.jpg` is a disposable output overwritten by the harness.
    Local synthetic fixtures are in `build/tests/image-regression/`.
 
-2. The encrypted-size fix is installed on the Mac. Await the user's next-sync
+2. The user confirmed 15 missing on the Mac. Historical next-sync
    result; offline native testing recovered the 15 size-mismatched originals.
    Do not install a test harness.
 
