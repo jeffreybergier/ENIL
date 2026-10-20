@@ -19,6 +19,7 @@
 #include "enil_worker.h"
 #include "enil_db.h"
 #include "enil_obs.h"
+#include "enil_crypto.h"
 #include "enil_cocoa_image.h"
 #include "enil_http.h"
 #include "enil_png.h"
@@ -1318,6 +1319,21 @@ static int sync_one_message_sticker(sqlite3 *db, const char *session_path,
   return download_sticker_list(db, session_path, pending, "live", "sticker", NULL, 0, 0);
 }
 
+/* MEDIA_CONTENT_INFO.fileSize may describe plaintext or wire bytes. For an
+ * encrypted OBS object, wire bytes include the HMAC removed by decryption.
+ * Keep the historical DB/JSON "plain_size" value unchanged and interpret it
+ * here for both cached originals and new downloads. Call only after complete
+ * image validation; a size match never establishes image integrity. */
+static int media_size_matches(const char *path, size_t expected,
+                              const char *enc_km) {
+  struct stat st;
+  if (!expected) return 1;
+  if (stat(path, &st) != 0 || st.st_size < 0) return 0;
+  if ((unsigned long long)st.st_size == expected) return 1;
+  return enc_km && enc_km[0] && expected > ENIL_CRYPTO_FILE_TAG_LEN &&
+      (unsigned long long)st.st_size == expected - ENIL_CRYPTO_FILE_TAG_LEN;
+}
+
 /* Return -1 for persistence failures, 1 for an unavailable attachment, and 0
  * for a complete image/thumbnail pair. Both live and full sync use this path. */
 static int download_media_entry(sqlite3 *db, const char *session_path,
@@ -1328,9 +1344,8 @@ static int download_media_entry(sqlite3 *db, const char *session_path,
   char media_dir[1280], chat_dir[1536], dest[1600], rel_path[512];
   char thumb_dest[1600], thumb_rel[512];
   ENILThumbInfo info;
-  struct stat st;
   double size_value = cJSON_GetNumberValue(cJSON_GetObjectItem(entry, "plain_size"));
-  size_t plain_size = size_value > 0 ? (size_t)size_value : 0;
+  size_t expected_size = size_value > 0 ? (size_t)size_value : 0;
   int original_ok, thumb_ok;
   if (!message_id || !chat_id || !account_dir[0]) return 1;
   snprintf(media_dir, sizeof(media_dir), "%s/media", account_dir);
@@ -1342,23 +1357,23 @@ static int download_media_entry(sqlite3 *db, const char *session_path,
   mkdir(media_dir, 0755);
   mkdir(chat_dir, 0755);
   memset(&info, 0, sizeof(info));
+  enc_km = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "enc_km"));
   original_ok = enil_image_validate(dest, &info.orig_width, &info.orig_height) == 0 &&
-    (!plain_size || (stat(dest, &st) == 0 && (size_t)st.st_size == plain_size));
+    media_size_matches(dest, expected_size, enc_km);
   thumb_ok = original_ok && enil_image_validate(thumb_dest, &info.thumb_width, &info.thumb_height) == 0;
   if (!original_ok || !thumb_ok) {
     /* Clear stale metadata before attempting repair; a failed transfer or
      * thumbnail must never leave a completed row behind. */
     if (enil_db_set_media_info(db, message_id, NULL, 0, 0, NULL, 0, 0) != SQLITE_OK) return -1;
     if (!original_ok) {
-      enc_km = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "enc_km"));
       sid = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "sid"));
       oid = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "oid"));
       obs_pop = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "obs_pop"));
       e2ee_version = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "e2ee_version"));
       if (enil_obs_download_message(session_path, message_id, sid, oid, obs_pop,
-            e2ee_version, enc_km, plain_size, dest) != 0 ||
+            e2ee_version, enc_km, expected_size, dest) != 0 ||
           enil_image_validate(dest, &info.orig_width, &info.orig_height) != 0 ||
-          (plain_size && (stat(dest, &st) != 0 || (size_t)st.st_size != plain_size))) return 1;
+          !media_size_matches(dest, expected_size, enc_km)) return 1;
     }
     /* Reuse a valid original after thumbnail failure, including across launch. */
     if (enil_thumb_generate(dest, thumb_dest, &info) != 0) return 1;

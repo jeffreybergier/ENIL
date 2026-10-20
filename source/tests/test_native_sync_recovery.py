@@ -104,6 +104,9 @@ class NativeSyncRecoveryTests(unittest.TestCase):
     def test_photos_repair_corrupt_originals_and_retry_thumbnails_offline(self):
         self.run_recovery("media")
 
+    def test_encrypted_photo_sizes_accept_plaintext_or_tagged_wire_length(self):
+        self.run_recovery("media-size")
+
     def test_phase_write_failures_do_not_report_success_or_advance_cursor(self):
         for mode in range(5):
             with self.subTest(failure=["begin", "commit", "decrypt", "receipts", "discovery"][mode]):

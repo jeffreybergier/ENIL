@@ -6,6 +6,7 @@ Run the executable with a disposable account directory containing
 session.json. Add --ui to display a representative chat after recovery.
 --regenerate removes one thumbnail in the disposable fixture and verifies
 that recovery recreates it. Never use the normal application account directory.
+--expect-complete=N asserts an independently known recoverable-image count.
 Every application curl transfer is replaced at compile time by a refusal.
 On Leopard, additionally run under sandbox-exec with network* denied and
 production account reads/writes denied. Preserve logs privately: framework

@@ -680,6 +680,9 @@ static void parse_media_meta(cJSON *meta, const char **sid, const char **oid,
   info_text = cJSON_GetStringValue(cJSON_GetObjectItem(meta, "MEDIA_CONTENT_INFO"));
   info = info_text ? cJSON_Parse(info_text) : NULL;
   file_size = info ? cJSON_GetObjectItem(info, "fileSize") : NULL;
+  /* Historical column name: encrypted senders may supply wire length,
+   * including the authentication tag. Preserve metadata verbatim; media
+   * validation accounts for the tag when checking decrypted cached files. */
   if (plain_size && file_size && cJSON_IsNumber(file_size) && file_size->valuedouble > 0)
     *plain_size = (sqlite3_int64)file_size->valuedouble;
   cJSON_Delete(info);

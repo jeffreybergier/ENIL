@@ -776,6 +776,73 @@ static void media_recovery(void) {
 
 }
 
+/* Metadata can describe plaintext or authenticated ciphertext. Exercise both
+ * cached originals and fresh downloads through the production sync pipeline.
+ * The decoder fixture is five bytes; expected outcomes are explicit. */
+static void media_size_recovery(void) {
+  static const struct {
+    int size;
+    const char *key;
+    int accepted;
+  } cases[] = {
+    {5, "", 1}, {5, "encrypted", 1}, {37, "encrypted", 1},
+    {37, "", 0}, {36, "encrypted", 0}, {38, "encrypted", 0},
+    {31, "encrypted", 0}, {32, "encrypted", 0}, {1, "encrypted", 0},
+    {0, "encrypted", 1}, {0, "", 1}
+  };
+  char dir[1024], original[1200], thumb[1200];
+  int i, fresh;
+  media_test = 1;
+  snprintf(dir, sizeof(dir), "%s", session_path); *strrchr(dir, '/') = 0;
+  snprintf(original, sizeof(original), "%s/media", dir);
+  assert(mkdir(original, 0700) == 0);
+  snprintf(original, sizeof(original), "%s/media/chat", dir);
+  assert(mkdir(original, 0700) == 0);
+  snprintf(original, sizeof(original), "%s/media/chat/photo.jpg", dir);
+  snprintf(thumb, sizeof(thumb), "%s/media/chat/photo_t.jpg", dir);
+  assert(sqlite3_exec(db, "INSERT INTO messages_v2"
+      "(id,chat_id,contentType,media_e2ee_version) VALUES('photo','chat',1,'2')",
+      NULL, NULL, NULL) == SQLITE_OK);
+  for (fresh = 0; fresh < 2; fresh++) {
+    for (i = 0; i < (int)(sizeof(cases) / sizeof(cases[0])); i++) {
+      sqlite3_stmt *stmt = NULL;
+      int downloads = media_downloads;
+      assert(sqlite3_prepare_v2(db, "UPDATE messages_v2 SET "
+          "media_plain_size=?,enc_km=? WHERE id='photo'", -1, &stmt, NULL)
+          == SQLITE_OK);
+      sqlite3_bind_int(stmt, 1, cases[i].size);
+      sqlite3_bind_text(stmt, 2, cases[i].key, -1, SQLITE_STATIC);
+      assert(sqlite3_step(stmt) == SQLITE_DONE);
+      sqlite3_finalize(stmt);
+      if (fresh) unlink(original);
+      else image_fixture(original, "image");
+      /* Valid originals must also regenerate a missing thumbnail. */
+      unlink(thumb);
+      assert(enil_sync_attachments(db, "synthetic", "self", session_path)
+          == (cases[i].accepted ? 1 : 2));
+      assert(unavailable == !cases[i].accepted);
+      assert(media_downloads - downloads == (fresh || !cases[i].accepted));
+      assert(sqlite3_prepare_v2(db, "SELECT media_path,thumb_path,"
+          "orig_width,thumb_width FROM messages_v2 WHERE id='photo'",
+          -1, &stmt, NULL) == SQLITE_OK);
+      assert(sqlite3_step(stmt) == SQLITE_ROW);
+      if (cases[i].accepted) {
+        assert(sqlite3_column_type(stmt, 0) == SQLITE_TEXT);
+        assert(sqlite3_column_type(stmt, 1) == SQLITE_TEXT);
+        assert(sqlite3_column_int(stmt, 2) == 20);
+        assert(sqlite3_column_int(stmt, 3) == 20);
+      } else {
+        assert(sqlite3_column_type(stmt, 0) == SQLITE_NULL);
+        assert(sqlite3_column_type(stmt, 1) == SQLITE_NULL);
+        assert(sqlite3_column_int(stmt, 2) == 0);
+        assert(sqlite3_column_int(stmt, 3) == 0);
+      }
+      sqlite3_finalize(stmt);
+      assert(enil_db_get_local_rev(db) == 10);
+    }
+  }
+}
+
 static int reject_commit(void *unused) { (void)unused; return 1; }
 static void asset_write_failures(void) {
   sqlite3_stmt *row;
@@ -844,6 +911,7 @@ int main(int argc, char **argv) {
     if (!strncmp(argv[3], "phase-write-", 12)) phase_write_failure(atoi(argv[3]+12));
     else if (!strcmp(argv[3], "retry-worker")) retry_failed_worker();
     else if (!strcmp(argv[3], "media")) media_recovery();
+    else if (!strcmp(argv[3], "media-size")) media_size_recovery();
     else if (!strcmp(argv[3], "asset-write")) asset_write_failures();
     else if (!strcmp(argv[3], "cache")) recover_missing_sticker();
     else if (!strcmp(argv[3], "chat-page")) chat_page_and_status_queries();

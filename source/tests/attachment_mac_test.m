@@ -13,6 +13,7 @@
 #include "enil_session.h"
 #include "enil_sync.h"
 #include "enil_cocoa_image.h"
+#include "enil_crypto.h"
 #include <curl/curl.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -191,11 +192,17 @@ static void testUI(NSString *directory, NSString *chat) {
 
 int main(int argc, char **argv) {
   NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-  int ui = 0, regenerate = 0, removed = 0, arg;
-  CHECK(argc >= 2 && argc <= 4);
+  int ui = 0, regenerate = 0, removed = 0, arg, expectedComplete = -1;
+  CHECK(argc >= 2 && argc <= 5);
   for (arg = 2; arg < argc; arg++) {
     if (!strcmp(argv[arg], "--ui")) ui = 1;
     else if (!strcmp(argv[arg], "--regenerate")) regenerate = 1;
+    else if (!strncmp(argv[arg], "--expect-complete=", 18)) {
+      char *end = NULL;
+      long value = strtol(argv[arg] + 18, &end, 10);
+      CHECK(*end == 0 && value >= 0 && value <= 1000000);
+      expectedComplete = (int)value;
+    }
     else CHECK(0);
   }
   NSString *directory = [[NSString stringWithUTF8String:argv[1]]
@@ -233,9 +240,11 @@ int main(int argc, char **argv) {
         [NSString stringWithFormat:@"media/%s/%s.jpg", chat, mid]];
     struct stat st;
     double size = cJSON_GetNumberValue(cJSON_GetObjectItem(row, "plain_size"));
+    const char *key = cJSON_GetStringValue(cJSON_GetObjectItem(row, "enc_km"));
     int valid = enil_image_validate([path fileSystemRepresentation], NULL, NULL)
         == 0 && (size <= 0 || (stat([path fileSystemRepresentation], &st) == 0
-        && (double)st.st_size == size));
+        && ((double)st.st_size == size ||
+        (key && key[0] && (double)st.st_size + ENIL_CRYPTO_FILE_TAG_LEN == size))));
     cJSON_AddBoolToObject(row, "expected", valid);
     if (valid) available++; else unavailable++;
     if (valid && regenerate && !removed) {
@@ -246,6 +255,7 @@ int main(int argc, char **argv) {
     }
   }
   CHECK(!regenerate || removed);
+  CHECK(expectedComplete < 0 || available == expectedComplete);
   int result = enil_sync_attachments(db, "offline-fixture", "offline-self",
       [session fileSystemRepresentation]);
   CHECK(result > 0);

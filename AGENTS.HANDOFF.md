@@ -1,11 +1,12 @@
 # Image sync fix handoff
 
 Updated 2026-10-20. The image validation fix is implemented and committed as
-`063793b` (`fix: validate cached images on legacy ImageIO`). Leopard offline
-recovery and a representative message-pane check now pass. Remaining work
-includes the 32-byte size discrepancies below, missing originals, and deciding
-with the user when to run a live sync or release. The fixed Mac build is now
-installed on `imac-rsa` but has not been opened. Nothing has been pushed.
+`063793b` (`fix: validate cached images on legacy ImageIO`). That build is
+installed on `imac-rsa`; the user ran sync and confirmed 30 unavailable images.
+The additional encrypted-size fix described below now recovers 15 more images
+in offline native testing. **The encrypted-size fix has not been installed on
+either production device.** Remaining work is deployment when authorized,
+investigating 15 missing originals, and any published release. Nothing is pushed.
 Read `AGENTS.md` before continuing.
 
 ## Production boundaries
@@ -20,13 +21,67 @@ Read `AGENTS.md` before continuing.
   recovery and UI testing on `imac-rsa`, with ENIL quit. This supersedes the
   earlier prohibition on testing that Mac. Use disposable Desktop copies,
   never the production account directory. The user subsequently authorized
-  installing the fixed Mac build but explicitly said not to open it. No live
-  sync is authorized. See the installation record below.
+  installing the first fixed Mac build but explicitly said not to open it.
+  The user later opened/synced it themselves, then quit both apps for a
+  requested read-only phone-cache recovery attempt. Do not launch either app
+  or run a production sync as part of tests. See the records below.
 - The two devices use different LINE client identities (Chrome versus desktop)
   for the **same account**. Different account-directory or chat IDs do not mean
   different users. Match images by message ID, then use the destination
   database's `chat_id` to construct its media paths.
 - Follow the root Git instructions: local commits as Strappy, no push.
+
+## Encrypted-size fix and final recovery result
+
+The fresh phone audit found originals/thumbnails for only 15 of the 30 pending
+IDs. Those originals are byte-identical to files already in the Mac's correct
+chat directories. The other 15 IDs have no matching originals or thumbnails
+in the phone media cache. Both fresh SQLite snapshots and transferred media
+were checksum-verified; no production files or database values were changed.
+Evidence is private under
+`build/tests/image-regression/private/phone-recovery-20261020/`.
+
+Root cause: `build_e2ee_image_metadata` writes encrypted byte length (including
+the 32-byte HMAC) into `MEDIA_CONTENT_INFO.fileSize`; the historical
+`media_plain_size` field stores that unchanged. Other saved encrypted messages
+already use plaintext byte length, so subtracting 32 unconditionally is wrong.
+
+`enil_sync.c` now accepts either exact plaintext length or exactly 32 fewer
+bytes for messages with nonempty `ENC_KM`. Both cached-image reuse and
+post-download verification use the same check. Unencrypted messages remain
+strict; full image validation and authenticated download decryption remain
+required. No sender-format changes, schema migration, or metadata rewriting.
+
+- Portable regression failed before the fix and passes after it. It exercises
+  cached originals and fresh downloads with plaintext/wire sizes, rejects
+  adjacent wrong sizes and unencrypted tag allowances, checks thumbnail
+  regeneration, metadata clearing on failure, and cursor preservation.
+- Native Leopard/PPC fixture: **115 images; 85 complete before; 100 complete
+  after; 15 unavailable offline**. Explicit `--expect-complete=100` passed.
+  Deliberate thumbnail deletion/regeneration and the representative message
+  pane/original-link check also passed. No production account access or
+  network requests were allowed by the sandbox.
+- All 16 database tables matched the prior recovered fixture outside the six
+  image path/dimension fields; exactly 15 additional image rows were repaired.
+- `make test-host`: 100 Python and 57 Worker tests passed.
+- `make clean` then `make debug release`: passed for all four Mac and both
+  iOS architectures, both configurations, with no compiler warnings. Clean
+  targets preserved `build/tests/` and its private fixtures.
+- Both platform package validations passed. iOS has cross-build coverage,
+  not native runtime coverage of this fix.
+- Both analyzers completed with the same four existing findings: possible
+  null input in `enil_asset_cache.c:39`, possible nil dictionary key in
+  `QRLoginViewController.m:395`, and unused assignments in
+  `ENILAccount.m:211` and `enil_db.c:1051`. No new findings.
+
+Native fixtures and logs:
+`~/Desktop/enil-size-regression-20261020` on `imac-rsa`.
+Local private results:
+`build/tests/image-regression/private/size-recovery-20261020/`.
+Build/test logs have the `size-` prefix in `build/tests/image-regression/`.
+Current normal release packages under `build/macOS` and `build/iOS` include
+this second fix; they are newer than the installed Mac bundle recorded below.
+Version metadata is still 1.1.1; this is not a published release.
 
 ## October 20 Leopard recovery testing
 
@@ -248,11 +303,9 @@ Native fixtures, harness, and logs remain under
    `thumbnail.jpg` is a disposable output overwritten by the harness.
    Local synthetic fixtures are in `build/tests/image-regression/`.
 
-2. Investigate the 15 originals with the exact 32-byte size discrepancy using
-   the preserved metadata and fixtures. Determine what `MEDIA_CONTENT_INFO`
-   `fileSize` describes before changing the strict size check. The offline
-   attachment pipeline, database updates, and thumbnail regeneration have
-   now been tested; see the October 20 results above.
+2. Deploy the encrypted-size fix when authorized. Its offline native test
+   recovers the 15 size-mismatched originals; production still has the first
+   validation-only fix. Do not install a test harness.
 
 3. Representative message-pane rendering now passes. Broader application
    lifecycle and live post-fix sync remain untested. Do not inject saved login
@@ -263,12 +316,12 @@ Native fixtures, harness, and logs remain under
    shared-code regression coverage. iOS has cross-build coverage, not native
    runtime coverage of this fix. Production phone testing is not authorized.
 
-5. Report the 30 offline failures separately: 15 missing originals and 15
-   size mismatches. Historical 404 responses do not establish that every
-   remaining image is expired. Investigate before promising zero warnings.
+5. Investigate the remaining 15 missing originals. Neither the Mac fixture
+   nor the fresh phone media cache has those message IDs. Historical 404
+   responses do not prove expiration. The size mismatches are now fixed.
 
-6. The fixed Mac build is installed but unopened; coordinate any live sync or
-   published release with the user. The phone has not been updated.
+6. Coordinate installation of the second fix, any live sync, or published
+   release with the user. The phone has not been updated.
    Normal fixed Mac package: `build/macOS/release/ENIL/ENIL.zip`.
    Normal fixed iOS package: `build/iOS/release/ENIL/ENIL.ipa`.
    These are local builds of the new commit; the version metadata was not
