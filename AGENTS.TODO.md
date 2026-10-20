@@ -3,6 +3,17 @@
 Checked against the current source on 2026-09-26. These are the remaining
 tasks in this file; partial implementations are called out below.
 
+- [ ] **Remove the temporary iOS keychain override after the container update.**
+      Added 2026-10-20. First verify the rebuilt container includes
+      AltivecIntelligence commits `00f985c` and `7aaf397`; a newer tag alone
+      is insufficient. Remove `source/iOS/ENILTemporaryKeychainStore.m`, its
+      shared-source entry in `source/iOS/Makefile`, and the class-name macro
+      in `source/shared/XPFoundation.m`. Keep the improved error messages
+      and regression tests. Update the native test build command to link
+      the container's library, then clean-build and test legacy credential
+      read/save and persistence across relaunch on both iOS 6 and iOS 8.
+      See [the removal instructions](docs/keychain-migration.md#temporary-ios-override-2026-10-20).
+
 - [ ] **Finish native testing of the image sync fix.** See
       [the image validation handoff](AGENTS.HANDOFF.md) for commit `063793b`,
       saved private fixtures, completed checks, and production-device limits.
