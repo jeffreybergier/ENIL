@@ -1,12 +1,27 @@
 # Image sync fix handoff
 
 Updated 2026-10-20. Image and keychain fixes are installed on both production
-devices. Both databases were backed up and the same 15 incomplete image message
-rows have now been removed from both. Gomadango's subsequent full sync logged
-Done, with zero incomplete rows and none of the deleted IDs returning. The Mac
-is prepared for the user's next sync. Retain all cleanup backups until the user
-explicitly authorizes deletion. Nothing pushed.
+devices. The same 15 incomplete image messages were removed from both databases.
+The user confirmed both devices sync without missing-file errors. At their
+explicit request, the database-cleanup backup directories on both devices and
+all local copies from that cleanup run have now been deleted. Earlier app
+rollback backups and unrelated regression fixtures remain intact. Nothing pushed.
 Read `AGENTS.md` before continuing.
+
+## Cleanup backups deleted with user authorization
+
+After confirming no missing-file errors on either device, the user explicitly
+authorized deleting the database-cleanup backups. Removed and verified absent:
+- imac-rsa: `/Users/me/Desktop/enil-message-cleanup-20261020`
+- gomadango: `/var/root/tmp_altivec/enil-message-cleanup-20261020`
+- local: `build/tests/image-regression/private/message-cleanup-20261020`
+
+This includes the raw DB/WAL/SHM backups, held sidecars, standalone before/after
+copies, deleted-row exports, verification snapshots and run-specific scripts.
+The production databases were not touched. Earlier app/account rollback backups
+and unrelated regression fixtures were outside this cleanup and retained.
+The cleanup backup and evidence paths in the historical records below no longer
+exist; their previous retention instructions are superseded by this authorization.
 
 ## Mac database cleanup and phone sync confirmation
 
@@ -32,7 +47,7 @@ Local audit/export: `message-cleanup-20261020/imac-rsa/` below the private path
 listed above. Remote backup stage remains `~/Desktop/enil-message-cleanup-20261020`.
 All backups for BOTH devices remain retained; no deletion authorization received.
 
-## Database cleanup — backups retained pending confirmation
+## Historical database cleanup — backups subsequently deleted
 
 The user requested database backups and deletion of the 15 missing-image
 messages. Both apps were quit by the user. Verified snapshots showed the same
