@@ -1,3 +1,8 @@
+#import <TargetConditionals.h>
+#if TARGET_OS_IPHONE
+/* Temporary override; remove with source/iOS/ENILTemporaryKeychainStore.m. */
+#define AIKeychainStore ENILTemporaryKeychainStore
+#endif
 #import <AltivecCocoa/AIKeychainStore.h>
 #import "XPFoundation.h"
 #import <TargetConditionals.h>
@@ -272,6 +277,16 @@ static NSError *XP_fileError(NSInteger code, NSString *description) {
 
 @end
 
+NSString *const XPKeychainValidationErrorDomain = @"ENILKeychainValidation";
+
+static BOOL XPKeychainInputError(NSError **error, int code, NSString *message)
+{
+  if (error) *error = [NSError errorWithDomain:XPKeychainValidationErrorDomain
+      code:code userInfo:[NSDictionary dictionaryWithObject:message
+      forKey:NSLocalizedDescriptionKey]];
+  return NO;
+}
+
 /* App-owned account-only discovery and URL replacement policy. */
 @implementation XPKeychain
 
@@ -294,19 +309,35 @@ static NSError *XP_fileError(NSInteger code, NSString *description) {
 
 + (BOOL)deleteInternetPasswordForAccount:(NSString *)account;
 {
+  return [self deleteInternetPasswordForAccount:account error:NULL];
+}
+
++ (BOOL)deleteInternetPasswordForAccount:(NSString *)account
+                                 error:(NSError **)outError;
+{
   unsigned int attempt;
+  if (outError) *outError = nil;
   for (attempt = 0; attempt < 128; attempt++) {
     NSError *error = nil;
     AIKeychainStore *store = [AIKeychainStore internetPasswordStoreForKey:account
                                                                 error:&error];
-    if (!store) return [error code] == errSecItemNotFound;
+    if (!store) {
+      if ([error code] == errSecItemNotFound) return YES;
+      if (outError) *outError = error;
+      return NO;
+    }
     if (![store removeItemForKey:account error:&error] &&
-        [error code] != errSecItemNotFound) return NO;
+        [error code] != errSecItemNotFound) {
+      if (outError) *outError = error;
+      return NO;
+    }
 #if !TARGET_OS_IPHONE
     /* Preserve the old Mac first-match policy; iOS removed all account matches. */
     return YES;
 #endif
   }
+  if (outError) *outError = [NSError errorWithDomain:NSOSStatusErrorDomain
+      code:errSecDuplicateItem userInfo:nil];
   return NO; /* Bound concurrent delete/recreate races. */
 }
 
@@ -314,28 +345,52 @@ static NSError *XP_fileError(NSInteger code, NSString *description) {
                                 URL:(NSString *)url
                            password:(NSString *)password;
 {
+  return [self setInternetPasswordForAccount:account URL:url password:password
+                                      error:NULL];
+}
+
++ (BOOL)setInternetPasswordForAccount:(NSString *)account
+                                URL:(NSString *)url
+                           password:(NSString *)password
+                              error:(NSError **)error;
+{
   NSURL *parsed;
+  NSError *lookupError = nil;
   AIKeychainAuthentication authentication;
   AIKeychainStore *store;
-  if (![account length] || ![url length] || !password) return NO;
+  if (error) *error = nil;
+  if (![account length] || ![url length] || ![password length])
+    return XPKeychainInputError(error, 1, NSLocalizedString(
+        @"Worker URL and Shared Secret must both be set.", nil));
   parsed = [NSURL URLWithString:url];
-  if (![[parsed host] length]) return NO;
+  NSString *scheme = [[parsed scheme] lowercaseString];
+  if (![[parsed host] length] ||
+      (![scheme isEqualToString:@"http"] && ![scheme isEqualToString:@"https"]) ||
+      [url rangeOfCharacterFromSet:[NSCharacterSet
+          whitespaceAndNewlineCharacterSet]].location != NSNotFound ||
+      [[parsed port] intValue] < 0 || [[parsed port] intValue] > 65535)
+    return XPKeychainInputError(error, 2, NSLocalizedString(
+        @"Enter a valid HTTP or HTTPS Worker URL, including its host name.", nil));
 #if TARGET_OS_IPHONE
   authentication = AIKeychainAuthenticationDefault;
 #else
   authentication = AIKeychainAuthenticationUnspecified;
 #endif
   store = [[[AIKeychainStore alloc] initWithServer:parsed
-      protocolType:[[parsed scheme] isEqualToString:@"http"] ?
+      protocolType:[scheme isEqualToString:@"http"] ?
           AIKeychainProtocolHTTP : AIKeychainProtocolHTTPS
       authenticationType:authentication securityDomain:nil] autorelease];
-  if (!store) return NO;
-  /* URL replacement is the existing app policy, not a library migration.
-   * Keep exact-scope updates in place whenever the account already lives here. */
-  if ([store containsKey:account error:NULL])
-    return [store setString:password forKey:account error:NULL];
-  if (![self deleteInternetPasswordForAccount:account]) return NO;
-  return [store setString:password forKey:account error:NULL];
+  if (!store) return XPKeychainInputError(error, 2, NSLocalizedString(
+      @"Enter a valid HTTP or HTTPS Worker URL, including its host name.", nil));
+  /* Never delete an old entry when lookup failed due to access/lock errors. */
+  if ([store containsKey:account error:&lookupError])
+    return [store setString:password forKey:account error:error];
+  if ([lookupError code] != errSecItemNotFound) {
+    if (error) *error = lookupError;
+    return NO;
+  }
+  if (![self deleteInternetPasswordForAccount:account error:error]) return NO;
+  return [store setString:password forKey:account error:error];
 }
 
 @end

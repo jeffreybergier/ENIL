@@ -8,6 +8,46 @@ by the agent. Phone recovery count and camera-roll behavior await user testing.
 Nothing is pushed.
 Read `AGENTS.md` before continuing.
 
+## Keychain regression and temporary iOS fix (2026-10-20)
+
+After the image-fix IPA install, the user reported missing Worker credentials
+on gomadango and failed saves on koolphone5. The image-fix IPA was also installed
+on koolphone5 for their testing. Native isolated research found that old iOS
+writes omitted authentication type, leaving an empty value; the shared library
+rejected discovery with -50. Saving replacements could fail on that old entry.
+No real keychain credentials were read, deleted, or changed by the agent.
+
+AltivecIntelligence commit `00f985c` fixes legacy authentication identity.
+ENIL now has a temporary iOS-only copy named `ENILTemporaryKeychainStore` so
+current containers can build the fix immediately. See `docs/keychain-migration.md`
+for upstream identity, removal steps, and native test instructions. `/altivec`
+was not modified. The Mac keychain implementation remains container-provided.
+
+The expanded upstream device test fails before the fix and passes afterward.
+Native tests on koolphone5 passed legacy read/update/delete, distinct Default
+identity, and persistence across separate processes. ENIL's actual facade and
+normal app entitlements also passed legacy reads, credential saves, URL changes,
+and second-process persistence with synthetic fixtures, which were removed.
+Logs: `build/tests/keychain-research/facade.log` in ENIL and
+`build/keychain-legacy/` in AltivecIntelligence. Device test stage:
+`~/tmp_altivec/enil-keychain-research-20261020`.
+
+Both preferences UIs now distinguish input validation from keychain failures
+and display the native OSStatus code in alerts. The shared adapter preserves
+errors and aborts replacement on denied/locked lookups. Native injected-error
+checks passed and preserved the existing synthetic credential.
+
+Validation: clean Mac/iOS debug and release builds passed with no compiler
+warnings; 100 Python and 57 Worker tests passed; both package validations passed.
+Static analysis completed with the same four pre-existing findings (asset cache
+NULL strcmp, database/account dead stores, QR login nil dictionary key), no new
+findings. Both iOS slices contain only the temporary keychain class, not a
+second linked AIKeychainStore class. Installed alert UI was not exercised.
+
+The newly built normal IPA includes this temporary fix but has not been installed.
+Installed UI force-quit/relaunch confirmation remains pending; gomadango's
+production installation has not been changed since the earlier image-fix IPA.
+
 ## October 20 iOS release installation
 
 The user explicitly authorized installing the fresh release IPA on gomadango,

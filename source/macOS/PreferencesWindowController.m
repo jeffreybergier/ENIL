@@ -281,19 +281,12 @@ static NSString *const kTbWorker = @"ENILPrefsTb.Worker";
   (void)sender;
   NSString *url    = [urlField_ stringValue];
   NSString *secret = [secretField_ stringValue];
-  if (![url length] || ![secret length]) {
-    NSAlert *a = [[[NSAlert alloc] init] autorelease];
-    [a setMessageText:NSLocalizedString(@"Both fields are required", nil)];
-    [a setInformativeText:NSLocalizedString(
-      @"Worker URL and Shared Secret must both be set.", nil)];
-    [a runModal];
-    return;
-  }
-  if (![[ENILKeychain sharedKeychain] saveWorkerURL:url secret:secret]) {
+  NSError *error = nil;
+  if (![[ENILKeychain sharedKeychain] saveWorkerURL:url secret:secret
+                                           error:&error]) {
     NSAlert *a = [[[NSAlert alloc] init] autorelease];
     [a setMessageText:NSLocalizedString(@"Could not save credentials", nil)];
-    [a setInformativeText:NSLocalizedString(
-      @"The keychain refused the write. See Console.app for details.", nil)];
+    [a setInformativeText:[ENILKeychain messageForSaveError:error]];
     [a runModal];
     return;
   }

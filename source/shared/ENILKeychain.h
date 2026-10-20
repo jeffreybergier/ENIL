@@ -34,6 +34,12 @@ extern NSString *const ENILKeychainDidChangeNotification;
  * triggers a -reload + change notification. Returns NO on parse/keychain
  * failure. */
 - (BOOL)saveWorkerURL:(NSString *)url secret:(NSString *)secret;
+/* Main-thread save; error preserves validation domain or native OSStatus code.
+ * Returned NSError is autoreleased and cleared on success. */
+- (BOOL)saveWorkerURL:(NSString *)url secret:(NSString *)secret
+                error:(NSError **)error;
+/* Localized, secret-free explanation suitable for either platform's alert. */
++ (NSString *)messageForSaveError:(NSError *)error;
 
 /* Drop the cache and re-read on next accessor call. */
 - (void)reload;

@@ -252,3 +252,6 @@
 "Could not save attachments" = "添付ファイルの情報を保存できません";
 
 "Could not check cached images" = "キャッシュ画像を確認できません";
+
+"Enter a valid HTTP or HTTPS Worker URL, including its host name." = "ホスト名を含む有効な HTTP または HTTPS の Worker URL を入力してください。";
+"Keychain error %ld: the credentials could not be saved." = "キーチェーンエラー %ld：認証情報を保存できませんでした。";

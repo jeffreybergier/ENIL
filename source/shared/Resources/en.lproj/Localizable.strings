@@ -253,3 +253,6 @@
 "Could not save attachments" = "Could not save attachments";
 
 "Could not check cached images" = "Could not check cached images";
+
+"Enter a valid HTTP or HTTPS Worker URL, including its host name." = "Enter a valid HTTP or HTTPS Worker URL, including its host name.";
+"Keychain error %ld: the credentials could not be saved." = "Keychain error %ld: the credentials could not be saved.";

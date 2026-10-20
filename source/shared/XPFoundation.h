@@ -92,6 +92,9 @@
  *               Both deprecated since 10.10 but the only API Tiger ships, so
  *               the deprecated-declarations pragma earns its keep here.
  * iOS:          SecItemAdd / SecItemCopyMatching with kSecClassInternetPassword. */
+/* Input errors use this domain; storage errors retain NSOSStatusErrorDomain.
+ * Error outputs are autoreleased, cleared on success, and never contain secrets. */
+extern NSString *const XPKeychainValidationErrorDomain;
 @interface XPKeychain : NSObject
 + (BOOL)findInternetPasswordForAccount:(NSString *)account
                                 outURL:(NSString **)outURL
@@ -99,5 +102,11 @@
 + (BOOL)setInternetPasswordForAccount:(NSString *)account
                                   URL:(NSString *)url
                              password:(NSString *)password;
++ (BOOL)setInternetPasswordForAccount:(NSString *)account
+                                  URL:(NSString *)url
+                             password:(NSString *)password
+                                error:(NSError **)error;
 + (BOOL)deleteInternetPasswordForAccount:(NSString *)account;
++ (BOOL)deleteInternetPasswordForAccount:(NSString *)account
+                                 error:(NSError **)error;
 @end

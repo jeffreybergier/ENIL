@@ -66,15 +66,25 @@ static NSString *envOrNil(NSString *name) {
 
 - (BOOL)saveWorkerURL:(NSString *)url secret:(NSString *)secret;
 {
-  if (![url length] || ![secret length]) {
-    ENILLog(@"ENILKeychain.saveWorkerURL", @"refusing empty url or secret");
-    return NO;
-  }
-  if (![XPKeychain setInternetPasswordForAccount:kAccount
-                                              URL:url
-                                         password:secret]) {
-    return NO;
-  }
+  return [self saveWorkerURL:url secret:secret error:NULL];
+}
+
++ (NSString *)messageForSaveError:(NSError *)error;
+{
+  if ([[error domain] isEqual:XPKeychainValidationErrorDomain])
+    return [error localizedDescription];
+  if ([[error domain] isEqual:NSOSStatusErrorDomain])
+    return [NSString stringWithFormat:NSLocalizedString(
+        @"Keychain error %ld: the credentials could not be saved.", nil),
+        (long)[error code]];
+  return NSLocalizedString(@"Could not save credentials", nil);
+}
+
+- (BOOL)saveWorkerURL:(NSString *)url secret:(NSString *)secret
+                error:(NSError **)error;
+{
+  if (![XPKeychain setInternetPasswordForAccount:kAccount URL:url
+      password:secret error:error]) return NO;
   [self reload];
   [[NSNotificationCenter defaultCenter]
     postNotificationName:ENILKeychainDidChangeNotification object:self];

@@ -418,7 +418,12 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 - (void)doneAction
 {
   [[self view] endEditing:YES];
-  if (![self commitWorkerCredentialsIfNeeded]) return;
+  if (![self commitWorkerCredentialsIfNeeded]) {
+    [self XP_showAlertWithTitle:NSLocalizedString(@"Could not save credentials", nil)
+                       message:[self statusMessage]
+                  dismissTitle:NSLocalizedString(@"OK", nil)];
+    return;
+  }
   if ([self dismissesOnDone]) [self enil_dismissModalViewController];
 }
 
@@ -431,15 +436,10 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   if (![self workerDirty]) return YES;
   NSString *url = [self trimmed:[[self urlField] text]];
   NSString *secret = [self trimmed:[[self secretField] text]];
-  if (![url length] || ![secret length]) {
-    [self setStatusMessageAndReload:
-      NSLocalizedString(@"Both fields are required", nil)];
-    return NO;
-  }
-  if (![[ENILKeychain sharedKeychain] saveWorkerURL:url secret:secret]) {
-    ENILLog(@"PreferencesViewController.commit", @"keychain write failed");
-    [self setStatusMessageAndReload:NSLocalizedString(
-      @"Could not save to the keychain. Check the URL and try again.", nil)];
+  NSError *error = nil;
+  if (![[ENILKeychain sharedKeychain] saveWorkerURL:url secret:secret
+                                           error:&error]) {
+    [self setStatusMessageAndReload:[ENILKeychain messageForSaveError:error]];
     return NO;
   }
   ENILLog(@"PreferencesViewController.commit",
