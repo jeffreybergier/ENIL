@@ -1,12 +1,36 @@
 # Image sync fix handoff
 
 Updated 2026-10-20. Image and keychain fixes are installed on both production
-devices. The user confirmed credential restoration and 15 remaining missing
-images on gomadango, matching imac-rsa. At their request both databases were
-backed up, then (after clarification) only gomadango's 15 incomplete image
-message rows were deleted. Await the user's phone-only sync test. Retain all
-cleanup backups until the user explicitly authorizes deletion. Nothing pushed.
+devices. Both databases were backed up and the same 15 incomplete image message
+rows have now been removed from both. Gomadango's subsequent full sync logged
+Done, with zero incomplete rows and none of the deleted IDs returning. The Mac
+is prepared for the user's next sync. Retain all cleanup backups until the user
+explicitly authorizes deletion. Nothing pushed.
 Read `AGENTS.md` before continuing.
+
+## Mac database cleanup and phone sync confirmation
+
+After phone-only cleanup, a read-only coherent database/WAL capture confirmed
+3,645 messages, 99 image messages, zero incomplete image rows, and zero deleted
+IDs returned on gomadango. Its syslog recorded `[Sync.done] Done` at 22:41:07
+(device local time). Private evidence:
+`build/tests/image-regression/private/message-cleanup-20261020/post-sync-verification.json`.
+
+The user then requested the same deletion on imac-rsa. ENIL was confirmed closed
+and all database/sidecar checksums still matched the retained original backup.
+Exactly the same 15 rows were removed: 3,673 -> 3,658 messages, 100 remaining image
+messages, zero incomplete rows. All other rows across all 16 tables matched the
+backup exactly; quick_check and foreign_key_check passed. The edited database
+was transferred, validated, and installed with original me:staff ownership.
+Original WAL/SHM were moved into `held-original/` beside the Mac backup.
+ENIL was not launched; no sync ran. Await the user's Mac sync test.
+
+Mac edited DB SHA256:
+`2116f8eadf0b2153c8506a975c035ad82e51342a2bacdabfebc880d862d80949`.
+Installed SHA1: `dffa865ad6602943e52105f875c16ae84a294fa4`.
+Local audit/export: `message-cleanup-20261020/imac-rsa/` below the private path
+listed above. Remote backup stage remains `~/Desktop/enil-message-cleanup-20261020`.
+All backups for BOTH devices remain retained; no deletion authorization received.
 
 ## Database cleanup — backups retained pending confirmation
 
@@ -41,7 +65,8 @@ Backups to retain (do not remove without explicit user confirmation):
   Do not commit these private files. The local scripts are specific to this run;
   do not blindly rerun them against later account state.
 
-The imac-rsa production database was not edited. Current phone account remains
+At the phone-only stage, the imac-rsa database was not edited; the later Mac
+cleanup is recorded above. Current phone account remains
 under `/var/mobile/Applications/022CB2B8-672F-4FD3-B513-3521959403FB`.
 If later restoring after new syncs, account for new messages rather than blindly
 replacing a newer database with the whole old snapshot.
