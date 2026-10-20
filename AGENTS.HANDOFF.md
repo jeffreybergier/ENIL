@@ -44,7 +44,14 @@ NULL strcmp, database/account dead stores, QR login nil dictionary key), no new
 findings. Both iOS slices contain only the temporary keychain class, not a
 second linked AIKeychainStore class. Installed alert UI was not exercised.
 
-The newly built normal IPA includes this temporary fix but has not been installed.
+The normal release IPA with `dc85658` was installed on koolphone5 at the user's
+request using appinst; installation succeeded and the transferred IPA and
+installed executable hashes were verified. Stage/log:
+`~/tmp_altivec/enil-keychain-fixed-20261020`. New app container:
+`/var/mobile/Containers/Bundle/Application/52257E06-8425-4B23-8978-8332DE9D1C69`.
+IPA SHA256: `a4e7b1d34419b86868a33fdb478561d981cf17956a944fafde237b56a88d6021`.
+Executable SHA256: `daddb2975c1a5079cf5219c34d7a0760fd409dcdbad3a1e4ebc1113e59efb432`.
+The agent did not launch ENIL or run sync.
 Installed UI force-quit/relaunch confirmation remains pending; gomadango's
 production installation has not been changed since the earlier image-fix IPA.
 
