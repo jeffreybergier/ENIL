@@ -8,6 +8,47 @@ by the agent. Phone recovery count and camera-roll behavior await user testing.
 Nothing is pushed.
 Read `AGENTS.md` before continuing.
 
+## iOS 6 keychain follow-up (2026-10-20)
+
+The user reported -25299 on gomadango after the first keychain fix. Disposable
+native tests reproduced an iOS 6 difference: omitted authentication is absent
+from returned attributes, not the empty string returned on koolphone5/iOS 8.
+Exact empty-auth queries did not find/remove that record. ENIL can produce
+-25299 when its bounded replacement loop fails to remove the discovered item;
+it does not necessarily mean SecItemAdd returned that status.
+
+AltivecIntelligence commit `7aaf397` pins absent-auth discoveries to their native
+persistent reference. Reads/updates/deletes use that identity; the account/group
+is checked locally, because iOS 6 rejects an access-group filter alongside the
+persistent-reference query. Removed pinned entries are not recreated. Other
+stores retain normal behavior. ENIL's temporary source now mirrors this commit.
+
+Upstream library tests passed on both phones, including separate-process
+persistence, distinct Default neighbors, invalid account/group protection and
+no recreation after deletion. ENIL's real facade, with normal app entitlements,
+also passed validation/error propagation, legacy reads/saves, URL replacement
+and second-process persistence on both phones. All fixtures were synthetic and
+removed; no real Worker credentials were inspected or modified. The installed
+app was not launched by the agent during testing.
+
+Evidence: `build/tests/keychain-research/gomadango-fixed.log` and
+`koolphone5-ios6-fix.log` in ENIL; `build/keychain-legacy/ios6-final.log`,
+`ios8-final.log`, `ios6-cross.log`, `recorder-ios6.log` in AltivecIntelligence.
+
+The revised normal release IPA is installed on gomadango via appinst; transfer
+and installed-executable SHA256 checks passed. Stage/log:
+`~/tmp_altivec/enil-keychain-ios6-fixed-20261020`. New container:
+`/var/mobile/Applications/022CB2B8-672F-4FD3-B513-3521959403FB`.
+IPA: `18bab970bab6df436d49ce7cdedc78082b522eeb9c30380f9e5b0fe152edb3cc`.
+Executable: `6f11ebfbc8927cbd3944f05bfbc1be48a802afc407674eeb376712e1282cb852`.
+ENIL was left unopened for the user's check. Koolphone5's installed app was not
+updated during this follow-up; only isolated test executables ran there.
+
+Validation: clean iOS debug/release builds and package checks passed without
+compiler warnings. Changed keychain source analysis had no findings. Host suite
+passed (100 Python, 57 Worker). All six upstream architecture checks passed;
+Mac runtime was not retested. No pushes or container changes were made.
+
 ## Keychain regression and temporary iOS fix (2026-10-20)
 
 After the image-fix IPA install, the user reported missing Worker credentials

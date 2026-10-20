@@ -29,14 +29,14 @@ coverage limits. No image was rebuilt or published for this migration.
 
 ## Temporary iOS override (2026-10-20)
 
-AltivecIntelligence commit `00f985c` fixes discovery and matching of legacy iOS
+AltivecIntelligence commits `00f985c` and `7aaf397` fix discovery and matching of legacy iOS
 internet-password entries whose authentication type is empty. The old ENIL
 writer omitted this attribute; treating it as explicit Default or rejecting it
 prevents reading the old item and can block ENIL's replacement-save policy.
 
 Until that engine version is available in the container, iOS builds compile
 `source/iOS/ENILTemporaryKeychainStore.m` under MRC. Its implementation is copied
-from that commit, with only a prologue and header import/class-name substitution.
+from `7aaf397`, with only a prologue and header import/class-name substitution.
 `XPFoundation.m` maps the class name to `ENILTemporaryKeychainStore` on iOS only.
 This avoids conflicting with the container's existing Objective-C class and
 requires no engine binary/header changes. Mac builds retain their existing path.
@@ -89,3 +89,15 @@ lookup aborts the save before replacement/deletion. Messages contain no secret.
 The Mac NSAlert and the iOS Add Account/Done alerts display the shared explanation;
 for example, a denied interaction produces `Keychain error -25308` instead of
 asking the user to correct a valid URL. The iOS footer retains the same message.
+
+### iOS 6 follow-up
+
+Gomadango returns an absent authentication attribute, whereas koolphone5 returns
+an empty string. Exact empty-string queries do not match the iOS 6 item; ENIL's
+bounded replacement loop could therefore report -25299 after repeatedly failing
+to remove it. The revised temporary implementation follows the upstream fix:
+legacy discovery pins absent-auth items to their persistent reference, validates
+the account/group before queries, and never recreates a deleted pinned item.
+Native library and ENIL facade tests now pass on both phones, including
+read/update/delete, URL replacement, error propagation and two-process
+persistence. The real Worker credentials were not inspected or modified by tests.
