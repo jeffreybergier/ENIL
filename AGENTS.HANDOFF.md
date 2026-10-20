@@ -8,6 +8,23 @@ by the agent. Phone recovery count and camera-roll behavior await user testing.
 Nothing is pushed.
 Read `AGENTS.md` before continuing.
 
+## Latest production confirmation and Mac installation (2026-10-20)
+
+The user confirmed gomadango restored its existing Worker credential and then
+reported only 15 files missing after sync, matching the Mac's remaining count.
+
+At the user's request, the latest normal Mac release was directly installed to
+`/Applications/ENIL.app` on imac-rsa using their already authorized replacement
+exception. Release/package checks passed. Transfer and installed executable
+checksums matched. ENIL was confirmed closed before and after; it was not opened
+and no sync ran. The release contains the image fixes and improved Mac save
+errors; the temporary keychain override remains iOS-only.
+
+Stage: `~/Desktop/enil-keychain-update-20261020`, with the ZIP and prior bundle
+`previous-ENIL.app` retained for rollback.
+ZIP SHA1: `6706e5bdfc25dd5160c129dd0af0ea60b9d7fbae`.
+Executable SHA1: `b91c94505b738d699f20d5da32c074f2424d52dd`.
+
 ## iOS 6 keychain follow-up (2026-10-20)
 
 The user reported -25299 on gomadango after the first keychain fix. Disposable
