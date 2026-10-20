@@ -1,8 +1,9 @@
 # Image sync fix handoff
 
-Updated 2026-10-19. The image validation fix is implemented and committed as
-`063793b` (`fix: validate cached images on legacy ImageIO`). Remaining work is
-primarily native compatibility and end-to-end sync/UI testing, then deciding
+Updated 2026-10-20. The image validation fix is implemented and committed as
+`063793b` (`fix: validate cached images on legacy ImageIO`). Leopard offline
+recovery and a representative message-pane check now pass. Remaining work
+includes the 32-byte size discrepancies below, missing originals, and deciding
 with the user when to deploy or release. Nothing has been pushed or installed
 on production. Read `AGENTS.md` before continuing.
 
@@ -14,13 +15,79 @@ on production. Read `AGENTS.md` before continuing.
 - The user explicitly directed native testing to **`x4-vm`**. That machine
   actually runs **Tiger 10.4.11 on PowerPC**, not Leopard.
 - Do not resume tests, syncs, app launches, installations, or database changes
-  on production devices. The user was shutting them down. Use saved fixtures
-  and the authorized VM; arrange any additional test host with the user.
+  on the production phone. On October 20 the user authorized isolated offline
+  recovery and UI testing on `imac-rsa`, with ENIL quit. This supersedes the
+  earlier prohibition on testing that Mac. Use disposable Desktop copies,
+  never the production account directory. Production installation and live
+  sync have not been authorized by this testing request.
 - The two devices use different LINE client identities (Chrome versus desktop)
   for the **same account**. Different account-directory or chat IDs do not mean
   different users. Match images by message ID, then use the destination
   database's `chat_id` to construct its media paths.
 - Follow the root Git instructions: local commits as Strappy, no push.
+
+## October 20 Leopard recovery testing
+
+The installed Mac app is 1.1.1. App and complete account backups are under
+`~/Desktop/enil-image-regression-20261020` on `imac-rsa`, with checksum manifests.
+The production database, WAL, and app executable were compared against those
+backups and match. No production installation or live sync was performed.
+
+- Final image harness on Leopard/PPC: all 220 captured cache files and all
+  seven synthetic cases passed.
+- New `source/tests/attachment_mac_test.py/.m` harness runs the real
+  `enil_sync_attachments` pipeline against a disposable database and copied
+  media/purchases. It creates and removes its own synthetic session; never
+  copy production `session.json` into this fixture.
+- All application curl transfers are renamed at compile time to a refusal.
+  Additionally run under `sandbox-exec`, denying `network*`, production
+  account reads/writes, and writes under the user's Library. The observed
+  missing-image requests fail before curl because the synthetic session has
+  no OBS token. This is an offline cache test, not a download-success test.
+- Baseline recovery: **115 images, zero complete before; 85 repaired and
+  30 still unavailable offline**. Paths use destination chat IDs; dimensions
+  and original/thumbnail validation passed. Total attachment failure count
+  was 30. All 16 database tables matched before/after outside the six image
+  path/dimension fields; exactly 85 rows changed. The sync cursor and message
+  count were preserved.
+- A repeat recovery run deliberately removed one copied thumbnail; it was
+  regenerated successfully and the result remained 85 complete / 30 pending.
+- The final `--ui --regenerate` run passed on Leopard: the actual message
+  controller loaded recovered thumbnails, the original link resolved to an
+  image that decoded, and a private screenshot was saved. This is a
+  representative message-pane check using the production renderer with an
+  offline model, not a full application startup, live sync, or external
+  Preview launch. An earlier UI attempt selected a chat with no image in its
+  first 50 messages; the harness now selects an image within the initial page.
+- Of the 30 remaining originals, **15 are missing and 15 exist but are exactly
+  32 bytes shorter than `media_plain_size`**. None of the residual cases was
+  classified as a decode failure with matching size. Do not call these all
+  expired downloads. The file crypto code uses a 32-byte authentication tag;
+  whether the stored metadata includes that tag remains to be established.
+  Do not drop the size check or change production metadata without evidence.
+- `make test-host` passed (99 Python and 57 Worker tests). The PPC harness
+  build emitted no compiler warnings. Worker tooling still emits the Node
+  DEP0190 deprecation warning.
+
+Native recovery files/logs are in the above Desktop directory's `recovery/`;
+`account/` there is disposable. Local private database copies, audit results,
+and logs are in `build/tests/image-regression/private/leopard-recovery/`.
+The normal app and both test harnesses are all named `ENIL.app`; never install
+a harness as the production app.
+
+Build the recovery harness with:
+
+```sh
+ARCHS=ppc python3 source/tests/attachment_mac_test.py
+```
+
+Its package is `build/tests/attachment-native/macOS/release/ENIL/ENIL.zip`.
+Run only on an explicitly prepared disposable account directory below Desktop
+containing `.enil-offline-fixture`, copied database/WAL and cache files, and no
+session. Optional `--regenerate` removes one fixture thumbnail and checks its
+repair; `--ui` uses the actual message controller and page renderer with an
+offline model. Web resources are restricted to files inside the fixture.
+Logs and `ui.png` may contain private conversation data; keep them out of Git.
 
 ## Problem and evidence
 
@@ -158,28 +225,24 @@ Native fixtures, harness, and logs remain under
    `thumbnail.jpg` is a disposable output overwritten by the harness.
    Local synthetic fixtures are in `build/tests/image-regression/`.
 
-2. Test the full attachment recovery path against a **disposable copy** of the
-   saved Mac database and media, using destination chat IDs. Prefer an offline
-   harness that refuses network requests. Verify successful cached images
-   repopulate media/thumbnail paths and dimensions, and unavailable files
-   remain accurately counted. The existing native harness tests ImageIO,
-   not the complete database sync or chat UI.
+2. Investigate the 15 originals with the exact 32-byte size discrepancy using
+   the preserved metadata and fixtures. Determine what `MEDIA_CONTENT_INFO`
+   `fileSize` describes before changing the strict size check. The offline
+   attachment pipeline, database updates, and thumbnail regeneration have
+   now been tested; see the October 20 results above.
 
-3. Test visible images/thumbnails in an isolated app/test account on an
-   authorized test machine. No actual UI or complete post-fix sync has yet
-   been run. Do not inject saved login sessions into tests or inadvertently
-   connect the user's account to LINE.
+3. Representative message-pane rendering now passes. Broader application
+   lifecycle and live post-fix sync remain untested. Do not inject saved login
+   sessions into offline tests or inadvertently connect the account to LINE.
 
-4. Obtain native **Leopard** coverage on a user-approved test host if possible;
-   `x4-vm` proves Tiger behavior only. Also consider a modern Mac and test iOS
-   device for shared-code regression coverage. iOS has cross-build coverage,
-   not native runtime coverage of this fix. Do not use the production iMac or
-   phone for this merely because they are reachable.
+4. Leopard coverage is now established on `imac-rsa`; `x4-vm` proves Tiger
+   behavior only. Consider a modern Mac and an approved test iOS device for
+   shared-code regression coverage. iOS has cross-build coverage, not native
+   runtime coverage of this fix. Production phone testing is not authorized.
 
-5. Report the remaining genuine unavailable-image count separately from the
-   validation bug. All 115 disappearing has not been demonstrated: not every
-   image exists in the captured phone cache, and some network objects return
-   404. Investigate residual failures before promising a zero warning count.
+5. Report the 30 offline failures separately: 15 missing originals and 15
+   size mismatches. Historical 404 responses do not establish that every
+   remaining image is expired. Investigate before promising zero warnings.
 
 6. Coordinate production deployment/release with the user after testing.
    Normal fixed Mac package: `build/macOS/release/ENIL/ENIL.zip`.
