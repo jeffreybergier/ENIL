@@ -52,8 +52,13 @@ installed executable hashes were verified. Stage/log:
 IPA SHA256: `a4e7b1d34419b86868a33fdb478561d981cf17956a944fafde237b56a88d6021`.
 Executable SHA256: `daddb2975c1a5079cf5219c34d7a0760fd409dcdbad3a1e4ebc1113e59efb432`.
 The agent did not launch ENIL or run sync.
-Installed UI force-quit/relaunch confirmation remains pending; gomadango's
-production installation has not been changed since the earlier image-fix IPA.
+The user confirmed koolphone5 automatically restored its existing keychain
+settings. At their subsequent request the same IPA was installed on gomadango
+using appinst. Installation succeeded; IPA and installed executable hashes match
+those above. Stage/log: `~/tmp_altivec/enil-keychain-fixed-20261020`.
+New gomadango container:
+`/var/mobile/Applications/635B001B-679F-42A6-AA12-2AAE086F3F9D`.
+The agent did not open ENIL or run sync. Gomadango user testing is pending.
 
 ## October 20 iOS release installation
 
