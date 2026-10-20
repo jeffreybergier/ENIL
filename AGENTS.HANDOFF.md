@@ -1,12 +1,50 @@
 # Image sync fix handoff
 
-Updated 2026-10-20. Both image fixes (`063793b` and `e2aec94`) are now
-installed on imac-rsa and gomadango. The user confirmed the Mac's missing count
-dropped to 15 after live sync and deferred investigation of those missing files.
-The phone's fresh release IPA is installed; no app launch or live sync was run
-by the agent. Phone recovery count and camera-roll behavior await user testing.
-Nothing is pushed.
+Updated 2026-10-20. Image and keychain fixes are installed on both production
+devices. The user confirmed credential restoration and 15 remaining missing
+images on gomadango, matching imac-rsa. At their request both databases were
+backed up, then (after clarification) only gomadango's 15 incomplete image
+message rows were deleted. Await the user's phone-only sync test. Retain all
+cleanup backups until the user explicitly authorizes deletion. Nothing pushed.
 Read `AGENTS.md` before continuing.
+
+## Database cleanup — backups retained pending confirmation
+
+The user requested database backups and deletion of the 15 missing-image
+messages. Both apps were quit by the user. Verified snapshots showed the same
+15 incomplete image IDs on both devices; no dependent sticon rows existed.
+Twelve are within their chats' newest 50 local messages. Because full sync
+fetches the latest 50 from LINE and can reinsert deleted rows, the user was
+warned that one-time deletion may not persist. They chose: delete only on
+gomadango and test sync there. No persistent exclusions were added.
+
+Completed on gomadango: removed exactly those 15 rows from messages_v2;
+3,660 messages -> 3,645; incomplete image rows 15 -> 0. SQLite quick_check and
+foreign_key_check passed. Byte-preserving comparison across all 16 tables
+confirmed all other rows unchanged, including sync cursors and chat metadata.
+The edited standalone database was transferred and checksum-verified before
+replacement, after confirming production files had not changed since backup.
+Original sidecars were retained outside the account; ownership remains mobile.
+The installed main DB SHA256 is
+`7d737f98d0b2fcdcf4ad995da8bc56674f2de2acdfd99d33ee2e5b0b8c26063a`.
+ENIL was not opened and no sync was run by the agent.
+
+Backups to retain (do not remove without explicit user confirmation):
+- imac-rsa: `~/Desktop/enil-message-cleanup-20261020/raw/` contains the original
+  database, WAL and SHM, with before/after source checksums in the parent.
+- gomadango: `~/tmp_altivec/enil-message-cleanup-20261020/raw/` contains the
+  original database, WAL and SHM. `held-original/` retains the moved sidecars;
+  `after.sqlite` is the installed edited copy. Source checksums are in the parent.
+- Local private copies, standalone `before.sqlite` backups, exact target IDs,
+  deleted-row export and audit:
+  `build/tests/image-regression/private/message-cleanup-20261020/`.
+  Do not commit these private files. The local scripts are specific to this run;
+  do not blindly rerun them against later account state.
+
+The imac-rsa production database was not edited. Current phone account remains
+under `/var/mobile/Applications/022CB2B8-672F-4FD3-B513-3521959403FB`.
+If later restoring after new syncs, account for new messages rather than blindly
+replacing a newer database with the whole old snapshot.
 
 ## Latest production confirmation and Mac installation (2026-10-20)
 
