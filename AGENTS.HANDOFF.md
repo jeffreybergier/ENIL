@@ -4,8 +4,9 @@ Updated 2026-10-20. The image validation fix is implemented and committed as
 `063793b` (`fix: validate cached images on legacy ImageIO`). Leopard offline
 recovery and a representative message-pane check now pass. Remaining work
 includes the 32-byte size discrepancies below, missing originals, and deciding
-with the user when to deploy or release. Nothing has been pushed or installed
-on production. Read `AGENTS.md` before continuing.
+with the user when to run a live sync or release. The fixed Mac build is now
+installed on `imac-rsa` but has not been opened. Nothing has been pushed.
+Read `AGENTS.md` before continuing.
 
 ## Production boundaries
 
@@ -18,8 +19,9 @@ on production. Read `AGENTS.md` before continuing.
   on the production phone. On October 20 the user authorized isolated offline
   recovery and UI testing on `imac-rsa`, with ENIL quit. This supersedes the
   earlier prohibition on testing that Mac. Use disposable Desktop copies,
-  never the production account directory. Production installation and live
-  sync have not been authorized by this testing request.
+  never the production account directory. The user subsequently authorized
+  installing the fixed Mac build but explicitly said not to open it. No live
+  sync is authorized. See the installation record below.
 - The two devices use different LINE client identities (Chrome versus desktop)
   for the **same account**. Different account-directory or chat IDs do not mean
   different users. Match images by message ID, then use the destination
@@ -31,7 +33,7 @@ on production. Read `AGENTS.md` before continuing.
 The installed Mac app is 1.1.1. App and complete account backups are under
 `~/Desktop/enil-image-regression-20261020` on `imac-rsa`, with checksum manifests.
 The production database, WAL, and app executable were compared against those
-backups and match. No production installation or live sync was performed.
+backups and match at the end of testing. No live sync was performed.
 
 - Final image harness on Leopard/PPC: all 220 captured cache files and all
   seven synthetic cases passed.
@@ -88,6 +90,27 @@ session. Optional `--regenerate` removes one fixture thumbnail and checks its
 repair; `--ui` uses the actual message controller and page renderer with an
 offline model. Web resources are restricted to files inside the fixture.
 Logs and `ui.png` may contain private conversation data; keep them out of Git.
+
+## October 20 Mac installation
+
+The user requested installation on `imac-rsa` without opening ENIL. The normal
+`build/macOS/release/ENIL/ENIL.zip` was rebuilt and package validation passed;
+it still reports version/build **1.1.1**. No release bump or publication.
+Its SHA-256 is
+`1da0ed471bc683c50d15b927c0ffc6c124148dc74cde16a39d76db206fdfe261`.
+
+Leopard's package installer stalled without a prompt and was terminated.
+The installed executable was verified unchanged at that point. The user then
+explicitly approved direct bundle replacement as an exception to the workspace
+restriction on manually modifying `/Applications`.
+
+The normal fixed app is now at `/Applications/ENIL.app`. All **320 bundle
+entries** (file hashes/executable bits, directories, symlinks) match the staged
+release. The prior bundle was also verified after moving it to
+`~/Desktop/enil-install-20261020/previous-ENIL.app`; `previous-app.tar` in that
+directory provides another backup. Installation logs and the verified ZIP
+remain in the same staging directory. ENIL was confirmed **not running** after
+installation. Do not open it or run a live sync without a new user instruction.
 
 ## Problem and evidence
 
@@ -244,7 +267,8 @@ Native fixtures, harness, and logs remain under
    size mismatches. Historical 404 responses do not establish that every
    remaining image is expired. Investigate before promising zero warnings.
 
-6. Coordinate production deployment/release with the user after testing.
+6. The fixed Mac build is installed but unopened; coordinate any live sync or
+   published release with the user. The phone has not been updated.
    Normal fixed Mac package: `build/macOS/release/ENIL/ENIL.zip`.
    Normal fixed iOS package: `build/iOS/release/ENIL/ENIL.ipa`.
    These are local builds of the new commit; the version metadata was not
