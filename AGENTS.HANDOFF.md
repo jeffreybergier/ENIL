@@ -3,9 +3,9 @@
 Updated 2026-10-20. The image validation fix is implemented and committed as
 `063793b` (`fix: validate cached images on legacy ImageIO`). That build is
 installed on `imac-rsa`; the user ran sync and confirmed 30 unavailable images.
-The additional encrypted-size fix described below now recovers 15 more images
-in offline native testing. **The encrypted-size fix has not been installed on
-either production device.** Remaining work is deployment when authorized,
+The additional encrypted-size fix (`e2aec94`) recovers 15 more images in offline
+native testing and is now installed on `imac-rsa`, left closed. The phone has
+not been updated. Remaining work is the user's live-sync confirmation,
 investigating 15 missing originals, and any published release. Nothing is pushed.
 Read `AGENTS.md` before continuing.
 
@@ -80,8 +80,24 @@ Local private results:
 `build/tests/image-regression/private/size-recovery-20261020/`.
 Build/test logs have the `size-` prefix in `build/tests/image-regression/`.
 Current normal release packages under `build/macOS` and `build/iOS` include
-this second fix; they are newer than the installed Mac bundle recorded below.
+this second fix; the Mac package is now installed as recorded below.
 Version metadata is still 1.1.1; this is not a published release.
+
+## Encrypted-size fix installation
+
+The user explicitly requested direct replacement in Applications, without an
+installer script. `/Applications/ENIL.app` now contains the normal release
+build with `e2aec94`. The transferred ZIP and installed executable checksums
+were verified; ENIL was confirmed closed before and after replacement.
+No agent-run live sync occurred.
+
+Staging/rollback directory:
+`~/Desktop/enil-size-fix-install-20261020`.
+The prior installed bundle is `previous-ENIL.app` there.
+ZIP SHA-1: `5030f553b14a94d103f719175bc479adbd1a5fb7`.
+Installed executable SHA-1: `509614e73ca7f38a815dcef9108195a63140481d`.
+Expected next-sync unavailable count is 15, assuming unchanged cache/data,
+based on the offline native result of 100 complete images out of 115.
 
 ## October 20 Leopard recovery testing
 
@@ -303,9 +319,9 @@ Native fixtures, harness, and logs remain under
    `thumbnail.jpg` is a disposable output overwritten by the harness.
    Local synthetic fixtures are in `build/tests/image-regression/`.
 
-2. Deploy the encrypted-size fix when authorized. Its offline native test
-   recovers the 15 size-mismatched originals; production still has the first
-   validation-only fix. Do not install a test harness.
+2. The encrypted-size fix is installed on the Mac. Await the user's next-sync
+   result; offline native testing recovered the 15 size-mismatched originals.
+   Do not install a test harness.
 
 3. Representative message-pane rendering now passes. Broader application
    lifecycle and live post-fix sync remain untested. Do not inject saved login
@@ -320,8 +336,8 @@ Native fixtures, harness, and logs remain under
    nor the fresh phone media cache has those message IDs. Historical 404
    responses do not prove expiration. The size mismatches are now fixed.
 
-6. Coordinate installation of the second fix, any live sync, or published
-   release with the user. The phone has not been updated.
+6. Coordinate any phone update, agent-run live sync, or published release with
+   the user. The phone has not been updated.
    Normal fixed Mac package: `build/macOS/release/ENIL/ENIL.zip`.
    Normal fixed iOS package: `build/iOS/release/ENIL/ENIL.ipa`.
    These are local builds of the new commit; the version metadata was not
