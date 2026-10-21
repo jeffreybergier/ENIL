@@ -112,7 +112,13 @@ unsigned enil_reaction_glyph(int predefined_type) {
 static void append_head(ENILStrBuf *b, const char *body_class,
                         const char *base_href, const char *extra_css) {
   ESB_LIT(b, "<!DOCTYPE html><html><head><meta charset=\"utf-8\">");
-  ESB_LIT(b, ENIL_HTML_ZOOM_SCRIPT);
+  /* Chat sizing is in viewport points; zoom would turn 320 into 384. */
+  if (strcmp(body_class, "enil-messages") == 0) {
+    ESB_LIT(b, "<meta name=\"viewport\" "
+               "content=\"width=device-width,initial-scale=1\">");
+  } else {
+    ESB_LIT(b, ENIL_HTML_ZOOM_SCRIPT);
+  }
   if (base_href && base_href[0]) {
     ESB_LIT(b, "<base href=\"");
     esb_html(b, base_href);
@@ -459,7 +465,7 @@ static void append_reactions(ENILStrBuf *b, const char *reactions_json) {
       append_icon(b, g, 0);
       ESB_LIT(b, "</span>");
       if (counts[t] > 1) {
-        char num[32];
+        char num[64];
         int n = snprintf(num, sizeof(num),
                          "<span class=\"rxn-count\">%d</span>", counts[t]);
         if (n > 0 && (size_t)n < sizeof(num)) esb_append(b, num, (size_t)n);
@@ -471,28 +477,13 @@ static void append_reactions(ENILStrBuf *b, const char *reactions_json) {
   cJSON_Delete(arr);
 }
 
-/* True when two adjacent messages belong to the same visual run: same
- * direction, same sender, same calendar day, within a 5-minute window.
- * Drives sender-name / timestamp / tail collapsing. */
+/* Calendar-day boundaries for date dividers. */
 static int same_calendar_day(long long a_ms, long long b_ms) {
   time_t ta = (time_t)(a_ms / 1000), tb = (time_t)(b_ms / 1000);
   struct tm la, lb, *p;
   p = localtime(&ta); if (!p) return 0; la = *p;
   p = localtime(&tb); if (!p) return 0; lb = *p;
   return la.tm_year == lb.tm_year && la.tm_yday == lb.tm_yday;
-}
-
-static int msg_same_run(const ENILHTMLMessage *a, const ENILHTMLMessage *b) {
-  long long d;
-  const char *na, *nb;
-  if (!a || !b || a->is_outgoing != b->is_outgoing) return 0;
-  na = a->sender_name ? a->sender_name : "";
-  nb = b->sender_name ? b->sender_name : "";
-  if (strcmp(na, nb) != 0) return 0;
-  d = b->created_at - a->created_at;
-  if (d < 0) d = -d;
-  if (d > 300000LL) return 0;
-  return same_calendar_day(a->created_at, b->created_at);
 }
 
 /* "Today" / "Yesterday" / "Mon DD, YYYY" for the day-divider chip. */
@@ -514,9 +505,7 @@ static void day_label(long long ms, char *buf, size_t n) {
   if (!strftime(buf, n, "%b %e, %Y", &lt)) buf[0] = '\0';
 }
 
-/* Centered translucent day-divider chip — emitted by the page loop on each
- * calendar-day boundary. The canvas is transparent (NSWindow shows through),
- * so a dark translucent pill reads on any backdrop. */
+/* Centered day-divider chip at each calendar-day boundary. */
 static void append_day_divider(ENILStrBuf *b, long long created_at) {
   char lbl[64];
   day_label(created_at, lbl, sizeof(lbl));
@@ -582,12 +571,8 @@ static int is_media_msg(const ENILHTMLMessage *m) {
   return 0;
 }
 
-/* A LINE system/notification event (e.g. contentType 18 "C_PI"): a non-text,
- * non-media, non-sticker content type carrying no body and no known
- * placeholder. Without this it falls through to an empty .enil-text div and,
- * when grouped with a neighbour, shows as a blank segment above the
- * .enil-seg+.enil-seg hairline. Rendered instead as a standalone
- * [System message] chip and kept out of any neighbour's bubble. */
+/* A LINE system/notification event with no body or known placeholder.
+ * Render a [System message] label instead of an empty text bubble. */
 static int is_system_msg(const ENILHTMLMessage *m) {
   if (!m) return 0;
   if (m->content_type == 0) return 0;             /* plain text */
@@ -599,20 +584,7 @@ static int is_system_msg(const ENILHTMLMessage *m) {
   return 1;
 }
 
-/* cur starts a fresh bubble on sender/day/time change, or whenever either
- * side is media/sticker — media never shares a bubble with text. System
- * events stand alone for the same reason: they must not occupy a segment
- * inside a real message's bubble. */
-static int run_breaks(const ENILHTMLMessage *prev, const ENILHTMLMessage *cur) {
-  if (!prev) return 1;
-  if (is_media_msg(prev) || is_media_msg(cur)) return 1;
-  if (is_system_msg(prev) || is_system_msg(cur)) return 1;
-  return !msg_same_run(prev, cur);
-}
-
-/* One message inside a (possibly multi-message) shared bubble. The bubble
- * frame is drawn by append_run; consecutive segments are separated by a
- * hairline (CSS .enil-seg + .enil-seg border-top). */
+/* Message content shared by initial rendering and in-place updates. */
 static void append_segment(ENILStrBuf *b, const ENILHTMLMessage *m,
                            int seg_first, int seg_last,
                            int show_sender, int show_time) {
@@ -680,8 +652,8 @@ static void append_segment(ENILStrBuf *b, const ENILHTMLMessage *m,
     ESB_LIT(b, "\"");
     if (w > 0 && h > 0) {
       snprintf(dim, sizeof(dim),
-               " width=\"%d\" height=\"%d\" style=\"width:%dpx;height:%dpx\"",
-               w, h, w, h);
+               " width=\"%d\" height=\"%d\"",
+               w, h);
       esb_append(b, dim, strlen(dim));
     }
     ESB_LIT(b, ">");
@@ -735,31 +707,24 @@ static void append_segment(ENILStrBuf *b, const ENILHTMLMessage *m,
   ESB_LIT(b, "</div>"); /* close .enil-seg */
 }
 
-/* Emit one run (msgs[s..e], all same sender/day, no media) as a single
- * shared bubble: wrapper + (incoming) avatar + one .enil-bubble holding
- * the per-message segments. */
-static void append_run(ENILStrBuf *b, const ENILHTMLMessage *msgs, int s, int e) {
-  const ENILHTMLMessage *first = &msgs[s];
-  const char *direction = first->is_outgoing ? "outgoing" : "incoming";
-  int outgoing = first->is_outgoing;
-  int single = (s == e);
-  int media = single && is_media_msg(first);
-  int j;
+/* One independent bubble per message in history, pagination, and live pushes. */
+static void append_message(ENILStrBuf *b, const ENILHTMLMessage *m) {
+  const char *direction = m->is_outgoing ? "outgoing" : "incoming";
+  int photo = m->content_type != 7 &&
+    (m->content_type == 1 || (m->thumb_path && m->thumb_path[0]) ||
+     (m->media_path && m->media_path[0]));
   ESB_LIT(b, "<div class=\"enil-message ");
   esb_append(b, direction, strlen(direction));
-  if (single) ESB_LIT(b, " run-solo");
+  ESB_LIT(b, " run-solo");
+  if (photo) ESB_LIT(b, " enil-photo-message");
   ESB_LIT(b, "\">");
-  if (!outgoing)
-    append_avatar(b, first->sender_name, first->avatar_path);
+  if (!m->is_outgoing)
+    append_avatar(b, m->sender_name, m->avatar_path);
   ESB_LIT(b, "<div class=\"enil-bubble");
-  if (media) ESB_LIT(b, " enil-media-bubble");
+  if (photo || is_media_msg(m)) ESB_LIT(b, " enil-media-bubble");
   ESB_LIT(b, "\">");
-  for (j = s; j <= e; j++) {
-    int show_sender = (!outgoing && j == s &&
-                       first->sender_name && first->sender_name[0]);
-    append_segment(b, &msgs[j], j == s, j == e, show_sender, j == e);
-  }
-  ESB_LIT(b, "</div></div>"); /* close .enil-bubble, .enil-message */
+  append_segment(b, m, 1, 1, !m->is_outgoing, 1);
+  ESB_LIT(b, "</div></div>");
 }
 
 /* Bare segment (no run wrapper) for in-place updateMessage swaps. */
@@ -869,7 +834,7 @@ char *enil_html_page_with_css_more(const ENILHTMLMessage *msgs, int count,
                                           int n_group_readers,
                                           const char *seen_message_id) {
   ENILStrBuf b;
-  int i, e, k;
+  int i, k;
   read_marker_bucket_t *buckets = NULL;
   int n_buckets = 0;
   int seen_idx = -1;
@@ -945,26 +910,17 @@ char *enil_html_page_with_css_more(const ENILHTMLMessage *msgs, int count,
   }
   i = 0;
   while (i < count) {
-    e = i;
-    while (e + 1 < count && !run_breaks(&msgs[e], &msgs[e + 1])) {
-      /* Stop extending the run AT any marker boundary so the bubble breaks
-       * here — the marker line then sits between the last-read segment and
-       * the first-unread one rather than below them both. The "Seen" anchor
-       * breaks the run for the same reason. */
-      if (bucket_at(buckets, n_buckets, e) >= 0 || e == seen_idx) break;
-      e++;
-    }
     if (i == 0 ||
         !same_calendar_day(msgs[i - 1].created_at, msgs[i].created_at))
       append_day_divider(&b, msgs[i].created_at);
-    append_run(&b, msgs, i, e);
+    append_message(&b, &msgs[i]);
     for (k = 0; k < n_buckets; k++) {
-      if (buckets[k].msg_idx >= i && buckets[k].msg_idx <= e)
+      if (buckets[k].msg_idx == i)
         append_read_marker(&b, &buckets[k], msgs, group_readers);
     }
-    if (seen_idx >= i && seen_idx <= e)
+    if (seen_idx == i)
       append_seen_marker(&b, msgs[seen_idx].message_id);
-    i = e + 1;
+    i++;
   }
 cleanup:
   for (i = 0; i < n_buckets; i++) free(buckets[i].reader_indices);
@@ -982,7 +938,7 @@ cleanup:
 static char *enil_html_node(const ENILHTMLMessage *msg) {
   ENILStrBuf b;
   if (!esb_init(&b)) return NULL;
-  append_run(&b, msg, 0, 0);
+  append_message(&b, msg);
   return b.buf;
 }
 
@@ -1038,24 +994,22 @@ char *enil_html_js_append(const ENILHTMLMessage *msg) {
 char *enil_html_js_prepend(const ENILHTMLMessage *msgs, int count,
                            int has_more) {
   ENILStrBuf b;
-  int i, e, first_out = 1;
+  int i, first_out = 1;
   if (count <= 0 || !msgs) return NULL;
   if (!esb_init(&b)) return NULL;
   ESB_LIT(&b, "prependMessages([");
   i = 0;
   while (i < count) {
     ENILStrBuf nb;
-    e = i;
-    while (e + 1 < count && !run_breaks(&msgs[e], &msgs[e + 1])) e++;
     if (!first_out) ESB_LIT(&b, ",");
     first_out = 0;
     ESB_LIT(&b, "\"");
     if (esb_init(&nb)) {
-      append_run(&nb, msgs, i, e);
+      append_message(&nb, &msgs[i]);
       if (nb.buf) { esb_js(&b, nb.buf); free(nb.buf); }
     }
     ESB_LIT(&b, "\"");
-    i = e + 1;
+    i++;
   }
   if (has_more) ESB_LIT(&b, "],1)");
   else          ESB_LIT(&b, "],0)");

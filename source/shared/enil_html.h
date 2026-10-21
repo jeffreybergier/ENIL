@@ -7,7 +7,7 @@
  * page like desktop Cmd-+ BEFORE first paint (running in <head> means the
  * first layout is already scaled — no post-load reflow). UA detection keeps
  * the same markup serving both targets; macOS WebKit stays at 1.0. Emitted
- * by every <head>-producing site so empty-state and populated pages match. */
+ * by picker and empty-state pages; chat pages use viewport-point sizing. */
 #define ENIL_HTML_ZOOM_SCRIPT \
   "<script>document.documentElement.style.zoom=" \
   "/iP(hone|ad|od)/.test(navigator.userAgent)?'1.2':'1.0';</script>"
