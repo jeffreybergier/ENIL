@@ -13,6 +13,11 @@ include $(ALTIVEC_ROOT)/make/projects.mk
 cloudflare-%: FORCE
 	@cd "$(ENIL_PROJECT_ROOT)/source/cloudflare" && npm run "$*"
 
+# Offline, opt-in timing workload; not part of correctness tests.
+.PHONY: benchmark-render
+benchmark-render:
+	@python3 -B "$(ENIL_PROJECT_ROOT)/source/tests/render_benchmark.py" $(BENCH_ARGS)
+
 test: test-host
 test-host-suite: test-build-system test-client-identity native-tests cloudflare-test
 
