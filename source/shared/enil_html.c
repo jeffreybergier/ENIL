@@ -161,8 +161,9 @@ static const char kFoot[] =
     "b.appendChild(d);"
     "d.innerHTML=h;"
     "var el=d.firstChild;"
-    "if(el)b.appendChild(el);"
-    "b.removeChild(d);"
+    /* Replace the attached parser in one mutation instead of appending the
+       row and then removing a second body child. */
+    "if(el)b.replaceChild(el,d);else b.removeChild(d);"
     "if(stick)window.scrollTo(0,b.scrollHeight)"
   "}"
   "function updateMessage(id,h,force){"
@@ -389,11 +390,15 @@ static const char kFoot[] =
     "var y0=(window.pageYOffset||b.scrollTop||0);"
     "var d=document.createElement('div');"
     "b.appendChild(d);"
+    /* Parse while attached for Tiger, but stage rows in a fragment so the
+       live message list receives the page in one insertion, in source order. */
+    "var frag=document.createDocumentFragment();"
     "for(var i=0;i<a.length;i++){"
       "d.innerHTML=a[i];"
       "var el=d.firstChild;"
-      "if(el)b.insertBefore(el,ref)"
+      "if(el)frag.appendChild(el)"
     "}"
+    "b.insertBefore(frag,ref);"
     "b.removeChild(d);"
     "if(!more&&btn&&btn.parentNode)btn.parentNode.removeChild(btn);"
     "window.scrollTo(0,y0+(b.scrollHeight-h0))"

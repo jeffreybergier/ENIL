@@ -70,6 +70,9 @@ try {
     if (!ready) throw new Error('Page did not initialize');
     const load_ms = await evaluate('benchmarkReady');
     const result = await evaluate(`(async () => {
+      if (document.documentElement.clientWidth !== 320 || window.innerWidth !== 320)
+        throw Error('Expected a 320 CSS pixel viewport, got ' +
+                    document.documentElement.clientWidth + '/' + window.innerWidth);
       const n = document.querySelectorAll('.enil-seg[id^="msg-"]').length;
       const images = Array.from(document.images);
       if (n !== ${count} || images.some(i => !i.complete || !i.naturalWidth))
@@ -106,19 +109,29 @@ try {
         for (const e of old.querySelectorAll('[id]')) e.id = 'older-' + i + '-' + e.id;
         older.push(old.outerHTML);
       }
+      const anchor = document.getElementById('msg-000000');
+      const anchorTop = anchor.getBoundingClientRect().top;
       const prependStart = performance.now();
       prependMessages(older, false);
       void document.body.offsetHeight;
       const prepend_layout_ms = performance.now()-prependStart;
       if (document.querySelectorAll('.enil-seg').length !== ${count + 41})
         throw Error('Append/prepend lost messages');
+      const rows = document.querySelectorAll('.enil-message');
+      for (let i=0; i<40; i++) {
+        if (rows[i].querySelector('.enil-seg').id !== 'older-' + i + '-append-msg-000000')
+          throw Error('Prepend changed message order');
+      }
+      if (rows[rows.length-1].querySelector('.enil-seg').id !== 'append-msg-000000')
+        throw Error('Append did not insert at the end');
+      const prepend_anchor_drift_px = Math.abs(anchor.getBoundingClientRect().top-anchorTop);
       return {scroll_ms, append_layout_ms, prepend_layout_ms, dom_nodes: document.querySelectorAll('*').length,
-        images: images.length, emojis};
+        images: images.length, emojis, prepend_anchor_drift_px};
     })()`);
     if (run >= 0) samples.push({load_ms, ...result});
     await call('Target.closeTarget', {targetId}, null); session = undefined;
   }
-  console.log(JSON.stringify({version: version.product, viewport: '320x568@2 mobile; iOS UA', samples}));
+  console.log(JSON.stringify({version: version.product, viewport: '320x568@2 mobile; verified 320 CSS px; iOS UA', samples}));
 } finally {
   child.kill();
   for (const p of pending.values()) clearTimeout(p.timer);

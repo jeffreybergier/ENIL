@@ -16,7 +16,7 @@ import subprocess
 
 REPO = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
-WORKLOAD = 'mixed-chat-v1'
+WORKLOAD = 'mixed-chat-v2'
 
 
 def run(args, **kwargs):
@@ -128,7 +128,10 @@ def compare_results(result, baseline, enforce=False, threshold=25):
 
 
 def main():
+    global REPO
     p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--source-root', type=Path, default=REPO,
+                   help='benchmark production code/CSS from another checkout using this harness')
     p.add_argument('--messages', type=int, default=2000)
     p.add_argument('--repeats', type=int, default=7)
     p.add_argument('--browser', default=os.environ.get('CHROMIUM'))
@@ -136,6 +139,7 @@ def main():
     p.add_argument('--max-regression-percent', type=float, default=25)
     p.add_argument('--enforce', action='store_true', help='fail on timing regressions (only on a controlled runner)')
     args = p.parse_args()
+    REPO = args.source_root.resolve()
     if args.messages < 5 or args.messages % 5 or args.repeats < 3:
         p.error('messages must be a positive multiple of 5; repeats must be >= 3')
     browser = args.browser or shutil.which('chromium') or shutil.which('google-chrome')
@@ -172,9 +176,19 @@ def main():
     html = (out / 'chats/chat.html').read_text()
     if len(re.findall(r'id="msg-\d+"', html)) != args.messages:
         raise RuntimeError('Renderer did not produce the complete fixture')
+    # Legacy pages omit viewport metadata, making mobile Chromium use a
+    # 980-CSS-pixel layout on the emulated 320-pixel screen. Compare equal
+    # layout widths without modifying the production renderer's saved output.
+    viewport_injected = not re.search(r'<meta\b[^>]*name=[\"\']viewport[\"\']', html, re.I)
+    browser_html = html
+    if viewport_injected:
+        browser_html = html.replace('</head>',
+            '<meta name="viewport" content="width=device-width,initial-scale=1"></head>', 1)
+    browser_page = out / 'chats/browser.html'
+    browser_page.write_text(browser_html)
     with (out / 'browser.log').open('w') as log:
         browser_result = json.loads(run(['node', str(HERE / 'render_benchmark_browser.mjs'), browser,
-                                        str(out / 'chats/chat.html'), str(args.messages), str(args.repeats)], stderr=log))
+                                        str(browser_page), str(args.messages), str(args.repeats)], stderr=log))
     metrics = {'native_render_ms': summary([float(s) for s in native.splitlines()])}
     for key in ['load_ms', 'scroll_ms', 'append_layout_ms', 'prepend_layout_ms']:
         metrics['browser_' + key] = summary([s[key] for s in browser_result['samples']])
@@ -190,12 +204,15 @@ def main():
                               'compiler': run(['cc', '--version']).splitlines()[0],
                               'browser': browser_result['version'], 'viewport': browser_result['viewport'],
                               'node': run(['node', '--version']).strip()},
+              'browser_viewport_injected': viewport_injected,
+              'prepend_anchor_max_drift_px': max(s['prepend_anchor_drift_px'] for s in browser_result['samples']),
               'html_bytes': len(html.encode()), 'css_sha256': hashlib.sha256(css.encode()).hexdigest(),
               'dom': {k: browser_result['samples'][0][k] for k in ['dom_nodes', 'images', 'emojis']},
               'metrics': metrics}
     (out / 'results.json').write_text(json.dumps(result, indent=2) + '\n')
     for key, value in metrics.items():
         print(f'{key}: median {value["median"]:.2f} ms ({value["min"]:.2f}–{value["max"]:.2f})')
+    print('Maximum prepend scroll-anchor drift:', result['prepend_anchor_max_drift_px'], 'px')
     print('Results and page:', out)
     if args.compare:
         compare_results(result, json.loads(args.compare.read_text()),

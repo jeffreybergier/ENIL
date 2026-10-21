@@ -37,8 +37,12 @@ Core Foundation locale/date formatting costs are not measured.
 The browser uses the actual generated HTML/JavaScript and extracts current
 `commonCSS` and `messageCSS` literals from `ENILUserDefaults.m`. Extraction fails
 if those definitions disappear; update the extractor if CSS becomes dynamic.
-It uses a 320×568 viewport, scale factor 2, and iPhone user agent to activate the
-app's mobile zoom. Each sample gets a new page, with browser caching disabled;
+It uses a 320×568 viewport, scale factor 2, and iPhone user agent. Workload v2
+also verifies a 320-CSS-pixel layout: v1's simulated screen alone allowed legacy
+pages without viewport metadata to lay out at 980 CSS pixels. The runner adds
+viewport metadata to a separate browser fixture only when the rendered page
+omits it. Existing viewport metadata and zoom styles are preserved. The raw
+production HTML is kept unchanged. Each sample gets a new page, with browser caching disabled;
 two browser warmups precede seven measured samples. Filesystem caches remain
 warm. Measurements are:
 
@@ -54,20 +58,36 @@ warm. Measurements are:
 - `browser_prepend_layout_ms`: production `prependMessages` plus forced layout
   for 40 cloned rendered text rows, after the append.
 
-Message count, emoji/photo/sticker counts and decoded images are asserted before
-accepting a sample. Results record individual samples, median/min/max, compiler,
-browser, host, viewport, source revision, CSS hash and document size. DOM node
+Message count, emoji/photo/sticker counts, decoded images, viewport width, and
+insertion order are asserted before accepting a sample. Prepend scroll-anchor
+drift is recorded separately in pixels; legacy zoomed pages can already have
+drift, so this diagnostic is not a timing regression or a failed baseline.
+Verify zero drift on the current renderer. Order and scroll-position checks run
+outside the timed insertion regions. Results record individual samples,
+median/min/max, compiler, browser, host, viewport, source revision, CSS hash and
+document size. DOM node
 count is captured after the 41 inserted rows; image counts describe the original
 2,000-message page. Missing assets or incomplete rendering fail the run, rather
 than producing an apparently faster result.
 
 ## Baseline and comparisons
 
-The initial baseline is [render-baseline.json](render-baseline.json). Run:
+The historical v1 baseline is [render-baseline.json](render-baseline.json).
+Its layout width was not controlled, so it cannot be compared with v2 results.
+It is retained for reference rather than overwritten with a faster baseline.
+
+Use the current harness for both revisions. With the pre-change code in a
+separate checkout (including its submodules), run the two versions sequentially:
 
 ```sh
-make benchmark-render BENCH_ARGS='--compare docs/render-baseline.json'
+make benchmark-render BENCH_ARGS='--source-root /path/to/before-checkout'
+make benchmark-render BENCH_ARGS='--compare /path/to/before-checkout/build/render-benchmark/results.json'
 ```
+
+`--source-root` selects production C sources and CSS from that checkout, writes
+outputs beneath its `build/`, and records its Git revision. Both runs use the
+invoking checkout's benchmark driver and browser checks. This avoids silently
+comparing different harnesses when the benchmark itself changes.
 
 Comparison is advisory by default because shared-runner load, browser updates,
 CPU scheduling and host differences affect timings. Chromium on Linux is a
@@ -87,8 +107,11 @@ and a fresh baseline; do not refresh baselines merely to hide a slowdown.
 
 Outputs are in `build/render-benchmark/`: `results.json`, `browser.log`,
 `fixture.sqlite`, compiled driver, CSS, fonts, assets, and `chats/chat.html`.
-Open that HTML locally to inspect the fixture. To deliberately establish a new
-baseline after reviewing its results:
+`chats/chat.html` is the untouched renderer output; `chats/browser.html` is the
+viewport-normalized browser fixture. Results record whether metadata was
+injected and the maximum prepend scroll-anchor drift. Open either HTML locally
+to inspect it. To deliberately establish a new baseline after reviewing its
+results:
 
 ```sh
 make benchmark-render
