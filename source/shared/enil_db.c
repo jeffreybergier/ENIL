@@ -638,8 +638,10 @@ static const char * const kSQL_InsertMessageSticonPackage =
 
 static const char * const kSQL_GetMessageSticons =
   "SELECT ms.package_id, ms.sticon_id, COALESCE(s.image_path, ''),"
-  " COALESCE(s.image_width, 0), COALESCE(s.image_height, 0)"
+  " COALESCE(s.image_width, 0), COALESCE(s.image_height, 0),"
+  " ms.ordinal, m.replace_json"
   " FROM message_sticons ms"
+  " JOIN messages_v2 m ON m.id = ms.message_id"
   " LEFT JOIN sticons_v2 s ON s.package_id = ms.package_id"
   "  AND s.sticon_id = ms.sticon_id"
   " WHERE ms.message_id = ? ORDER BY ms.ordinal ASC";
@@ -2384,11 +2386,14 @@ static const enil_col_t message_sticon_cols[] = {
   { "sticon_id",    ENIL_F_STR },
   { "image_path",   ENIL_F_STR },
   { "image_width",  ENIL_F_INT },
-  { "image_height", ENIL_F_INT }
+  { "image_height", ENIL_F_INT },
+  { "ordinal", ENIL_F_INT },
+  { "replace_json", ENIL_F_STR }
 };
 
 /* ============================================================================
- * Return the ordered sticon resources for a message (one row per $-marker).
+ * Return ordered sticon resources with S/E from persisted REPLACE metadata.
+ * Read existing rows directly; no migration or re-sync is required.
  * ==========================================================================*/
 cJSON *enil_db_get_message_sticons(sqlite3 *db, const char *message_id) {
   sqlite3_stmt *stmt;
@@ -2401,7 +2406,31 @@ cJSON *enil_db_get_message_sticons(sqlite3 *db, const char *message_id) {
     return NULL;
   }
   sqlite3_bind_text(stmt, 1, message_id, -1, SQLITE_TRANSIENT);
-  return rows_to_cjson_array(stmt, message_sticon_cols, 5);
+  {
+    cJSON *rows = rows_to_cjson_array(stmt, message_sticon_cols, 7);
+    cJSON *first = cJSON_GetArrayItem(rows, 0);
+    const char *json = cJSON_GetStringValue(
+      cJSON_GetObjectItem(first, "replace_json"));
+    cJSON *root = json ? cJSON_Parse(json) : NULL;
+    cJSON *resources = cJSON_GetObjectItem(
+      cJSON_GetObjectItem(root, "sticon"), "resources");
+    cJSON *row;
+    cJSON_ArrayForEach(row, rows) {
+      int ordinal = (int)cJSON_GetNumberValue(
+        cJSON_GetObjectItem(row, "ordinal"));
+      cJSON *resource = cJSON_GetArrayItem(resources, ordinal);
+      cJSON *start = cJSON_GetObjectItem(resource, "S");
+      cJSON *end = cJSON_GetObjectItem(resource, "E");
+      if (cJSON_IsNumber(start) && cJSON_IsNumber(end)) {
+        cJSON_AddNumberToObject(row, "S", start->valuedouble);
+        cJSON_AddNumberToObject(row, "E", end->valuedouble);
+      }
+      cJSON_DeleteItemFromObject(row, "ordinal");
+      cJSON_DeleteItemFromObject(row, "replace_json");
+    }
+    cJSON_Delete(root);
+    return rows;
+  }
 }
 
 /* ============================================================================

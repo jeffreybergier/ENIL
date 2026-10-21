@@ -1416,9 +1416,8 @@ char *enil_html_js_append_inline_sticon(sqlite3 *db, const char *temp_id,
     LOG("js_append_inline_sticon", "NULL argument");
     return NULL;
   }
-  (void)alt_texts;
   text_html = enil_message_text_html_for_sticons(db, text, count,
-                                                 package_ids, sticon_ids);
+                                                 package_ids, sticon_ids, alt_texts);
   memset(&m, 0, sizeof(m));
   m.message_id   = temp_id;
   m.sender_name  = sender_name ? sender_name : "";
