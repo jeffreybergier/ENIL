@@ -107,14 +107,4 @@
   [self setBackgroundColor:[UIColor clearColor]];
 }
 
-- (void)XP_removeShadow
-{
-  NSEnumerator *e = [[self subviews] objectEnumerator];
-  UIView *v;
-  while ((v = [e nextObject])) {
-    if (![v isKindOfClass:[UIImageView class]]) break;  /* hit the content view */
-    [v setHidden:YES];
-  }
-}
-
 @end

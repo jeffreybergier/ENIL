@@ -598,7 +598,6 @@ didPickSticonPackageId:(NSString *)packageId
 - (void)webViewDidFinishLoad:(UIWebView *)webView
 {
   (void)webView;
-  [[[self webView] XP_scrollView] XP_removeShadow];
   [self finishInitialWebViewScroll];
 }
 

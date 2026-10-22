@@ -40,16 +40,6 @@
  * shows through. Generic for any view — the web views are the only callers. */
 - (void)XP_setBackgroundTransparent;
 
-/* Hide a UIWebView scroll view's overscroll drop-shadow without disturbing its
- * scroll indicators. UIWebView layers its scroll view as: gradient shadow
- * UIImageViews (behind) → the UIWebBrowserView content → scroll-indicator
- * UIImageViews (in front). The shadows are exactly the image views preceding the
- * content view, so this hides leading image-view subviews and stops at the first
- * non-image subview — leaving the indicators alone. There is no UIScrollView
- * property for this; hiding the views is the only lever. Call on the scroll view
- * (via XP_scrollView) after each load; the views are rebuilt per content load.
- * Sending this to nil (the 4.3 floor's absent scroll view) is a safe no-op. */
-- (void)XP_removeShadow;
 @end
 
 @interface UIWebView (XPUIKit)

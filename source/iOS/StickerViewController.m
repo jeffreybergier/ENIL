@@ -8,7 +8,7 @@
 #import "ENILUserDefaults.h"
 #import "XPFoundation.h"
 #import "AIFontAwesome.h"
-#import "XPUIKit.h"  /* XP_scrollView / XP_setBackgroundTransparent / XP_removeShadow */
+#import "XPUIKit.h"  /* XP_scrollView / XP_setBackgroundTransparent */
 
 /* Picker grid geometry — matches the macOS inspector. Stickers use the 108 px
  * cell / 100 px thumb pair; sticons the compact 48/42 pair. */
@@ -215,12 +215,6 @@ static void parseQuery(NSString *query, NSString **packageId, NSString **sticker
     return NO;
   }
   return YES;
-}
-
-- (void)webViewDidFinishLoad:(UIWebView *)webView
-{
-  (void)webView;
-  [[[self webView] XP_scrollView] XP_removeShadow];
 }
 
 - (void)dealloc
