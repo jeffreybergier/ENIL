@@ -103,6 +103,36 @@ try {
       void document.body.offsetHeight;
       const append_layout_ms = performance.now()-appendStart;
       await frame(); await frame();
+      const sleep = ms => new Promise(r => setTimeout(r, ms));
+      const assert = (ok, message) => {if(!ok)throw Error(message);};
+      // Verify real scroll motion, final clearance, burst following and cancellation.
+      const movingTop = enilScrollTop();
+      await sleep(600);
+      assert(enilScrollTop() > movingTop, 'Append did not animate');
+      assert(Math.abs(enilBottom()-enilScrollTop()) <= 1, 'Append missed bottom');
+      const tail = document.querySelectorAll('.enil-message');
+      assert(Math.abs(innerHeight-tail[tail.length-1].getBoundingClientRect().bottom-8)<=1,
+        'Expected eight-point trailing clearance');
+      window.scrollTo(0,0);
+      const topBefore = enilScrollTop();
+      appendMessage(node.outerHTML.replace(/append-msg-/g,'quiet-msg-'), false);
+      await sleep(600);
+      assert(enilScrollTop()===topBefore,'Incoming message pulled reader from history');
+      document.querySelector('.enil-message:last-of-type').remove();
+      enilScrollNow();
+      appendMessage(node.outerHTML.replace(/append-msg-/g,'burst1-msg-'),false);
+      appendMessage(node.outerHTML.replace(/append-msg-/g,'burst2-msg-'),false);
+      setReadMarker('burst2-msg-000000');
+      await sleep(600);
+      assert(Math.abs(enilBottom()-enilScrollTop())<=1,'Burst/receipt lost bottom following');
+      setReadMarker('');
+      document.getElementById('burst1-msg-000000').closest('.enil-message').remove();
+      document.getElementById('burst2-msg-000000').closest('.enil-message').remove();
+      window.scrollTo(0,0);enilAnimateScroll();await sleep(80);
+      window.dispatchEvent(new Event('touchstart'));
+      const stopped = enilScrollTop();await sleep(600);
+      assert(enilScrollTop()===stopped,'Touch did not cancel animation');
+      enilScrollNow();
       const older = [];
       for (let i=0; i<40; i++) {
         const old = node.cloneNode(true);
@@ -111,6 +141,7 @@ try {
       }
       const anchor = document.getElementById('msg-000000');
       const anchorTop = anchor.getBoundingClientRect().top;
+      enilAnimateScroll(); // Pagination must cancel this pending bottom scroll.
       const prependStart = performance.now();
       prependMessages(older, false);
       void document.body.offsetHeight;
@@ -124,7 +155,9 @@ try {
       }
       if (rows[rows.length-1].querySelector('.enil-seg').id !== 'append-msg-000000')
         throw Error('Append did not insert at the end');
+      await sleep(600);
       const prepend_anchor_drift_px = Math.abs(anchor.getBoundingClientRect().top-anchorTop);
+      assert(prepend_anchor_drift_px<=1,'Pagination lost its anchor');
       return {scroll_ms, append_layout_ms, prepend_layout_ms, dom_nodes: document.querySelectorAll('*').length,
         images: images.length, emojis, prepend_anchor_drift_px};
     })()`);

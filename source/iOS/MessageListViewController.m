@@ -216,7 +216,7 @@ static const CGFloat kComposeBarHeight = 44.0;
 - (void)scrollWebViewToBottom
 {
   [[self webView] stringByEvaluatingJavaScriptFromString:
-    @"window.scrollTo(0, document.body.scrollHeight);"];
+    @"enilScrollNow();"];
 }
 
 #pragma mark - Rendering

@@ -134,6 +134,36 @@ static void append_head(ENILStrBuf *b, const char *body_class,
 
 static const char kFoot[] =
   "<script>"
+  /* One deferred animation per JS burst. Keep following while it runs,
+   * remeasure the target for receipts/media/resize, and yield to user input.
+   * Timer-based scrolling also works on legacy WebKit without CSS animation. */
+  "var enilScrollTimer=null,enilScrollGeneration=0;"
+  "function enilScrollTop(){return window.pageYOffset||document.documentElement.scrollTop||document.body.scrollTop||0;}"
+  "function enilBottom(){return Math.max(0,Math.max(document.body.scrollHeight,document.documentElement.scrollHeight)-(window.innerHeight||document.documentElement.clientHeight||0));}"
+  "function enilCancelScroll(){enilScrollGeneration++;if(enilScrollTimer!==null)clearTimeout(enilScrollTimer);enilScrollTimer=null;}"
+  "function enilScrollNow(){enilCancelScroll();window.scrollTo(0,enilBottom());}"
+  "function enilAnimateScroll(){"
+  "if(enilScrollTimer!==null)return;"
+  "var g=++enilScrollGeneration;"
+  "enilScrollTimer=setTimeout(function(){"
+  "var start=enilScrollTop(),started=(new Date()).getTime();"
+  "function step(){"
+  "if(g!==enilScrollGeneration)return;"
+  "var p=Math.min(1,((new Date()).getTime()-started)/500);"
+  "window.scrollTo(0,Math.round(start+(enilBottom()-start)*(1-Math.pow(1-p,3))));"
+  "if(p<1)enilScrollTimer=setTimeout(step,16);else enilScrollTimer=null;"
+  "}"
+  "step();"
+  "},0);"
+  "}"
+  "if(window.addEventListener){"
+  "window.addEventListener('touchstart',enilCancelScroll,false);"
+  "window.addEventListener('mousedown',enilCancelScroll,false);"
+  "window.addEventListener('wheel',enilCancelScroll,false);"
+  "window.addEventListener('mousewheel',enilCancelScroll,false);"
+  "window.addEventListener('keydown',enilCancelScroll,false);"
+  "}"
+
   /* "Stick to bottom" test: is the viewport already at (or within ~120px of)
      the bottom? The page is body-scrolled, so measure off document.body — the
      same scrollHeight/pageYOffset the append and prepend paths already use. A
@@ -142,6 +172,7 @@ static const char kFoot[] =
      scrollingElement, so read window.innerHeight with a
      documentElement.clientHeight fallback. */
   "function enilNearBottom(){"
+    "if(enilScrollTimer!==null)return true;"
     "var b=document.body;"
     "var vh=(window.innerHeight||document.documentElement.clientHeight||0);"
     "var st=(window.pageYOffset||b.scrollTop||0);"
@@ -164,7 +195,7 @@ static const char kFoot[] =
     /* Replace the attached parser in one mutation instead of appending the
        row and then removing a second body child. */
     "if(el)b.replaceChild(el,d);else b.removeChild(d);"
-    "if(stick)window.scrollTo(0,b.scrollHeight)"
+    "if(stick)enilAnimateScroll()"
   "}"
   "function updateMessage(id,h,force){"
     "var el=document.getElementById('msg-'+id);"
@@ -177,7 +208,7 @@ static const char kFoot[] =
     "var nw=d.firstChild;"
     "if(nw)el.parentNode.replaceChild(nw,el);"
     "b.removeChild(d);"
-    "if(stick)window.scrollTo(0,b.scrollHeight)"
+    "if(stick)enilAnimateScroll()"
   "}"
   "function failMessage(id){"
     "var el=document.getElementById('msg-'+id);"
@@ -189,6 +220,7 @@ static const char kFoot[] =
      full reload — used when an SSE reaction op updates messages_v2. h is the
      new .enil-reactions block, or "" to just remove it. */
   "function updateReactions(id,h){"
+    "var stick=enilNearBottom();"
     "var el=document.getElementById('msg-'+id);"
     "if(!el)return;"
     "var i,c=el.childNodes;"
@@ -197,14 +229,15 @@ static const char kFoot[] =
         "el.removeChild(c[i]);break"
       "}"
     "}"
-    "if(!h)return;"
+    "if(!h){if(stick)enilAnimateScroll();return;}"
     "var b=document.body;"
     "var d=document.createElement('div');"
     "b.appendChild(d);"
     "d.innerHTML=h;"
     "var nw=d.firstChild;"
     "if(nw)el.appendChild(nw);"
-    "b.removeChild(d)"
+    "b.removeChild(d);"
+    "if(stick)enilAnimateScroll()"
   "}"
   /* Move (or clear) the "Read up to here" marker without a full reload.
      id="" clears the marker; an id places it immediately after the row that
@@ -251,7 +284,7 @@ static const char kFoot[] =
     "var nw=d.firstChild;"
     "if(nw)row.parentNode.insertBefore(nw,row.nextSibling);"
     "b.removeChild(d);"
-    "if(stick)window.scrollTo(0,b.scrollHeight)"
+    "if(stick)enilAnimateScroll()"
   "}"
   /* Self read-position marker — the gray "Seen" sibling of setReadMarker.
      Byte-for-byte the same split-and-insert logic, only the element id,
@@ -291,7 +324,7 @@ static const char kFoot[] =
     "var nw=d.firstChild;"
     "if(nw)row.parentNode.insertBefore(nw,row.nextSibling);"
     "b.removeChild(d);"
-    "if(stick)window.scrollTo(0,b.scrollHeight)"
+    "if(stick)enilAnimateScroll()"
   "}"
   /* Group variant of setReadMarker — keyed by reader_mid so multiple
      readers can be tracked independently. Labels are appended directly
@@ -371,7 +404,7 @@ static const char kFoot[] =
     "lbl.setAttribute('data-reader-mid',rmid);"
     "lbl.appendChild(document.createTextNode(name));"
     "target.appendChild(lbl);"
-    "if(stick)window.scrollTo(0,document.body.scrollHeight)"
+    "if(stick)enilAnimateScroll()"
   "}"
   /* Mark an existing bubble as unsent in place (SSE op 64/65) — adds the
      `deleted` class so CSS applies the strike/fade; text stays visible. */
@@ -383,6 +416,7 @@ static const char kFoot[] =
   /* Insert older messages above the existing ones while keeping the user's
      current view fixed: re-anchor scrollTop by the height we just added. */
   "function prependMessages(a,more){"
+    "enilCancelScroll();"
     "var b=document.body;"
     "var btn=document.getElementById('load-earlier');"
     "var ref=btn?btn.nextSibling:b.firstChild;"
@@ -403,7 +437,7 @@ static const char kFoot[] =
     "if(!more&&btn&&btn.parentNode)btn.parentNode.removeChild(btn);"
     "window.scrollTo(0,y0+(b.scrollHeight-h0))"
   "}"
-  "window.scrollTo(0,document.body.scrollHeight)"
+  "enilScrollNow()"
   "</script></body></html>";
 
 static const char *content_placeholder(int ct) {

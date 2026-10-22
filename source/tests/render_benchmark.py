@@ -186,6 +186,11 @@ def main():
             '<meta name="viewport" content="width=device-width,initial-scale=1"></head>', 1)
     browser_page = out / 'chats/browser.html'
     browser_page.write_text(browser_html)
+    # Keep interactive controls outside the production viewport and document.
+    demo_script = (HERE / 'render_scroll_demo.js').read_text()
+    (out / 'chats/scroll-demo.html').write_text(browser_html.replace(
+        '</body>', '<script>' + demo_script + '</script></body>'))
+    shutil.copyfile(HERE / 'render_scroll_demo.html', out / 'scroll-demo.html')
     with (out / 'browser.log').open('w') as log:
         browser_result = json.loads(run(['node', str(HERE / 'render_benchmark_browser.mjs'), browser,
                                         str(browser_page), str(args.messages), str(args.repeats)], stderr=log))

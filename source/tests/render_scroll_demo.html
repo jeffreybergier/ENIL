@@ -1,0 +1,24 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>ENIL scrolling demo</title>
+<style>
+body{font:16px/1.5 Helvetica,Arial,sans-serif;background:#edf0f3;color:#252a31;margin:32px}
+main{display:flex;gap:32px;align-items:flex-start;flex-wrap:wrap}
+iframe{width:320px;height:480px;border:1px solid #aab2bc;background:white}
+section{max-width:450px}button{font:inherit;padding:8px 12px;margin:0 6px 10px 0;cursor:pointer}
+</style>
+<h1>ENIL · incoming messages</h1>
+<main><iframe id="chat" title="320-point conversation" src="chats/scroll-demo.html"></iframe>
+<section><p>Production chat renderer, 8-point trailing clearance and a 500 ms scroll animation.</p>
+<button onclick="send('incoming')">Incoming text</button>
+<button onclick="send('outgoing')">Send text</button>
+<button onclick="send('photo')">Incoming photo</button>
+<button onclick="send('burst')">Three-message burst</button>
+<button onclick="send('receipt')">Read marker</button>
+<button onclick="send('bottom')">Back to bottom</button>
+<button onclick="document.getElementById('chat').src='chats/scroll-demo.html'">Reset</button>
+<p>Scroll up inside the conversation, then add an incoming message: your position should stay put. Send text to follow the conversation again. Interrupt an animation by touching, clicking, or scrolling inside the conversation.</p>
+<p>This desktop-browser preview demonstrates layout and motion; it does not emulate iOS 6 WebKit.</p></section></main>
+<script>
+function send(action){document.getElementById('chat').contentWindow.postMessage(action,'*');}
+</script>

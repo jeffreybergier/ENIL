@@ -122,3 +122,24 @@ For a quick harness check, use `BENCH_ARGS='--messages 10 --repeats 3'`.
 Message count must be a positive multiple of five; repeats must be at least three.
 The benchmark is opt-in and separate from `make native-tests`; noisy performance
 thresholds should not break ordinary correctness testing.
+
+## Interactive scrolling preview
+
+The same run also generates `build/render-benchmark/scroll-demo.html`. Open it
+locally to exercise incoming text, outgoing text, photos, bursts and read markers
+inside a 320×480 conversation. Its companion `chats/scroll-demo.html` uses the
+production page plus a preview-only control script; the original `chat.html`
+remains unchanged. Keep the generated directory together so assets resolve.
+For a quick demonstration, run:
+
+```sh
+make benchmark-render BENCH_ARGS='--messages 40 --repeats 3'
+```
+
+The browser checks additionally verify animated append completion, eight-point
+trailing clearance, incoming messages preserving a history reader's position,
+burst following, and touch cancellation. Append timing still measures synchronous
+insertion/layout only, not the 500 ms animation. History prepend must cancel any
+pending animation and preserve its scroll anchor. Short conversations retain
+their existing top alignment; an offscreen entrance is not guaranteed there.
+This Chromium preview does not establish iOS 6 or Tiger WebKit device behavior.

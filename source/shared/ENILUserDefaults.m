@@ -6,7 +6,7 @@
 {
   return @"*{margin:0;padding:0}"
           "html{background:transparent}"
-          "body.enil-messages{background:#ffffff;color:#252a31;padding:0}"
+          "body.enil-messages{background:#ffffff;color:#252a31;padding:0 0 8px;overflow-anchor:none}"
           "body.enil-sticker-picker{background:#f5f5f5;color:#333;padding:0}"
           ".enil-image{display:block;border:0}"
           ".enil-load-earlier{clear:both;margin:0 0 12px;padding:0 0 8px;"
@@ -66,19 +66,19 @@
 + (NSString *)messageCSS;
 {
   return [[self commonCSS] stringByAppendingString:
-          @".enil-message{overflow:hidden;margin:18px 12px}"
+          @".enil-message{overflow:hidden;margin:18px 12px 0}"
           ".enil-day{clear:both;text-align:center;margin:26px 12px 22px;"
           "height:8px;border-bottom:1px solid #dce1e6}"
           ".enil-day span{display:inline-block;padding:0 12px;background:#fff;"
           "font-size:10px;line-height:16px;font-weight:bold;"
           "color:#6b7683;letter-spacing:0.06em;text-transform:uppercase}"
           ".enil-read-marker{clear:both;position:relative;height:0;"
-          "margin:10px 0 18px;border-top:1px solid #b8bfc7;text-align:right}"
+          "margin:18px 0 0;border-top:1px solid #b8bfc7;text-align:right}"
           ".enil-read-marker .enil-read-label{display:inline-block;"
           "position:relative;top:-8px;margin-right:12px;padding:0 6px;"
           "background:#ffffff;font-size:10px;line-height:14px;color:#68717d}"
           ".enil-seen-marker{clear:both;position:relative;height:0;"
-          "margin:10px 0 18px;border-top:1px solid #d9dde2;text-align:left}"
+          "margin:18px 0 0;border-top:1px solid #d9dde2;text-align:left}"
           ".enil-seen-marker .enil-seen-label{display:inline-block;"
           "position:relative;top:-8px;margin-left:12px;padding:0 6px;"
           "background:#ffffff;font-size:10px;line-height:14px;color:#68717d}"
@@ -141,7 +141,7 @@
           ".enil-sticker img{display:block;max-width:100%;height:auto!important}"
           /* Photo rows use the whole viewport on 320-point phones. Text
            * and metadata keep their insets; stickers retain their own size. */
-          ".enil-message.enil-photo-message{margin:16px 0;padding:0}"
+          ".enil-message.enil-photo-message{margin:16px 0 0;padding:0}"
           ".enil-photo-message .enil-avatar{display:none}"
           ".enil-photo-message .enil-bubble{width:320px;max-width:100%;"
           "-webkit-border-radius:0;border-radius:0}"
