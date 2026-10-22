@@ -45,6 +45,13 @@ Find the container again after each installation; its UUID can change.
 | Private +8s / `publish` | Retain one synthetic request with this app's section ID and unique publisher/record IDs; invoke `publish` after eight seconds. Press Home first. |
 | Withdraw / `withdraw` | Invoke `withdraw` on that retained request; cannot withdraw an earlier process's request. |
 | Clear public / `clear` | Cancel this test app's scheduled local notifications and set its badge to zero. |
+| Public x3 / `batch` | Schedule three distinctly labeled notifications at +15/+18/+21 seconds, with badge 3. |
+| Badge only / `badge` | Set the badge to zero without cancelling any notification. Log the before/after badge count. |
+| Cancel all / `cancel` | Call `cancelAllLocalNotifications` without writing the badge. |
+| Cancel one / `cancel-one` | Cancel the oldest saved public request from this process, without writing the badge. This is not a delivered-inventory lookup. |
+| Pending / `pending` | Log `scheduledLocalNotifications`; these are pending requests, not delivered notifications. |
+| Delivered / `list` | Create a main-queue `BBObserver`, request this app's list, and display observed bulletins. No callback within five seconds means unknown, not empty. |
+| Clear selected / `clear-one` | Clear only the selected observed bulletin with `clearBulletins:inSection:`. Requires a successful read and row selection. No badge write or public fallback. |
 
 URLs use `enil-bulletin-probe://HOST`. Commands are diagnostic triggers with no
 caller-supplied content, section, or identifier. They never address another app.
@@ -57,6 +64,33 @@ background-task allowance; expiration cancels delayed work. These protections do
 not prevent private code from blocking or crashing. Calls returning normally are
 logged as **unverified**, never delivery/removal success. There is no automatic
 public fallback that could obscure a failed private test or duplicate delivery.
+
+## Comparing the clearing operations
+
+Create a fresh **Public x3** batch for each operation, press Home, and wait at
+least 22 seconds. Confirm the three entries visually before returning to the app.
+Test **Badge only**, **Cancel all**, and **Cancel one** independently; inspect
+both the badge and Notification Center after each. Reusing an already cleared
+batch would confound the comparison. The OS may itself change badge/tray state
+in response to cancellation; "no badge write" describes the probe's actions.
+
+For the private path, tap **Delivered** after the public batch has appeared. If
+rows arrive, tap one and then **Clear selected**. Check that only that entry is
+removed, then request a fresh list. The table holds at most 100 own-section
+bulletins and deduplicates their IDs; it is an observed view, not proof of a
+complete snapshot. No returned objects means private clearing cannot proceed.
+The probe never substitutes saved/scheduled requests for observed bulletins.
+
+The observer is invalidated and detached before each new read and on teardown.
+Callbacks are marshalled to the main thread and checked against the current
+observer instance. Other apps' bulletin contents are neither retained nor logged.
+Runtime protocol metadata is used for callback ABI checks where available. On
+8.4.1 that metadata is absent; known callback declarations are used with the
+runtime `observerFeed` integer width verified. See the
+[reference delegate declarations](https://github.com/nst/iOS-Runtime-Headers/blob/master/protocols/BBObserverDelegate.h).
+Private methods still require matching signatures; no feed masks or privileged
+entitlements are added. Connection events, invalidated IDs, timeouts, and actual
+bulletin callbacks are logged separately.
 
 ## Koolphone5 results — 2026-10-22
 
@@ -103,11 +137,27 @@ exposes `BBDataProviderConnection.addDataProvider:` and
 `BBDataProviderProxy.addBulletin:forDestinations:`), with the matching binary or
 headers used to establish initialization, service identity, lifetime, and IPC
 permissions before invocation. No destination masks or entitlements were guessed.
-`BBObserver` clearing and tap routing are also untested. Actual iOS 6 testing,
-stock-device behavior, and visual private-notification withdrawal remain open.
+The expanded observer test creates and invalidates an observer successfully,
+but receives `connection=disconnected` and no bulletin callbacks within five
+seconds. Its initial feed is zero. The installed framework lacks runtime
+`BBObserverDelegate` protocol metadata. Adding its required invalidated-ID
+callback removed the earlier delegate-contract diagnostic, but did not establish
+a connection. This is not proof of a particular entitlement denial: connection,
+subscription, and authorization requirements need further investigation.
+Consequently, private enumeration and selected-bulletin removal remain unproven.
+Tap routing, actual iOS 6 testing, and stock-device behavior also remain open.
+
+The user confirmed that **Badge only** removed both the badge and the delivered
+notifications after a three-notification batch. This isolates badge-zero as
+sufficient for tray clearing on this device; it is no longer only evidence for
+the combined Clear public operation. The pending-list control reported all three
+scheduled requests before their fire times. Cancellation-only results require
+separate visual checks; private delivered reads must not be inferred from those
+pending counts.
 
 Raw logs from this run are retained locally under
-`build/device/koolphone5-20261022/`; build artifacts and logs are ignored by Git.
+`build/device/koolphone5-20261022/` and `build/device/koolphone5-buttons/`;
+build artifacts and logs are ignored by Git.
 Remote staging is `~/tmp_altivec/enil-bulletin-probe-20261022`. The installed test
 app is retained for further experiments. Use the supported app uninstall UI or
 installer to remove it; deleting staging does not uninstall the app.
