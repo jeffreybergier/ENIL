@@ -141,7 +141,25 @@ static const char kFoot[] =
   "function enilScrollTop(){return window.pageYOffset||document.documentElement.scrollTop||document.body.scrollTop||0;}"
   "function enilBottom(){return Math.max(0,Math.max(document.body.scrollHeight,document.documentElement.scrollHeight)-(window.innerHeight||document.documentElement.clientHeight||0));}"
   "function enilCancelScroll(){enilScrollGeneration++;if(enilScrollTimer!==null)clearTimeout(enilScrollTimer);enilScrollTimer=null;}"
-  "function enilScrollNow(){enilCancelScroll();window.scrollTo(0,enilBottom());}"
+  /* Let WebKit clamp instant scrolling to its real limit. UIWebView's
+   * reported viewport height can differ from its final visible bounds. */
+  "function enilScrollNow(){enilCancelScroll();"
+    "window.scrollTo(0,Math.max(document.body.scrollHeight,"
+      "document.documentElement.scrollHeight));}"
+  "var enilInitialScrollGeneration=-1;"
+  "function enilFinishInitialScroll(){"
+    "if(enilInitialScrollGeneration!==enilScrollGeneration)return;"
+    "enilScrollNow();"
+    "enilInitialScrollGeneration=enilScrollGeneration;"
+    "var g=enilScrollGeneration;"
+    /* One deferred pass lets native load/layout callbacks settle. A touch,
+     * pagination or live animation invalidates it through the generation. */
+    "setTimeout(function(){"
+      "if(g!==enilScrollGeneration)return;"
+      "enilScrollNow();"
+      "enilInitialScrollGeneration=enilScrollGeneration;"
+    "},0);"
+  "}"
   "function enilAnimateScroll(){"
   "if(enilScrollTimer!==null)return;"
   "var g=++enilScrollGeneration;"
@@ -437,7 +455,10 @@ static const char kFoot[] =
     "if(!more&&btn&&btn.parentNode)btn.parentNode.removeChild(btn);"
     "window.scrollTo(0,y0+(b.scrollHeight-h0))"
   "}"
-  "enilScrollNow()"
+  "enilScrollNow();"
+  "enilInitialScrollGeneration=enilScrollGeneration;"
+  "if(window.addEventListener)"
+    "window.addEventListener('load',enilFinishInitialScroll,false);"
   "</script></body></html>";
 
 static const char *content_placeholder(int ct) {

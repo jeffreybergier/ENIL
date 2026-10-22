@@ -101,6 +101,21 @@ static const CGFloat kComposeBarHeight = 44.0;
   [self updateMarkSeenEnabled];
 }
 
+/* The navigation transition can finalize the web view's height after its
+ * HTML loads. The page's generation guard yields to any user interaction. */
+- (void)viewDidAppear:(BOOL)animated;
+{
+  [super viewDidAppear:animated];
+  [self finishInitialWebViewScroll];
+}
+
+- (void)finishInitialWebViewScroll;
+{
+  [[self webView] stringByEvaluatingJavaScriptFromString:
+    @"if(typeof enilFinishInitialScroll==='function')"
+     "enilFinishInitialScroll();"];
+}
+
 - (void)viewWillDisappear:(BOOL)animated
 {
   [super viewWillDisappear:animated];
@@ -584,6 +599,7 @@ didPickSticonPackageId:(NSString *)packageId
 {
   (void)webView;
   [[[self webView] XP_scrollView] XP_removeShadow];
+  [self finishInitialWebViewScroll];
 }
 
 - (void)dealloc

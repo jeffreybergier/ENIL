@@ -138,7 +138,9 @@ make benchmark-render BENCH_ARGS='--messages 40 --repeats 3'
 
 The browser checks additionally verify animated append completion, eight-point
 trailing clearance, incoming messages preserving a history reader's position,
-burst following, and touch cancellation. Append timing still measures synchronous
+burst following, and touch cancellation. Initial-load checks also simulate a
+viewport height reported 30 points too tall, late layout growth, and a user
+interrupting the deferred load correction. Append timing still measures synchronous
 insertion/layout only, not the 500 ms animation. History prepend must cancel any
 pending animation and preserve its scroll anchor. Short conversations retain
 their existing top alignment; an offscreen entrance is not guaranteed there.

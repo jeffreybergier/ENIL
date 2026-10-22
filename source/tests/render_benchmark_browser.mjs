@@ -89,6 +89,32 @@ try {
           document.getElementById('msg-000000').getBoundingClientRect().height <= 0)
         throw Error('Messages are not laid out');
       const frame = () => new Promise(r => requestAnimationFrame(r));
+      // Initial loading must reach the browser's real limit, even when
+      // UIWebView reports a viewport taller than its visible scroll area.
+      const trueBottom = () => document.documentElement.scrollHeight-
+        document.documentElement.clientHeight;
+      if(Math.abs(trueBottom()-enilScrollTop())>1)
+        throw Error('Initial load missed bottom');
+      const heightDescriptor=Object.getOwnPropertyDescriptor(window,'innerHeight');
+      Object.defineProperty(window,'innerHeight',{configurable:true,value:innerHeight+30});
+      enilScrollNow();
+      if(Math.abs(trueBottom()-enilScrollTop())>1)
+        throw Error('Reported viewport height left initial scroll short');
+      Object.defineProperty(window,'innerHeight',heightDescriptor);
+      // Simulate late image/font layout before the native load callback.
+      enilInitialScrollGeneration=enilScrollGeneration;
+      document.body.style.paddingBottom='38px';
+      enilFinishInitialScroll();await frame();await frame();
+      if(Math.abs(trueBottom()-enilScrollTop())>1)
+        throw Error('Load completion did not account for late layout');
+      document.body.style.paddingBottom='8px';
+      enilFinishInitialScroll();await frame();await frame();
+      // Neither the deferred pass nor a later native callback may undo a drag.
+      enilFinishInitialScroll();
+      window.dispatchEvent(new Event('touchstart'));window.scrollTo(0,0);
+      await frame();await frame();enilFinishInitialScroll();await frame();
+      if(enilScrollTop()!==0)throw Error('Initial-load correction ignored user scroll');
+      enilScrollNow();
       const start = performance.now();
       for (let i=0; i<30; i++) {
         window.scrollTo(0, (document.body.scrollHeight-innerHeight)*(i%2));
