@@ -1,0 +1,4 @@
+build/
+.*.altivec-locks/
+.altivec-sdk/
+.DS_Store

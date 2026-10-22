@@ -1,0 +1,106 @@
+## AltivecIntelligence: Parent Project Setup
+# Use this file to "activate" the Altivec toolchain in your new repository.
+# No submodule needed — the GHCR image ships the full /altivec/ toolchain
+# (cross-compilers, AltivecCore libs, AI CLIs, and example apps). Supply the
+# three verified SDK archives in ~/.altivec/.altivec-sdk/ or .altivec-sdk/.
+#
+# Project rules and conventions for AI agents are documented at
+# /altivec/templates/AGENTS.md inside the image. The chooser copies it into
+# the app only when AGENTS.md is absent. User apps live at /repo/user/.
+#
+# Usage:
+# 1. Drop this file into your project root:
+#    curl -fsSL https://raw.githubusercontent.com/jeffreybergier/AltivecIntelligence/main/templates/compose.yml \
+#         -o compose.yml
+#
+# 2. Pull the image (one time, multi-GB — saves you the 5+ hour osxcross build):
+#    docker compose pull
+#
+# 3. Put the checksum-pinned SDK archives outside the image:
+#    mkdir -p ~/.altivec/.altivec-sdk .altivec-sdk
+#    printf '%s\n' '.altivec-sdk/' >> .gitignore
+#    Place these exact files in ~/.altivec/.altivec-sdk or ./.altivec-sdk:
+#    Each archive uses the container home copy first, then the project copy.
+#    Invalid copies fail validation; only absent files fall back.
+#    Existing home/workspace mounts expose the archives; no SDK bind mounts.
+#      MacOSX10.5.sdk.tar.xz
+#      MacOSX11.3.sdk.tar.xz
+#      iPhoneOS8.4.sdk.tar.gz
+#    docker compose run --rm altivec-sdk preflight
+#    docker compose run --rm altivec-sdk install
+#
+# 4. Try an example app baked into the image:
+#    docker compose run --rm altivec "cd /altivec/apps/SingleWindow && make"
+#
+# 5. Build your own app (Makefile at the root of your project,
+#    starting from /altivec/templates/Makefile.mac or Makefile.phone):
+#    docker compose run --rm altivec "make"
+#
+# 6. Use with AI Assistant:
+#    docker compose run --rm altivec-intelligence
+#
+#    Preinstalled AI CLI's:
+#    - Claude Code
+#    - Codex
+#    - Antigravity
+#    - Pi
+#    - OpenCode
+#    - Kimi
+#
+#    An interactive chooser prompts you to pick one.
+
+services:
+  altivec:
+    image: ${ALTIVEC_IMAGE:-ghcr.io/jeffreybergier/altivec-intelligence:latest}
+    working_dir: /repo/user
+    volumes:
+      # Mount the current project as the user workspace
+      - .:/repo/user
+      # Persist AI CLI settings, credentials, and shell state
+      - ~/.altivec:/root
+      # Persist package-manager and tool caches
+      - cache:/cache
+      # Extracted SDKs outside the container image
+      - altivec-sdk-legacy:/osxcross/legacy/target/SDK
+      - altivec-sdk-modern:/osxcross/modern/SDK
+
+  altivec-sdk:
+    profiles:
+      - tools
+    image: ${ALTIVEC_IMAGE:-ghcr.io/jeffreybergier/altivec-intelligence:latest}
+    working_dir: /repo/user
+    volumes:
+      - ~/.altivec:/root
+      - .:/repo/user
+      # Share extracted SDK installations with the app containers
+      - altivec-sdk-legacy:/osxcross/legacy/target/SDK
+      - altivec-sdk-modern:/osxcross/modern/SDK
+    entrypoint: altivec-sdk
+
+  altivec-intelligence:
+    image: ${ALTIVEC_IMAGE:-ghcr.io/jeffreybergier/altivec-intelligence:latest}
+    stdin_open: true
+    tty: true
+    environment:
+      - IS_SANDBOX=1
+      - TERM=xterm-256color
+      - COLORTERM=${COLORTERM:-}
+    working_dir: /repo/user
+    volumes:
+      # Mount the current project as the user workspace
+      - .:/repo/user
+      # Persist AI CLI settings, credentials, and shell state
+      - ~/.altivec:/root
+      # Persist package-manager and tool caches
+      - cache:/cache
+      # Extracted SDKs outside the container image
+      - altivec-sdk-legacy:/osxcross/legacy/target/SDK
+      - altivec-sdk-modern:/osxcross/modern/SDK
+    entrypoint: /bin/bash
+    command: -lc "altivec-chooser"
+
+# Runtime caches and extracted SDK installations
+volumes:
+  cache:
+  altivec-sdk-legacy:
+  altivec-sdk-modern:

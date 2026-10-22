@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "app_name": "ENILBulletinProbe",
+  "version": {
+    "source": "VERSION",
+    "format": "text",
+    "plists": [
+      "source/iOS/Info.plist"
+    ],
+    "keys": [
+      "CFBundleShortVersionString",
+      "CFBundleVersion"
+    ]
+  },
+  "targets": [
+    {
+      "name": "iOS",
+      "workdir": ".",
+      "build": [
+        {
+          "exec": "make",
+          "args": [
+            "iOS-release"
+          ]
+        }
+      ],
+      "artifacts": [
+        {
+          "path": "build/iOS/release/ENILBulletinProbe/ENILBulletinProbe.ipa",
+          "asset_name": "ENILBulletinProbe-{version}-iOS.ipa"
+        }
+      ]
+    }
+  ]
+}

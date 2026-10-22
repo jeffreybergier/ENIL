@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "template_version": "1.0.0",
+  "template": "ios-basic",
+  "name": "ENILBulletinProbe",
+  "bundle_id": "com.jeffburg.enil.bulletinprobe",
+  "platforms": [
+    "iOS"
+  ],
+  "mac_archs": "full",
+  "ios_package": "ipa",
+  "backend": "container",
+  "support_profile": "legacy-phone"
+}
