@@ -73,6 +73,10 @@ explicit entitlement is its application identifier. This jailbroken environment
   `BBDataProviderConnection`, `BBDataProviderProxy`, and `BBServerConduit` exist.
 - `publish` and `withdraw` both advertise `v8@0:4` on this armv7 runtime.
 - The user allowed notifications and confirmed the public control appeared.
+- The user subsequently confirmed that **Clear public** removed the public
+  notification. This validates the combined `cancelAllLocalNotifications` and
+  badge-zero operation on this device; it does not isolate which operation
+  removed the delivered notification or establish behavior with badges disabled.
 - A private publish executed while backgrounded (`applicationState == 2`) and
   returned normally. The user saw only the public control, no private bulletin.
   The system log explains the result:
