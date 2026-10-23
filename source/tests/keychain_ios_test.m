@@ -36,8 +36,7 @@ static int CheckErrors(NSString *key)
   int failed = 0;
   NSError *error = nil;
   NSString *url = nil, *password = nil;
-  Class store = NSClassFromString(@"ENILTemporaryKeychainStore");
-  if (!store) store = NSClassFromString(@"AIKeychainStore");
+  Class store = NSClassFromString(@"AIKeychainStore");
   Method lookup = class_getInstanceMethod(store, @selector(containsKey:error:));
   Method write = class_getInstanceMethod(store, @selector(setString:forKey:error:));
   IMP oldLookup = method_getImplementation(lookup);

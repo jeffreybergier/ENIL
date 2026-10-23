@@ -34,18 +34,16 @@ internet-password entries whose authentication type is empty. The old ENIL
 writer omitted this attribute; treating it as explicit Default or rejecting it
 prevents reading the old item and can block ENIL's replacement-save policy.
 
-Until that engine version is available in the container, iOS builds compile
-`source/iOS/ENILTemporaryKeychainStore.m` under MRC. Its implementation is copied
-from `7aaf397`, with only a prologue and header import/class-name substitution.
-`XPFoundation.m` maps the class name to `ENILTemporaryKeychainStore` on iOS only.
-This avoids conflicting with the container's existing Objective-C class and
-requires no engine binary/header changes. Mac builds retain their existing path.
+The former iOS-only `ENILTemporaryKeychainStore` copy and class-name redirect
+have now been removed. The container's `/altivec/libs/cocoa/AIKeychainStore.m`
+was compared with the fixed copy: only the prologue, header import and class-name
+substitution differed. The prebuilt iOS library also contains the legacy
+persistent-reference/account/group handling. Both platforms now use the
+container's `AIKeychainStore` directly.
 
-After updating the container, remove the temporary source, its entry in the iOS
-Makefile's shared source group, and the temporary class-name macro in
-`XPFoundation.m`. Rebuild and rerun the legacy persistence test before shipping.
-Do not remove the override based only on a newer container tag: verify it
-contains the engine fix.
+The native results below predate removal of the override. Rerun the legacy
+persistence test on iOS 6 and iOS 8 with the container library before shipping;
+cross-build checks do not establish native Keychain behavior.
 
 Native koolphone5 validation passed using the production facade, temporary
 implementation and normal ENIL entitlements. The test seeds an old-style entry,
@@ -54,14 +52,17 @@ process and removes the fixture. It never accesses the real `shared-secret`
 account. Build the isolated fixture from the repository root:
 
 ```sh
+mkdir -p build/tests/keychain-research
 clang -target armv7-apple-ios5.0 \
   -isysroot /osxcross/modern/SDK/iPhoneOS8.4.sdk -B/osxcross/modern/bin \
   -Wall -Wextra -Werror -Wno-deprecated-declarations \
   -Wno-semicolon-before-method-body \
   -I/altivec/libs/cocoa/build-phone/include -Isource/shared \
   -framework Foundation -framework Security \
-  source/iOS/ENILTemporaryKeychainStore.m source/shared/XPFoundation.m \
-  source/shared/ENILKeychain.m source/tests/keychain_ios_test.m -o build/tests/keychain-research/facade
+  source/shared/XPFoundation.m source/shared/ENILKeychain.m \
+  source/tests/keychain_ios_test.m \
+  /altivec/libs/cocoa/build-phone/lib/libAltivecCocoa.a \
+  -o build/tests/keychain-research/facade
 ldid -Ssource/iOS/Entitlements.plist build/tests/keychain-research/facade
 ```
 
@@ -95,7 +96,7 @@ asking the user to correct a valid URL. The iOS footer retains the same message.
 Gomadango returns an absent authentication attribute, whereas koolphone5 returns
 an empty string. Exact empty-string queries do not match the iOS 6 item; ENIL's
 bounded replacement loop could therefore report -25299 after repeatedly failing
-to remove it. The revised temporary implementation follows the upstream fix:
+to remove it. The container implementation now supplies the upstream fix:
 legacy discovery pins absent-auth items to their persistent reference, validates
 the account/group before queries, and never recreates a deleted pinned item.
 Native library and ENIL facade tests now pass on both phones, including

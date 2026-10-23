@@ -1,8 +1,3 @@
-#import <TargetConditionals.h>
-#if TARGET_OS_IPHONE
-/* Temporary override; remove with source/iOS/ENILTemporaryKeychainStore.m. */
-#define AIKeychainStore ENILTemporaryKeychainStore
-#endif
 #import <AltivecCocoa/AIKeychainStore.h>
 #import "XPFoundation.h"
 #import <TargetConditionals.h>
