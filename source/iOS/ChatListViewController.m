@@ -276,12 +276,7 @@ enum {
 - (void)syncAction
 {
   @try {
-    UIActionSheet *sheet = [[UIActionSheet alloc] initWithTitle:NSLocalizedString(@"Sync", nil)
-        delegate:self cancelButtonTitle:NSLocalizedString(@"Cancel", nil)
-        destructiveButtonTitle:nil otherButtonTitles:NSLocalizedString(@"Full Sync", nil),
-        NSLocalizedString(@"Retry Attachments", nil), nil];
-    [sheet setTag:701];
-    [self presentActionSheet:sheet];
+    [[self account] retrySync];
   } @catch (NSException *exception) {
     ENILLog(@"ChatListViewController.syncAction", @"exception: %@", exception);
   }
@@ -687,11 +682,6 @@ titleForHeaderInSection:(NSInteger)section
 - (void)actionSheet:(UIActionSheet *)actionSheet
 clickedButtonAtIndex:(NSInteger)buttonIndex
 {
-  if ([actionSheet tag] == 701) {
-    if (buttonIndex == 0) [[self account] retrySync];
-    else if (buttonIndex == 1) [[self account] retryAttachments];
-    return;
-  }
   NSString *chatId = [self pendingChatId];
   NSString *name   = [self pendingDisplayName];
   [self setPendingChatId:nil];

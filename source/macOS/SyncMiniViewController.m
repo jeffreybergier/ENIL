@@ -372,6 +372,16 @@ static void configureProgress(NSProgressIndicator *progress)
   [self configureSyncButton];
   [syncButton_ setTarget:self];
   [syncButton_ setAction:@selector(syncTapped:)];
+  /* Keep primary-click sync; AppKit presents this menu on secondary click.
+   * Nil targets route the actions through the window's responder chain. */
+  NSMenu *syncMenu = [[[NSMenu alloc]
+    initWithTitle:NSLocalizedString(@"Sync", nil)] autorelease];
+  [syncMenu addItemWithTitle:NSLocalizedString(@"Full Sync", nil)
+                     action:@selector(enilStartSync:) keyEquivalent:@""];
+  [syncMenu addItemWithTitle:NSLocalizedString(@"Retry Attachments", nil)
+                     action:@selector(enilRetryAttachments:)
+              keyEquivalent:@""];
+  [syncButton_ setMenu:syncMenu];
   [bar addSubview:syncButton_];
 
   /* SSE on/off toggle, anchored to the LEFT edge (NSViewMaxXMargin). */
