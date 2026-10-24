@@ -27,7 +27,6 @@ GROUP_shared_SOURCES = qrcodegen.c enil_http.c enil_jpeg.c enil_png.c enil_asset
 EXTRA_LIBS = -lpthread -ldl -framework CoreServices -framework Security \
              -framework ApplicationServices
 MAC_ICON = ENIL.icns
-BUNDLE_FONT_DIRS = $(ALTIVECCOCOA_DIR)/Resources/Fonts
 BUNDLE_LOCALIZATION_DIRS = $(SHARED_DIR)/Resources
 
 PRODUCTS = ENIL
@@ -39,6 +38,9 @@ ENIL_LOCALIZATIONS = $(BUNDLE_LOCALIZATION_DIRS)
 ENIL_FLAGS = $(EXTRA_FLAGS)
 ENIL_CORE = dynamic
 ENIL_COCOA = dynamic
+# ATSApplicationFontsPath and the HTML renderer both use the app's Fonts/.
+# Dynamic Cocoa linkage only embeds the framework's own copy.
+ENIL_FONTS = $(wildcard $(ALTIVECCOCOA_DIR)/Resources/Fonts/*)
 ENIL_RESOURCES += $(MAC_ICON)
 ENIL_LDFLAGS = -framework AppKit -lobjc $(EXTRA_LIBS)
 ENIL_FLAGS_ppc = -F$(SDK_ppc)/System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks
