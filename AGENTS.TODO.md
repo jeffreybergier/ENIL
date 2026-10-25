@@ -1,5 +1,37 @@
 # ENIL — Outstanding Work
 
+## Sticker keyword search
+
+Android research indicates shared per-language keyword/tag dictionaries plus
+per-sticker-pack tag-to-sticker mappings. Confirm with downloaded files before
+implementing; desktop internals have not been verified.
+
+- [ ] **Obtain real dictionary and mapping files.** Call
+      `getSuggestDictionarySetting` and `getSuggestResourcesV2` to obtain
+      resource paths, then test downloads from `obs.line-scdn.net` without
+      credentials. Unauthenticated metadata requests returned HTTP 403;
+      authentication requirements for the files themselves remain unconfirmed.
+- [ ] **Confirm the file formats.** Check language identifiers, versions,
+      encoding, keyword-to-tag and tag-to-sticker mappings, ranking weights,
+      and full-file versus patch updates against Android's parsers. Keep
+      research captures in ENIL-extras.
+- [ ] **Download and index search data.** Add shared C download/cache handling
+      and SQLite indexes for selected languages and available sticker packs.
+      Track resource versions and preserve usable data if an update fails.
+- [ ] **Implement local keyword search.** Normalize input, match keywords to
+      tags, and return ranked stickers from the account's available packs.
+      Define exact/prefix matching and keep result counts bounded.
+- [ ] **Add search UI on macOS and iOS.** Add a search field to the sticker
+      picker, language selection/download controls, and loading, empty, and
+      error states. Selecting a result should use the existing sticker-send
+      flow; keep typing and scrolling responsive.
+- [ ] **Validate offline and on devices.** Add Linux C assertions for parsing,
+      indexing, matching/ranking, and failed updates using small fixtures.
+      Build both platforms and test language downloads, offline search, and
+      sending a search result on native devices.
+
+## Other outstanding work
+
 Checked against the current source on 2026-09-26. These are the remaining
 tasks in this file; partial implementations are called out below.
 
