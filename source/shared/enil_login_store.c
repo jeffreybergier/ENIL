@@ -262,7 +262,8 @@ int enil_login_store_can_restart(const char *staging_dir) {
 int enil_login_store_restart(const char *staging_dir) {
   cJSON *staged = read_session(staging_dir), *fresh = cJSON_CreateObject();
   const char *source = string(staged, "nativeLoginSource");
-  const char *fields[] = {"clientIdentity", "reauthMid", "reauthLoginId"};
+  const char *fields[] = {"clientIdentity", "reauthMid", "reauthLoginId",
+                          "certificate"};
   char *root = parent(staging_dir), *pending = NULL, *path = NULL, *id = NULL;
   int i, ok = 0;
   if (!root || !fresh || !pending_name(source))
@@ -270,7 +271,7 @@ int enil_login_store_restart(const char *staging_dir) {
   pending = join(root, source);
   if (!pending || !retire(pending))
     goto done;
-  for (i = 0; i < 3; i++) {
+  for (i = 0; i < 4; i++) {
     cJSON *value = cJSON_GetObjectItemCaseSensitive(staged, fields[i]);
     if (value && !cJSON_AddItemToObject(fresh, fields[i], cJSON_Duplicate(value, 1)))
       goto done;

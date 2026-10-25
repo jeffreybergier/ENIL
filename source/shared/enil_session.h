@@ -52,10 +52,20 @@ int enil_session_continue_identity(const char *path);
  * Never fall back to the caller's token on -1. */
 int enil_session_bound_access_token(char **out);
 int enil_session_accept_next_access(const char *previous, const char *next);
-/* Seed a fresh QR session. Reauthentication copies only the old identity, not
- * credentials/QR keys. Never overwrites an existing staged session. */
+/* Seed a fresh QR session. Reauthentication carries identity and the legacy
+ * certificate, never tokens/QR keys. Never overwrites existing staging. */
 int enil_session_prepare_login(const char *path, const char *profile_id,
                                 const char *reauth_session_path);
+
+/* Installation-level QR certificates, one slot per client profile, shared by
+ * all accounts. path is <installation>/<account-or-staging>/session.json.
+ * Call on the login thread immediately before verification / after issuance.
+ * Load replaces root's certificate from the slot; an absent slot preserves a
+ * legacy session certificate. Save ignores missing/empty certificates.
+ * Both return 0 on invalid identity or I/O failure. Saves are atomic, private,
+ * and fsynced; they borrow root and never persist tokens or E2EE state. */
+int enil_session_load_login_certificate(const char *path, cJSON *root);
+int enil_session_save_login_certificate(const char *path, cJSON *root);
 
 /* Validates session.json and extracts required fields.
  * Returns 1 on success; *access_token_out is malloc'd, *mid_out is malloc'd or NULL.

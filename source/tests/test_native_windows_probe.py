@@ -53,6 +53,11 @@ class NativeWindowsProbeTests(unittest.TestCase):
                     body = self.rfile.read(int(self.headers["Content-Length"]))
                     status, payload = flow.send("https://legy.line-apps.com" + self.path,
                                                 body, dict(self.headers), 11)
+                    if flow.calls[-1] == "verifyCertificate":
+                        again = flow.calls.count("verifyCertificate") == 2
+                        assert flow.requests[-1][2][1][2] == ("certificate" if again else "")
+                        if again and mode == "certificate-reuse":
+                            payload = reply("verifyCertificate", [])
                     if mode == "token-error" and flow.calls[-1] == "qrCodeLoginV2ForSecure":
                         payload = reply(flow.calls[-1], [(1, TType.STRUCT, [(1, TType.I32, 5)])])
                 except Exception as error:
@@ -75,8 +80,9 @@ class NativeWindowsProbeTests(unittest.TestCase):
                                         capture_output=True, text=True, timeout=20)
                 self.assertFalse(failures, failures)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertEqual(flow.calls.count("createSession"), 1)
-                self.assertEqual(flow.calls.count("qrCodeLoginV2ForSecure"), 1)
+                count = 2 if mode in ("certificate-reuse", "certificate-rejected") else 1
+                self.assertEqual(flow.calls.count("createSession"), count)
+                self.assertEqual(flow.calls.count("qrCodeLoginV2ForSecure"), count)
                 for _, headers, _ in flow.requests:
                     self.assertEqual(headers["Accept-Language"], "ja-JP" if language == "ja" else "en-US")
                     self.assertEqual(headers["X-LAL"], "ja_JP" if language == "ja" else "en_US")
@@ -87,6 +93,16 @@ class NativeWindowsProbeTests(unittest.TestCase):
 
     def test_durable_credentials_and_reopen_without_network(self):
         self.run_probe("success")
+
+    def test_device_certificate_reused_by_fresh_windows_and_android_logins(self):
+        for profile in ("desktopwin", "android"):
+            with self.subTest(profile=profile):
+                self.run_probe("certificate-reuse", profile=profile)
+
+    def test_rejected_saved_certificate_falls_back_to_pin(self):
+        for profile in ("desktopwin", "android"):
+            with self.subTest(profile=profile):
+                self.run_probe("certificate-rejected", profile=profile)
 
     def test_japanese_login_and_polling_headers(self):
         self.run_probe("success", "ja")

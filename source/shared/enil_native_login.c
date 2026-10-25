@@ -97,7 +97,9 @@ static int encode(const char *method, cJSON *state, ENILBuf *out) {
     if (!cJSON_AddStringToObject(request, "authSessionId", sid))
       goto done;
     if (!strcmp(method, "verifyCertificate")) {
-      if (!cJSON_AddStringToObject(request, "certificate", ""))
+      const char *certificate = str(state, "certificate");
+      if (!cJSON_AddStringToObject(request, "certificate",
+                                   certificate ? certificate : ""))
         goto done;
     } else if (!strcmp(method, "qrCodeLoginV2ForSecure")) {
       enil_identity_t identity;
@@ -281,7 +283,11 @@ static int save_login_result(NativeLogin *p, cJSON *result) {
   copy_field(s, "e2eeLoginPublicKey", meta, "publicKey");
   copy_field(s, "e2eeVersion", meta, "e2eeVersion");
   copy_field(s, "e2eeHashKeyChain", meta, "hashKeyChain");
-  return save(p);
+  if (!save(p)) return 0;
+  if (str(result, "1") &&
+      !enil_session_save_login_certificate(p->path, s))
+    ENIL_LOG("NativeLogin.certificate", "Could not save device certificate");
+  return 1;
 }
 
 /* Recover if the app was interrupted after flushing the raw token reply but
@@ -467,6 +473,10 @@ int enil_native_login_run(const char *directory, const enil_qrlogin_callbacks_t 
       goto done;
   }
   if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(s, "nativePinVerified"))) {
+    if (!enil_session_load_login_certificate(p.path, s)) {
+      fail(&p, "Could not read device certificate");
+      goto done;
+    }
     result = call(&p, "verifyCertificate", 0, 0);
     if (!result) {
       const char *pin;

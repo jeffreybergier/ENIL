@@ -477,7 +477,7 @@ static void clear_qr_state(cJSON *s, int keep_e2ee_runtime) {
 }
 
 /* qrCodeLoginV2 → tokens + certificate + E2EE capture. */
-static int finalize_login(cJSON *s) {
+static int finalize_login(const char *path, cJSON *s) {
   cJSON *data, *issue;
   const char *access, *refresh, *cert;
   int captured = 0;
@@ -513,6 +513,9 @@ static int finalize_login(cJSON *s) {
   set_str(s, "accessToken", access);
   set_str(s, "refreshToken", refresh);
   set_str(s, "certificate", cert);
+  /* Remember trust before optional E2EE recovery or profile setup can fail. */
+  if (!enil_session_save_login_certificate(path, s))
+    LOG("finalize_login", "Could not save device certificate");
   /* Persist the eta fields too — without these, scheduleNextTokenRefresh
    * skips on the first launch after a fresh QR scan and the token would
    * never refresh organically until the next manual tokenRefresh call.
@@ -692,13 +695,17 @@ int enil_qrlogin_run(const char *account_dir,
   if (cancelled(cb)) { LOG("run", "cancelled after scan"); goto done; }
   emit_status(cb, "scan detected — finalizing");
 
+  if (!enil_session_load_login_certificate(path, s)) {
+    emit_status(cb, "Could not read device certificate");
+    goto done;
+  }
   if (!verify_certificate(s)) {
     LOG("run", "certificate rejected - PIN verification");
     if (!run_pin_flow(s, cb)) goto done;
   }
 
   if (cancelled(cb)) { LOG("run", "cancelled before finalize"); goto done; }
-  if (!finalize_login(s)) goto done;
+  if (!finalize_login(path, s)) goto done;
   token = jstr(s, "accessToken");
   if (!token) goto done;
 

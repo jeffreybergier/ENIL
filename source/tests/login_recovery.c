@@ -287,6 +287,83 @@ static void android_pending_isolation(const char *root) {
   free(win_pending); free(android_pending); free(resumed);
 }
 
+static void device_certificates(const char *root) {
+  const char *profiles[] = {"chrome", "desktopwin", "android"};
+  char dirs[3][4096], files[3][4096], slot[4096], name[128];
+  cJSON *states[3], *fresh, *saved;
+  struct stat info;
+  int i;
+  for (i = 0; i < 3; i++) {
+    path(dirs[i], sizeof(dirs[i]), root, profiles[i]);
+    assert(mkdir(dirs[i], 0700) == 0);
+    path(files[i], sizeof(files[i]), dirs[i], "session.json");
+    assert(enil_session_prepare_login(files[i], profiles[i], NULL));
+    states[i] = read_saved(dirs[i]);
+    assert(enil_session_load_login_certificate(files[i], states[i]));
+    assert(!cJSON_HasObjectItem(states[i], "certificate"));
+    cJSON_AddStringToObject(states[i], "certificate", profiles[i]);
+    cJSON_AddStringToObject(states[i], "accessToken", "must-not-copy");
+    assert(enil_session_save_login_certificate(files[i], states[i]));
+  }
+  for (i = 0; i < 3; i++) {
+    /* A different account can load the slot, even after deleting the original
+     * session. The other client slots must remain distinct. */
+    char other[4096], other_file[4096];
+    snprintf(name, sizeof(name), "other-%s", profiles[i]);
+    path(other, sizeof(other), root, name);
+    assert(mkdir(other, 0700) == 0);
+    path(other_file, sizeof(other_file), other, "session.json");
+    assert(enil_session_prepare_login(other_file, profiles[i], NULL));
+    assert(unlink(files[i]) == 0 && rmdir(dirs[i]) == 0);
+    fresh = read_saved(other);
+    assert(enil_session_load_login_certificate(other_file, fresh));
+    assert(!strcmp(cJSON_GetObjectItem(fresh, "certificate")->valuestring, profiles[i]));
+    assert(!cJSON_HasObjectItem(fresh, "accessToken"));
+    /* Replace this slot, then prove a previously loaded attempt gets the
+     * latest value when it reaches verification. */
+    cJSON_ReplaceItemInObject(states[i], "certificate", cJSON_CreateString("rotated"));
+    assert(enil_session_save_login_certificate(other_file, states[i]));
+    assert(enil_session_load_login_certificate(other_file, fresh));
+    assert(!strcmp(cJSON_GetObjectItem(fresh, "certificate")->valuestring, "rotated"));
+    cJSON_ReplaceItemInObject(states[i], "certificate", cJSON_CreateString(""));
+    assert(enil_session_save_login_certificate(other_file, states[i]));
+    cJSON_DeleteItemFromObject(states[i], "certificate");
+    assert(enil_session_save_login_certificate(other_file, states[i]));
+    assert(enil_session_load_login_certificate(other_file, fresh));
+    assert(!strcmp(cJSON_GetObjectItem(fresh, "certificate")->valuestring, "rotated"));
+    snprintf(name, sizeof(name), ".qr-certificate-%s.json", profiles[i]);
+    path(slot, sizeof(slot), root, name);
+    assert(stat(slot, &info) == 0 && (info.st_mode & 0777) == 0600);
+    saved = enil_session_read(slot);
+    assert(cJSON_GetArraySize(saved) == 1);
+    cJSON_Delete(saved);
+    /* Do not silently discard an unreadable/corrupt trust record. */
+    saved = cJSON_Parse("{\"certificate\":123}");
+    assert(enil_session_write(slot, saved));
+    assert(!enil_session_load_login_certificate(other_file, fresh));
+    cJSON_Delete(saved);
+    cJSON_AddStringToObject(states[i], "certificate", "durable");
+    fail_directory_sync = 1;
+    assert(!enil_session_save_login_certificate(other_file, states[i]));
+    fail_directory_sync = 0;
+    assert(enil_session_load_login_certificate(other_file, fresh));
+    assert(!strcmp(cJSON_GetObjectItem(fresh, "certificate")->valuestring, "durable"));
+    /* Restart must retain access to the device slot without carrying tokens. */
+    if (i) {
+      char *pending = enil_login_store_select(other);
+      assert(pending && enil_login_store_restart(other));
+      cJSON_Delete(fresh);
+      fresh = read_saved(other);
+      assert(enil_session_load_login_certificate(other_file, fresh));
+      assert(!strcmp(cJSON_GetObjectItem(fresh, "certificate")->valuestring, "durable"));
+      assert(!cJSON_HasObjectItem(fresh, "accessToken"));
+      free(pending);
+    }
+    cJSON_Delete(fresh);
+    cJSON_Delete(states[i]);
+  }
+}
+
 int main(int argc, char **argv) {
   assert(argc == 3);
   if (!strcmp(argv[2], "durability"))
@@ -299,6 +376,8 @@ int main(int argc, char **argv) {
     import_saved_and_retire(argv[1]);
   else if (!strcmp(argv[2], "android"))
     android_pending_isolation(argv[1]);
+  else if (!strcmp(argv[2], "certificates"))
+    device_certificates(argv[1]);
   else if (!strcmp(argv[2], "stale") || !strcmp(argv[2], "stale-legacy"))
     reject_superseded_save(argv[1], !strcmp(argv[2], "stale-legacy"));
   else

@@ -248,7 +248,7 @@ int enil_session_continue_identity(const char *path) {
 int enil_session_prepare_login(const char *path, const char *profile_id,
                                 const char *reauth_session_path) {
   enil_identity_t identity;
-  cJSON *root, *json;
+  cJSON *root, *json, *certificate = NULL;
   int ok;
   /* Staging is fresh. Refuse to overwrite QR state or an authenticated token. */
   if (!path || access(path, F_OK) == 0) return 0;
@@ -257,21 +257,94 @@ int enil_session_prepare_login(const char *path, const char *profile_id,
     if (!cJSON_IsObject(root)) { cJSON_Delete(root); return 0; }
     ok = enil_identity_parse(cJSON_GetObjectItemCaseSensitive(root, "clientIdentity"),
                              &identity);
+    certificate = cJSON_Duplicate(
+      cJSON_GetObjectItemCaseSensitive(root, "certificate"), 1);
     cJSON_Delete(root);
   } else {
     ok = enil_identity_default(profile_id, &identity);
   }
-  if (!ok) return 0;
+  if (!ok) { cJSON_Delete(certificate); return 0; }
   json = enil_identity_to_json(&identity);
   root = cJSON_CreateObject();
-  if (!json || !root) { cJSON_Delete(json); cJSON_Delete(root); return 0; }
+  if (!json || !root) {
+    cJSON_Delete(json); cJSON_Delete(root); cJSON_Delete(certificate);
+    return 0;
+  }
   cJSON_AddItemToObject(root, "clientIdentity", json);
+  if (certificate) cJSON_AddItemToObject(root, "certificate", certificate);
   {
     char *id = add_login_id(root);
     ok = id && enil_session_write(path, root);
     free(id);
   }
   cJSON_Delete(root);
+  return ok;
+}
+
+static char *login_certificate_path(const char *path, cJSON *root) {
+  enil_identity_t identity;
+  char *directory, *slash, *result;
+  if (!path || !cJSON_IsObject(root) ||
+      !enil_identity_parse(cJSON_GetObjectItemCaseSensitive(root,
+                            "clientIdentity"), &identity)) return NULL;
+  directory = strdup(path);
+  if (!directory) return NULL;
+  slash = strrchr(directory, '/');
+  if (!slash) { free(directory); return NULL; }
+  *slash = 0;
+  slash = strrchr(directory, '/');
+  if (!slash) { free(directory); return NULL; }
+  slash[1] = 0;
+  result = malloc(strlen(directory) + strlen(identity.profile_id) + 32);
+  if (result)
+    sprintf(result, "%s.qr-certificate-%s.json", directory, identity.profile_id);
+  free(directory);
+  return result;
+}
+
+int enil_session_load_login_certificate(const char *path, cJSON *root) {
+  char *file = login_certificate_path(path, root);
+  cJSON *saved = NULL, *value, *copy;
+  struct stat info;
+  int ok = 0;
+  if (!file) return 0;
+  if (lstat(file, &info) != 0) {
+    ok = errno == ENOENT;
+    goto done;
+  }
+  if (!S_ISREG(info.st_mode)) goto done;
+  saved = enil_session_read(file);
+  value = cJSON_GetObjectItemCaseSensitive(saved, "certificate");
+  if (!cJSON_IsString(value)) goto done;
+  copy = cJSON_Duplicate(value, 1);
+  if (!copy) goto done;
+  cJSON_DeleteItemFromObjectCaseSensitive(root, "certificate");
+  ok = cJSON_AddItemToObject(root, "certificate", copy);
+  if (!ok) cJSON_Delete(copy);
+done:
+  free(file);
+  cJSON_Delete(saved);
+  return ok;
+}
+
+int enil_session_save_login_certificate(const char *path, cJSON *root) {
+  char *file = login_certificate_path(path, root);
+  cJSON *value = cJSON_GetObjectItemCaseSensitive(root, "certificate");
+  cJSON *saved = NULL;
+  int ok = 0;
+  if (!file) return 0;
+  /* A missing certificate in a login reply must not erase remembered trust. */
+  if (!value || (cJSON_IsString(value) && !value->valuestring[0])) {
+    ok = 1;
+    goto done;
+  }
+  if (!cJSON_IsString(value)) goto done;
+  saved = cJSON_CreateObject();
+  ok = saved && cJSON_AddStringToObject(saved, "certificate", value->valuestring) &&
+       enil_session_write(file, saved);
+done:
+  free(file);
+  cJSON_Delete(saved);
   return ok;
 }
 

@@ -29,6 +29,7 @@ class ClientIdentityTests(unittest.TestCase):
 
     def check_session_lifecycle_and_wire_identity(self, selected, language, accept, lal):
         records = []
+        certificate_checks = {"chrome": 0, "desktopwin": 0}
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *args):
@@ -49,13 +50,24 @@ class ClientIdentityTests(unittest.TestCase):
                 data = {}
                 content_type = "application/json"
                 extra = {}
+                status = 200
                 if self.path.endswith("/createSession"):
                     data = {"authSessionId": "synthetic-session"}
                 elif self.path.endswith("/createQrCode"):
                     data = {"callbackUrl": "line://synthetic", "longPollingIntervalSec": 1,
                             "longPollingMaxCount": 1}
+                elif self.path.endswith("/verifyCertificate"):
+                    certificate_checks[profile] += 1
+                    # First login requires PIN; second accepts remembered trust;
+                    # third rejects it, exercising the existing PIN fallback.
+                    if certificate_checks[profile] != 2:
+                        status = 400
+                elif self.path.endswith("/createPinCode"):
+                    data = {"pinCode": "123456"}
                 elif self.path.endswith("/qrCodeLoginV2"):
-                    data = {"certificate": "synthetic-certificate",
+                    certificate = ("rotated-certificate" if certificate_checks[profile] > 1
+                                   else "synthetic-certificate")
+                    data = {"certificate": certificate,
                             "tokenV3IssueResult": {"accessToken": profile,
                                                    "refreshToken": "synthetic-refresh"},
                             "metaData": {"keyId": "1", "publicKey": "synthetic",
@@ -76,7 +88,7 @@ class ClientIdentityTests(unittest.TestCase):
                 elif self.path.startswith("/api/operation/receive"):
                     content_type = "text/event-stream"
                     payload = b'event: ping\ndata: {}\n\n'
-                self.send_response(200)
+                self.send_response(status)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(len(payload)))
                 for name, value in extra.items():
@@ -125,9 +137,15 @@ class ClientIdentityTests(unittest.TestCase):
             for method in ["createSession", "createQrCode", "checkQrCodeVerified",
                            "verifyCertificate", "qrCodeLoginV2", "getProfile"]:
                 matches = [(h, b) for path, h, b in requests if path.endswith("/" + method)]
-                self.assertEqual(len(matches), 1, method)
+                self.assertEqual(len(matches), 3 if application == CHROME_APP else 1, method)
                 self.assertEqual(matches[0][0]["user-agent"], user_agent)
                 self.assertEqual(matches[0][0]["x-line-chrome-version"], "3.7.2")
+            certs = [json.loads(b)[0]["certificate"] for path, _, b in requests
+                     if path.endswith("/verifyCertificate")]
+            self.assertEqual(certs, ["", "synthetic-certificate", "rotated-certificate"]
+                             if application == CHROME_APP else [""])
+            pins = [path for path, _, _ in requests if path.endswith("/createPinCode")]
+            self.assertEqual(len(pins), 2 if application == CHROME_APP else 1)
             completion = next(json.loads(b)[0] for path, _, b in requests if path.endswith("/qrCodeLoginV2"))
             self.assertEqual(completion["systemName"], "WINDOWS" if application == WINDOWS_APP else "CHROMEOS")
             self.assertEqual(completion["modelName"], "DESKTOPWIN" if application == WINDOWS_APP else "CHROME")

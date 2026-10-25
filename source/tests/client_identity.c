@@ -164,7 +164,8 @@ static void check_profile(const char *root, const char *profile) {
   assert(enil_session_prepare_login(staged, NULL, path));
   json = enil_session_read(staged);
   assert(!cJSON_HasObjectItem(json, "accessToken"));
-  assert(!cJSON_HasObjectItem(json, "certificate"));
+  assert(!strcmp(cJSON_GetObjectItem(json, "certificate")->valuestring,
+                 "synthetic-certificate"));
   assert(enil_identity_parse(cJSON_GetObjectItemCaseSensitive(json, "clientIdentity"), &identity));
   assert(strcmp(identity.user_agent, "saved-session-agent") == 0);
   assert(strcmp(identity.profile_id, profile) == 0);
@@ -196,6 +197,16 @@ static void check_profile(const char *root, const char *profile) {
   assert(!enil_identity_current());
   response = enil_line_post("/must-not-send", "[]", "synthetic");
   assert(response.status == 0 && !response.body);
+  if (!strcmp(profile, "chrome")) {
+    int attempt;
+    for (attempt = 2; attempt <= 3; attempt++) {
+      snprintf(dir, sizeof(dir), "%s/chrome-%d", root, attempt);
+      assert(mkdir(dir, 0700) == 0);
+      snprintf(path, sizeof(path), "%s/session.json", dir);
+      assert(enil_session_prepare_login(path, "chrome", NULL));
+      assert(enil_qrlogin_run(dir, NULL));
+    }
+  }
 }
 
 int main(int argc, char **argv) {

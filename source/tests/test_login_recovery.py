@@ -32,6 +32,9 @@ class LoginRecoveryTests(unittest.TestCase):
     def test_repeated_reauthentication_never_restores_older_tokens(self):
         self.run_case("cycles")
 
+    def test_device_certificates_survive_account_removal_and_restart(self):
+        self.run_case("certificates")
+
     def test_android_pending_login_isolation_activation_and_reauthentication(self):
         self.run_case("android")
 

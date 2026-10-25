@@ -96,7 +96,7 @@ int main(int argc, char **argv) {
   volatile int cancel = 1;
   cJSON *s;
   int before;
-  char path[2048];
+  char path[2048], second[2048];
   const char *profile;
   enil_identity_t expected_identity, saved_identity;
   assert(argc == 6);
@@ -182,5 +182,20 @@ int main(int argc, char **argv) {
   assert(enil_identity_parse(cJSON_GetObjectItem(s, "clientIdentity"), &saved_identity));
   assert(!memcmp(&expected_identity, &saved_identity, sizeof(saved_identity)));
   cJSON_Delete(s);
+  if (!strcmp(argv[3], "certificate-reuse") ||
+      !strcmp(argv[3], "certificate-rejected")) {
+    /* A fresh account/staging directory has no tokens or QR state. Only the
+     * installation-level certificate can avoid another PIN. */
+    snprintf(second, sizeof(second), "%s-second", argv[1]);
+    directory = second;
+    assert(mkdir(directory, 0700) == 0);
+    assert(strlen(directory) + 14 < sizeof(path));
+    strcpy(path, directory);
+    strcat(path, "/session.json");
+    assert(enil_session_prepare_login(path, profile, NULL));
+    assert(enil_native_login_run(directory, &cb));
+    assert(keys == 2 && unwraps == 2 && qr_count == 2);
+    assert(pins == (!strcmp(argv[3], "certificate-reuse") ? 1 : 2));
+  }
   return 0;
 }
