@@ -3,17 +3,6 @@
 Checked against the current source on 2026-09-26. These are the remaining
 tasks in this file; partial implementations are called out below.
 
-- [ ] **Revalidate legacy iOS keychain persistence with the container library.**
-      The temporary override has been removed after verifying the container's
-      implementation matches the fixed copy. Run the production-facade fixture
-      on both iOS 6 and iOS 8 to check legacy credential read/save and two-process
-      persistence using AltivecCocoa directly. See the
-      [fixture instructions](docs/keychain-migration.md#temporary-ios-override-2026-10-20).
-
-- [ ] **Finish native testing of the image sync fix.** See
-      [the image validation handoff](AGENTS.HANDOFF.md) for commit `063793b`,
-      saved private fixtures, completed checks, and production-device limits.
-
 - [ ] **Handle SSE `talkException` code 89 as LSOFF, if observed.** The SSE
       path already records exceptions, stops the stream, marks code 117 for
       reauthentication, refreshes/reconnects on 119 or 10051, treats code 8
