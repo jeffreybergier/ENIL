@@ -33,6 +33,31 @@ class BuildSystemTests(unittest.TestCase):
             self.assertIn(f'project={REPO}', result.stdout)
             self.assertIn(f'output={REPO}/custom/macOS/release', result.stdout)
 
+    def test_native_crypto_is_explicit_product_dependency(self):
+        for platform in ("macOS", "iOS"):
+            for local in ("0", "1"):
+                result = subprocess.run(["make", "--no-print-directory", "-C",
+                    str(REPO / "source" / platform), "print-config",
+                    f"ALTIVEC_ROOT={ENGINE}", f"ENIL_LOCAL_CRYPTO={local}"],
+                    capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                app = next(line for line in result.stdout.splitlines()
+                           if line.startswith("ENIL: type="))
+                self.assertIn("deps=" + ("ENILLTSM" if local == "1" else "") + " ", app)
+                packages = next(line for line in result.stdout.splitlines()
+                                if line.startswith("packages="))
+                self.assertNotIn("ltsm-test", packages)
+                self.assertNotIn("ltsm-check", packages)
+                if local == "1":
+                    self.assertIn("ENILLTSM: type=static", result.stdout)
+                else:
+                    self.assertNotIn("ENILLTSM:", result.stdout)
+        product = (REPO / "source/ltsm/products.mk").read_text()
+        self.assertIn("-DW2C2_RUNTIME_CHECKS=1", product)
+        self.assertIn("ENIL_LOCAL_CRYPTO ?= 1", product)
+        self.assertIn("GEN_enil_ltsm_COMMAND = python3", product)
+        self.assertNotIn("\n\t", product)
+
     def test_no_private_engine_recipes(self):
         for platform in ("macOS", "iOS"):
             text = (REPO / "source" / platform / "Makefile").read_text()

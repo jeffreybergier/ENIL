@@ -45,5 +45,7 @@ ENIL_RESOURCES += $(MAC_ICON)
 ENIL_LDFLAGS = -framework AppKit -lobjc $(EXTRA_LIBS)
 ENIL_FLAGS_ppc = -F$(SDK_ppc)/System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks
 ENIL_FLAGS_i386 = -F$(SDK_i386)/System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks
+include ../ltsm/products.mk
+PACKAGE_PRODUCTS = ENIL
 include $(ALTIVEC_ROOT)/altivec_common_mac.mk
 endif

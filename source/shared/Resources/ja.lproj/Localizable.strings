@@ -255,3 +255,5 @@
 
 "Enter a valid HTTP or HTTPS Worker URL, including its host name." = "ホスト名を含む有効な HTTP または HTTPS の Worker URL を入力してください。";
 "Keychain error %ld: the credentials could not be saved." = "キーチェーンエラー %ld：認証情報を保存できませんでした。";
+"Crypto runs locally. Worker settings are not used by this build." = "暗号処理は端末内で行われます。このビルドでは Worker 設定は使用されません。";
+"Crypto Error" = "暗号処理エラー";

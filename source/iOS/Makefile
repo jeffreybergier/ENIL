@@ -44,5 +44,7 @@ ENIL_FLAGS += -Wno-gnu-zero-variadic-macro-arguments
 ENIL_LDFLAGS = -framework UIKit -framework Foundation -framework CoreGraphics $(LIBS_IPHONE)
 ENIL_ENTITLEMENTS = Entitlements.plist
 ENIL_SANDBOX = container
+include ../ltsm/products.mk
+PACKAGE_PRODUCTS = ENIL
 include $(ALTIVEC_ROOT)/altivec_common_phone.mk
 endif

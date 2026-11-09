@@ -2023,6 +2023,16 @@ static int sse_event_cb(const ENILSSEEvent *ev, void *ctx)
   return enil_qrlogin_run_user_attempt([accountDir fileSystemRepresentation], &cb) ? YES : NO;
 }
 
++ (BOOL)usesLocalCrypto;
+{
+  return enil_worker_is_local() ? YES : NO;
+}
+
++ (BOOL)cryptoReady;
+{
+  return [self usesLocalCrypto] || [[ENILKeychain sharedKeychain] hasCredentials];
+}
+
 + (BOOL)workerFailed     { return enil_account_worker_failed() ? YES : NO; }
 + (BOOL)lineFailed       { return enil_account_line_failed()   ? YES : NO; }
 + (BOOL)anyServiceFailed { return enil_account_any_service_failed() ? YES : NO; }
@@ -2055,6 +2065,10 @@ static int sse_event_cb(const ENILSSEEvent *ev, void *ctx)
 
 + (void)syncWorkerCredentialsFromKeychain;
 {
+  if ([self usesLocalCrypto]) {
+    enil_worker_set_credentials(NULL, NULL);
+    return;
+  }
   ENILKeychain *kc = [ENILKeychain sharedKeychain];
   NSString *url    = [kc workerURL];
   NSString *secret = [kc workerSecret];

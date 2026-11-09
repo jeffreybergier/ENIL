@@ -26,8 +26,17 @@ individual builds. Platform `Makefile` files declare products, sources, flags, a
 Altivec owns build and packaging mechanics through its common entry points.
 Run `make test-host` for the build-system and Worker tests hosted on Linux.
 
-The native clients must not execute LINE extension code. They call the Worker
-for LTSM crypto and LINE directly for normal API traffic.
+The native clients use the statically linked ENILLTSM library for LTSM and LEGY
+crypto, and LINE directly for normal API traffic. Only the hash-verified,
+build-time-translated WASM is allowed in the library: no extension JavaScript,
+browser runtime, JIT, or runtime code downloads. Generated LINE-derived C and
+headers stay under build/ and out of Git. Keep bounds/signature checks enabled.
+
+Run `make test-ltsm` for the original-WASM/independent-crypto differential suite
+and the native facade/concurrency/cancellation harness. This needs no Worker
+credentials or LINE account. Run live comparisons separately and opt-in.
+`ENIL_LOCAL_CRYPTO=0` explicitly builds the remote backend; native failures must
+never silently send keys or plaintext to a Worker.
 
 ## Cloudflare Worker
 
@@ -38,14 +47,21 @@ Worker-only changes. Run `npm test` from `source/cloudflare` for Worker changes.
 The build downloads and verifies the extension, then generates the required
 JavaScript/WASM. Keep downloaded extension material and generated runtime
 assets out of Git. The running Worker is a crypto service and must not make
-outbound LINE requests. Do not move extension code into the native clients.
+outbound LINE requests. Native translation reuses this verified extraction
+pipeline; never check in the downloaded extension or translated outputs.
 
 ## Dependencies & Build Inputs
 
 A `git clone --recursive` is **not** buildable on its own. Beyond the
-committed app source, three input sources are needed:
+committed app source, four input sources are needed:
 
-- **Submodule** (in-repo via `--recursive`): `qrcodegen`, HTTPS and pinned.
+- **Submodules** (in-repo via `--recursive`): `qrcodegen` and `w2c2`, HTTPS
+  and pinned. CMake builds the latter as a host-side code generator.
+- **Verified extension inputs**: `npm ci --prefix source/cloudflare` followed
+  by `make ltsm-prepare` prepares the native library. The archive is validated
+  against the existing extension pin and the adapted WASM against the native
+  bridge's ABI hash. This preparation may download; subsequent native builds
+  and offline tests reuse the verified cache without a Worker credential.
 - **`/altivec` engine root**: the Make includes
   (`altivec_common_{mac,phone}.mk`, absolute-path) plus prebuilt
   AltivecCore and AltivecCocoa outputs. cJSON, sqlite, libcurl/OpenSSL/zlib,
@@ -63,8 +79,9 @@ archives from the repository secrets `ALTIVEC_SDK_MACOS_105_URL`,
 `ALTIVEC_SDK_MACOS_113_URL`, and `ALTIVEC_SDK_IPHONEOS_84_URL`, then verifies
 their pinned hashes before use.
 
-The **Cloudflare Worker** (`enil-cloud`) is a runtime crypto service, not a
-build input — see **Cloudflare Worker Role** below.
+The deployed **Cloudflare Worker** (`enil-cloud`) is an optional reference and
+explicit remote-backend service, not a native build dependency. Native builds
+need the verified extension archive, not a Worker URL or shared secret.
 
 ## House Rules
 
@@ -85,7 +102,9 @@ Required libraries: `cJSON`, `libcurl`, `sqlite`.
 
 - Keep `.env`, local Worker secrets, SDK archives, generated headers, and build
   outputs out of Git.
-- Preserve `source/deps/qrcodegen` as a pinned submodule.
+- Preserve `source/deps/qrcodegen` and `source/deps/w2c2` as pinned submodules.
+  Do not edit the translator checkout in place; review ABI/generation changes
+  and rerun native differential tests before updating its pin.
 - Research archives and captured fixtures live separately in ENIL-extras.
   They are not native or Worker build inputs.
 - Native release packaging is configured in `.altivec-release.json`; GitHub

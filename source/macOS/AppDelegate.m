@@ -306,7 +306,7 @@
            name:ENILKeychainDidChangeNotification
          object:nil];
   [self pushKeychainToWorker];
-  if (![[ENILKeychain sharedKeychain] hasCredentials]) {
+  if (![ENILAccount cryptoReady]) {
     ENILLog(@"AppDelegate.applicationDidFinishLaunching",
             @"no worker credentials - opening Preferences");
     [self showPreferencesWindow:self];
@@ -412,7 +412,7 @@
      "still no accounts open" — once an account is open, subsequent saves
      just reconfigure the worker layer without retriggering QR. */
   if ([_accounts count] == 0 && !_qrLoginWindowController &&
-      [[ENILKeychain sharedKeychain] hasCredentials]) {
+      [ENILAccount cryptoReady]) {
     [self continueLaunchAfterCredentials];
   }
 }

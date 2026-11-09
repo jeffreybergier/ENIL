@@ -7,6 +7,7 @@
 #import "ENILRootCoordinator.h"
 #import "UIViewController+ENILModal.h"
 #import "ENILKeychain.h"
+#import "ENILAccount.h"
 #import "XPFoundation.h"
 #import "XPUIKit.h"
 #import <AltivecCore/AltivecCore.h>
@@ -57,8 +58,12 @@
                                placeholder:NSLocalizedString(@"Shared Secret",
                                                              nil)]];
   ENILKeychain *kc = [ENILKeychain sharedKeychain];
-  [[self urlField] setText:[kc workerURL]];
-  [[self secretField] setText:[kc workerSecret]];
+  if (![ENILAccount usesLocalCrypto]) {
+    [[self urlField] setText:[kc workerURL]];
+    [[self secretField] setText:[kc workerSecret]];
+  }
+  [[self urlField] setEnabled:![ENILAccount usesLocalCrypto]];
+  [[self secretField] setEnabled:![ENILAccount usesLocalCrypto]];
 
   /* A single Done button: it commits any edited worker credentials, then (when
    * presented modally) closes. There is no separate Save — see -doneAction.
@@ -86,7 +91,8 @@
 - (void)viewDidAppear:(BOOL)animated
 {
   [super viewDidAppear:animated];
-  if (![[[self urlField] text] length]) [[self urlField] becomeFirstResponder];
+  if (![ENILAccount usesLocalCrypto] && ![[[self urlField] text] length])
+    [[self urlField] becomeFirstResponder];
 }
 
 - (void)reloadAccounts
@@ -196,6 +202,10 @@ titleForFooterInSection:(NSInteger)section
   /* Only the worker section carries a footer below; Linked Libraries has none. */
   if (section != [self workerSection]) return nil;
   if ([[self statusMessage] length]) return [self statusMessage];
+  if ([ENILAccount usesLocalCrypto]) {
+    return NSLocalizedString(
+      @"Crypto runs locally. Worker settings are not used by this build.", nil);
+  }
   if ([self envOverrideActive]) {
     return NSLocalizedString(
       @"Environment variables override these settings while set.", nil);
@@ -367,7 +377,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
   /* Persist any just-typed credentials first, so the gate below reads them
    * (the QR flow needs the worker before its first call). */
   BOOL ready = [self commitWorkerCredentialsIfNeeded];
-  if (ready && ![[ENILKeychain sharedKeychain] hasCredentials]) {
+  if (ready && ![ENILAccount cryptoReady]) {
     [self setStatusMessageAndReload:NSLocalizedString(
       @"Set the Worker URL and shared secret first.", nil)];
     ready = NO;

@@ -119,6 +119,11 @@ typedef enum {
 + (BOOL)restartQRLoginAtPath:(NSString *)accountDir;
 /* Caller stops the account engine before atomically installing the session. */
 + (BOOL)activateQRLoginAtPath:(NSString *)stagingDir accountPath:(NSString *)accountDir;
+/* Build-selected backend, safe on any thread. */
++ (BOOL)usesLocalCrypto;
+/* Startup readiness, main thread (remote builds consult ENILKeychain). Local
+ * crypto requires no Worker credentials. Does not probe LINE or log in. */
++ (BOOL)cryptoReady;
 /* Process-global network-health gate (see enil_health.h). These are sticky
  * failure flags shared across every account and network funnel, so they are
  * class-level — they read no per-instance state. */

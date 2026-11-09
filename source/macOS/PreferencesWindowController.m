@@ -1,5 +1,6 @@
 #import "PreferencesWindowController.h"
 #import "ENILKeychain.h"
+#import "ENILAccount.h"
 #import "XPFoundation.h"
 #import "AIFontAwesome.h"
 #include <stdlib.h>
@@ -96,8 +97,9 @@ static NSString *const kTbWorker = @"ENILPrefsTb.Worker";
     NSMakeRect(0, 0, kPaneW, kPaneH)] autorelease];
 
   ENILKeychain *kc = [ENILKeychain sharedKeychain];
-  NSString *curURL    = [kc workerURL];
-  NSString *curSecret = [kc workerSecret];
+  BOOL local = [ENILAccount usesLocalCrypto];
+  NSString *curURL    = local ? nil : [kc workerURL];
+  NSString *curSecret = local ? nil : [kc workerSecret];
 
   CGFloat y = kPaneH - kMargin - kRowH;
 
@@ -111,6 +113,7 @@ static NSString *const kTbWorker = @"ENILPrefsTb.Worker";
                              kPaneW - 2 * kMargin - kLabelW, kRowH);
   urlField_ = [[NSTextField alloc] initWithFrame:fieldF];
   [urlField_ setStringValue:curURL ? curURL : @""];
+  [urlField_ setEnabled:!local];
   [[urlField_ cell] setPlaceholderString:@"https://your-worker.workers.dev"];
   [root addSubview:urlField_];
 
@@ -125,6 +128,7 @@ static NSString *const kTbWorker = @"ENILPrefsTb.Worker";
   fieldF.origin.y = y;
   secretField_ = [[NSSecureTextField alloc] initWithFrame:fieldF];
   [secretField_ setStringValue:curSecret ? curSecret : @""];
+  [secretField_ setEnabled:!local];
   [root addSubview:secretField_];
 
   y -= (kRowH + kRowGap);
@@ -148,6 +152,7 @@ static NSString *const kTbWorker = @"ENILPrefsTb.Worker";
 
   NSButton *save = [[[NSButton alloc] initWithFrame:saveF] autorelease];
   [save setTitle:NSLocalizedString(@"Save", nil)];
+  [save setEnabled:!local];
   [save setBezelStyle:XPBezelStyleRounded];
   [save setKeyEquivalent:@"\r"];
   [save setTarget:self];
@@ -266,7 +271,10 @@ static NSString *const kTbWorker = @"ENILPrefsTb.Worker";
 {
   const char *eu = getenv("ENIL_WORKER_URL");
   const char *es = getenv("ENIL_WORKER_SECRET");
-  if ((eu && *eu) || (es && *es)) {
+  if ([ENILAccount usesLocalCrypto]) {
+    [envHint_ setStringValue:NSLocalizedString(
+      @"Crypto runs locally. Worker settings are not used by this build.", nil)];
+  } else if ((eu && *eu) || (es && *es)) {
     [envHint_ setStringValue:NSLocalizedString(
       @"Environment variables override these settings while set.", nil)];
   } else {
@@ -279,6 +287,10 @@ static NSString *const kTbWorker = @"ENILPrefsTb.Worker";
 - (void)saveAction:(id)sender;
 {
   (void)sender;
+  if ([ENILAccount usesLocalCrypto]) {
+    [[self window] performClose:self];
+    return;
+  }
   NSString *url    = [urlField_ stringValue];
   NSString *secret = [secretField_ stringValue];
   NSError *error = nil;

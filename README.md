@@ -1,5 +1,26 @@
 # ENIL
 
+ENIL performs request signing, E2EE and LEGY transport crypto locally by default.
+No Cloudflare Worker URL or secret is required. Existing account keys and
+version-1 `workerRestoreState` continue to work; there is no account migration
+or automatic remote fallback. The explicit `ENIL_LOCAL_CRYPTO=0` build option
+retains the old remote backend and its saved credentials.
+
+The static library, public C API, reproducible generation, offline tests and
+platform-validation limits are documented in [Native LTSM](docs/native-ltsm.md).
+Initialize the pinned submodules, then prepare the verified build inputs:
+
+```sh
+git submodule update --init --recursive
+npm ci --prefix source/cloudflare
+make ltsm-prepare
+make test-host
+make debug release
+```
+
+Run these Make targets in the configured Altivec environment. Preparation may
+download the pinned LINE extension; generated JS/WASM/C are ignored build
+inputs, not checked-in sources. Cached builds and native crypto execute offline.
 
 
 Build roots are resolved from the project Makefile and inherited by child makes.

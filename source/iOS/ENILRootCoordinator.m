@@ -70,7 +70,7 @@ NSString *const ENILAccountsDidChangeNotification = @"ENILAccountsDidChangeNotif
 - (void)continueAfterCredentials
 {
   @try {
-    if (![[ENILKeychain sharedKeychain] hasCredentials]) {
+    if (![ENILAccount cryptoReady]) {
       ENILLog(@"ENILRootCoordinator.continueAfterCredentials",
               @"no worker credentials");
       [self showSettings];
@@ -96,7 +96,7 @@ NSString *const ENILAccountsDidChangeNotification = @"ENILAccountsDidChangeNotif
   (void)note;
   [ENILAccount syncWorkerCredentialsFromKeychain];
   if ([self activeAccount] == nil &&
-      [[ENILKeychain sharedKeychain] hasCredentials]) {
+      [ENILAccount cryptoReady]) {
     [self continueAfterCredentials];
   }
 }

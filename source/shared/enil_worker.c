@@ -14,6 +14,17 @@
 #include "enil_api_json.h"
 #include "enil_cocoa_log.h"
 #include "enil_health.h"
+#if ENIL_LOCAL_CRYPTO
+#include "enil_ltsm.h"
+#endif
+
+int enil_worker_is_local(void) {
+#if ENIL_LOCAL_CRYPTO
+  return 1;
+#else
+  return 0;
+#endif
+}
 
 /* Thin wrapper: routes fixed-string call sites through NSLog with a
  * "Worker.<fn>" tag. Formatted sites should call ENIL_LOG directly. */
@@ -55,6 +66,7 @@ void enil_worker_set_credentials(const char *url, const char *secret) {
   enil_health_clear_failure(ENIL_ERR_WORKER);
 }
 
+#if !ENIL_LOCAL_CRYPTO
 /* Return an owned, internally consistent pair. No credential mutex is held
  * during curl or Cocoa callbacks; replacing Preferences cannot invalidate it. */
 static int worker_credentials_copy(const char *path, char **url, char **header) {
@@ -82,8 +94,36 @@ static int worker_cancel(void *ctx, curl_off_t a, curl_off_t b, curl_off_t c, cu
   return ctx && enil_atomic_load((const volatile int *)ctx);
 }
 
+#endif
+
+#if ENIL_LOCAL_CRYPTO
+static int local_cancel(void *context) {
+  return context && enil_atomic_load((const volatile int *)context);
+}
+#endif
+
 static char *worker_post(const char *path, const char *json_body,
                          const volatile int *cancel) {
+#if ENIL_LOCAL_CRYPTO
+  char *response = NULL;
+  char error[160];
+  int ok;
+  if (local_cancel((void *)cancel)) return NULL;
+  if (enil_health_is_failed(ENIL_ERR_WORKER)) return NULL;
+  ok = enil_ltsm_request_ex(path, json_body, &response, error, sizeof(error),
+                          cancel ? local_cancel : NULL, (void *)cancel);
+  if (local_cancel((void *)cancel)) {
+    enil_ltsm_free(response);
+    return NULL;
+  }
+  if (!ok) {
+    ENIL_LOG("Crypto.local", "%s: %s", path, error);
+    enil_health_set_failure(ENIL_ERR_WORKER,
+      "Local crypto failed. Tap Full Sync to retry.");
+    return NULL;
+  }
+  return response;
+#else
   char *url = NULL, *secret_hdr = NULL;
   ENILBuf buf = {NULL, 0};
   CURL *curl;
@@ -203,6 +243,15 @@ static char *worker_post(const char *path, const char *json_body,
     return NULL;
   }
   return buf.data;
+#endif
+}
+
+static void worker_string_free(char *s) {
+#if ENIL_LOCAL_CRYPTO
+  enil_ltsm_free(s);
+#else
+  free(s);
+#endif
 }
 
 static cJSON *parse_restore_state(const char *s) {
@@ -226,11 +275,11 @@ static cJSON *worker_call(const char *path, cJSON *req, const char *fn) {
   if (!req_str) { ENIL_LOG("Worker.call", "%s: serialize failed", fn); return NULL; }
 
   resp_str = worker_post(path, req_str, NULL);
-  free(req_str);
+  worker_string_free(req_str);
   if (!resp_str) { ENIL_LOG("Worker.call", "%s: no response", fn); return NULL; }
 
   resp = cJSON_Parse(resp_str);
-  free(resp_str);
+  worker_string_free(resp_str);
   if (!resp) { ENIL_LOG("Worker.call", "%s: invalid JSON response", fn); return NULL; }
   return resp;
 }
@@ -551,11 +600,11 @@ cJSON *enil_worker_decrypt_ex(const char *path, cJSON *payload,
   if (!body) return NULL;
 
   resp_str = worker_post(path, body, cancel);
-  free(body);
+  worker_string_free(body);
   if (!resp_str) { LOG("decrypt", "no response"); return NULL; }
 
   resp = cJSON_Parse(resp_str);
-  free(resp_str);
+  worker_string_free(resp_str);
   if (!resp) { LOG("decrypt", "invalid JSON response"); return NULL; }
   return resp;
 }

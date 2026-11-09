@@ -1,9 +1,9 @@
 /* ============================================================================
  * enil_crypto — OBS file encryption (media uploads / downloads).
  *
- * X25519/SHA-256/AES-GCM/Letter-Sealing primitives were removed: per
- * CLAUDE.md the clean-room boundary keeps all E2EE/keygen on the Cloudflare
- * Worker. Only the symmetric OBS file channel (key supplied by LINE) is local.
+ * Message E2EE, keygen and request signing live in ENILLTSM behind the
+ * enil_worker facade (or its explicitly selected remote backend). This header
+ * remains responsible for the separate symmetric OBS media channel.
  * ==========================================================================*/
 
 #ifndef ENIL_CRYPTO_H

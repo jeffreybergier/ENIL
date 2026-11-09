@@ -3,11 +3,17 @@
 
 #include "cJSON.h"
 
-/* Process-global worker endpoint + shared secret. Set once during app startup
+/* True when this build uses the offline native library. No automatic remote
+ * fallback: keys/plaintext never leave the process on a local crypto failure. */
+int enil_worker_is_local(void);
+
+/* Remote-backend endpoint + shared secret. Ignored by the native backend.
+ * Set once during app startup
  * (from ENILKeychain) and any time Preferences saves a new value. Both must
  * be non-empty before any worker call; an unset client logs and returns
  * NULL/0 from every public entry point. Strings are duplicated internally
- * so callers retain ownership of their inputs. */
+ * so callers retain ownership of their inputs. The remaining enil_worker_*
+ * operations preserve their original API/state contract in both backends. */
 void   enil_worker_set_credentials(const char *url, const char *secret);
 
 /* Returns a malloc'd HMAC string or NULL on error. Caller must free. */

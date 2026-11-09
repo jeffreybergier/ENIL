@@ -62,7 +62,11 @@ static void worker_set_failure(const char *user_message) {
   enil_atomic_store(&s_worker_failed, 1);
   ENIL_LOG("Health.set_failure", "[error.worker] Worker Error - %s",
            (user_message && *user_message) ? user_message : "unknown error");
+#if ENIL_LOCAL_CRYPTO
+  enil_status_post_error("error.worker", "Crypto Error");
+#else
   enil_status_post_error("error.worker", "Worker Error");
+#endif
 }
 
 static void worker_clear_failure(void) {

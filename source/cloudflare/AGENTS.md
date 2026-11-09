@@ -1,8 +1,11 @@
 # ENIL Cloudflare Worker
 
-A crypto service for ENIL clients. Clients talk directly to LINE and use this
-Worker for LTSM request signing, key generation, and message encryption/decryption.
-The running Worker does not contact LINE. The build downloads the extension.
+A crypto reference service and explicit remote backend for ENIL. Default native
+builds now link ENILLTSM (source/ltsm/) instead of calling this Worker. Both
+backends perform LTSM request signing, key generation and message crypto; the
+clients still talk directly to LINE. The running Worker does not contact LINE.
+The build downloads the extension; native translation reuses the verified
+extraction and native-MID adaptation. No generated extension code belongs in Git.
 
 ## Build and test
 

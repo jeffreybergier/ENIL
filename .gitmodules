@@ -1,3 +1,6 @@
 [submodule "source/deps/qrcodegen"]
 	path = source/deps/qrcodegen
 	url = https://github.com/nayuki/QR-Code-generator.git
+[submodule "source/deps/w2c2"]
+	path = source/deps/w2c2
+	url = https://github.com/turbolent/w2c2.git

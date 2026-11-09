@@ -124,6 +124,16 @@ jobs:
             "$BUILD_IMAGE" \
             preflight
 
+      - name: Prepare verified native crypto build inputs
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --entrypoint /bin/bash \
+            -v "${{ github.workspace }}:/repo/user" \
+            -w /repo/user \
+            "$BUILD_IMAGE" \
+            -lc 'npm ci --prefix source/cloudflare && make ltsm-prepare'
+
       - name: Build configured targets and stage assets
         run: |
           set -euo pipefail
