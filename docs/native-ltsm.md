@@ -241,7 +241,22 @@ VM debug suites are slow under emulation. Initial combined runs exceeded the
 with a longer budget passed. This is functional coverage, not a performance
 benchmark. Logs are retained under `build/validation/native-ltsm-20261109/`.
 
-No real account files were used or migrated. App GUI launch, real LINE login /
-message delivery, iOS device execution, and real Tiger/iOS-minimum hardware
-behavior are **not** established by these results. Passing differential fixtures
-is not an independent security audit.
+No real account files were used or migrated in the automated validation above.
+App GUI launch, real LINE login / message delivery, iOS device execution, and
+real Tiger/iOS-minimum hardware behavior are **not** established by those
+results. Passing differential fixtures is not an independent security audit.
+
+### User-reported app acceptance — November 13, 2026
+
+- [x] **iPhone 5 / iOS 6:** the user confirmed that the new native-crypto
+  ENIL 1.1.4 release IPA worked on the phone after transfer for manual testing.
+  Artifact: `build/iOS/release/ENIL/ENIL.ipa`, copied as
+  `ENIL-1.1.4-native-crypto-20261109.ipa`.
+  SHA-256: `8f2793872dec2b3eae9aeca1ad8535466db10744fc89667650134e6b98cf40aa`.
+- The user also reported that the Mavericks app works correctly.
+
+This establishes user-reported native app acceptance on iPhone 5 / iOS 6,
+not merely a cross-build. Individual login, messaging, backgrounding and
+recovery scenarios were not itemized in the report. The standalone iOS
+124-request suite and API/facade checks remain unrun; other iOS versions,
+arm64 devices and minimum-supported-OS behavior remain unverified.
