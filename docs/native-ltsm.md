@@ -260,3 +260,34 @@ not merely a cross-build. Individual login, messaging, backgrounding and
 recovery scenarios were not itemized in the report. The standalone iOS
 124-request suite and API/facade checks remain unrun; other iOS versions,
 arm64 devices and minimum-supported-OS behavior remain unverified.
+
+### Desktop QR login acceptance — November 15, 2026 (device date)
+
+- [x] **Tiger 10.4.11 / PPC (`x4-vm`), Desktop profile:** the user
+  confirmed a fresh QR login, including phone PIN verification, with the clean
+  ENIL 1.1.4 release built from `39b7c7b`. The normal app was staged below
+  `~/Desktop/ENIL-QR-login-20261115-081356/`; it is not a test harness.
+- [ ] **Chrome profile:** not confirmed. The phone reported expired PIN/QR
+  codes. Console logs show an existing QR session/key being reused on retry,
+  followed by HTTP 400 expiry responses. The initial PIN failure's cause is
+  not established; do not treat this as successful Chrome login coverage.
+- [ ] **Tablet profile:** not confirmed. Shared implementation with Desktop
+  does not establish acceptance of that client identity.
+
+Read-only inspection of Application Support and console logs found the expected
+Desktop native-thrift account identity, nonempty access/refresh tokens and E2EE
+state, a private per-profile certificate file, and a retired native recovery
+record beside the active account. Session/certificate files have mode 0600.
+The account directory matches its saved MID. A checksum-verified, coherent
+DB/WAL capture contained one account, six contacts, two chats, seven messages,
+sticker/sticon catalogs, and no talk exceptions. No account contents or secrets
+are checked in. Full database integrity/index validation was not performed:
+the inspection host lacks Apple's LOCALIZED collation.
+
+Console logs confirm successful scan, PIN verification, and secure login;
+certificate error 2 took the expected PIN-verification fallback. Initial SSE
+startup waited for the first sync cursor. Sync reported `Done` at 09:42:37 JST,
+then SSE started with a local revision. No new ENIL crash report was present
+at inspection. This establishes Desktop login and initial sync/startup, not
+all messaging, reconnect, or account-recovery scenarios. Private inspection
+artifacts remain ignored under `build/validation/qr-login-release/private/`.
