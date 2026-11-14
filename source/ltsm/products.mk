@@ -37,9 +37,9 @@ GROUP_ltsm_generated_FLAGS_x86_64 = -Wno-unused-but-set-variable -Wno-unused-but
 GROUP_ltsm_generated_FLAGS_arm64 = $(GROUP_ltsm_generated_FLAGS_x86_64)
 GROUP_ltsm_generated_FLAGS_armv7 = $(GROUP_ltsm_generated_FLAGS_x86_64)
 GROUP_ltsm_generated_FLAGS_host = $(GROUP_ltsm_generated_FLAGS_x86_64)
-# GCC 4.2 exhausts memory optimizing the obfuscated, large WASM functions,
-# even at -O1 with aggressive GC. Only translated legacy code uses -O0;
-# handwritten library/app code retains its ordinary compile policy.
+# GCC 4.2 requires more than 12 GiB of RAM to optimize the WASM-converted C:
+# i386 -O3 exhausted a 12 GiB Docker VM. Use -O0 only for generated legacy
+# code; handwritten library code and the main ENIL app remain optimized.
 GROUP_ltsm_generated_FLAGS_ppc = -O0
 GROUP_ltsm_generated_FLAGS_i386 = $(GROUP_ltsm_generated_FLAGS_ppc)
 ENILLTSM_FLAGS = -I$(LTSM_DIR) -I$(LTSM_GEN) -isystem $(LTSM_TRANSLATOR) \
