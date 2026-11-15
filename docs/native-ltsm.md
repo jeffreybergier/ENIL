@@ -320,8 +320,11 @@ record of that day's validation.
 - [x] **Image and stamp/sticker messaging:** the user confirmed sending and
   receiving both images and stamps with the same Desktop-profile app on
   `x4-vm`. The user subsequently also confirmed sending and receiving inline
-  sticons. Direct-versus-group coverage and other platforms were not separately
-  confirmed by these reports.
+  sticons. These media reports did not separately itemize group coverage or
+  other platforms.
+- [x] **Group messaging:** the user confirmed that group messaging works.
+  The report did not specify device/profile or individual message types;
+  do not infer that every media type was tested in groups.
 - [x] **Chrome profile:** the user subsequently confirmed fresh Chrome login
   on `koolphone5` / iOS 8.4.1 with the new ENIL 1.1.4 installation. Earlier
   `x4-vm` attempts reported expired PIN/QR codes; logs showed session/key reuse
@@ -394,9 +397,9 @@ photo sending from the camera roll on `koolphone5` / iOS 8.4.1.
 **Complete for the current native-crypto acceptance effort, per user decision.**
 Desktop login on Tiger/PPC, Chrome login and camera-roll photo sending on
 iOS 8.4.1, image/stamp/sticon send/receive on the Desktop profile, iOS armv7
-standalone suites in debug and release, and live Worker parity are confirmed
-as recorded above. Lifecycle and
-legacy Worker Keychain checks retain their explicit waived/not-needed status.
+standalone suites in debug and release, live Worker parity, and user-reported
+group messaging are confirmed as recorded above. Lifecycle and legacy Worker
+Keychain checks retain their explicit waived/not-needed status.
 
 Untested scenarios and platforms remain coverage limits, not passing results
 or blockers to this acceptance decision. Tablet login and same-profile
