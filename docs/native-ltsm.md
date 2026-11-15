@@ -267,6 +267,10 @@ arm64 devices and minimum-supported-OS behavior remain unverified.
   confirmed a fresh QR login, including phone PIN verification, with the clean
   ENIL 1.1.4 release built from `39b7c7b`. The normal app was staged below
   `~/Desktop/ENIL-QR-login-20261115-081356/`; it is not a test harness.
+- [x] **Image and stamp/sticker messaging:** the user confirmed sending and
+  receiving both images and stamps with the same Desktop-profile app on
+  `x4-vm`. Inline sticons, direct-versus-group coverage, and other platforms
+  were not separately confirmed by this report.
 - [ ] **Chrome profile:** not confirmed. The phone reported expired PIN/QR
   codes. Console logs show an existing QR session/key being reused on retry,
   followed by HTTP 400 expiry responses. The initial PIN failure's cause is
@@ -288,6 +292,7 @@ Console logs confirm successful scan, PIN verification, and secure login;
 certificate error 2 took the expected PIN-verification fallback. Initial SSE
 startup waited for the first sync cursor. Sync reported `Done` at 09:42:37 JST,
 then SSE started with a local revision. No new ENIL crash report was present
-at inspection. This establishes Desktop login and initial sync/startup, not
-all messaging, reconnect, or account-recovery scenarios. Private inspection
+at inspection. Together with the user's subsequent image/stamp confirmation,
+this establishes Desktop login, initial sync/startup, and image/stamp messaging,
+not all messaging, reconnect, or account-recovery scenarios. Private inspection
 artifacts remain ignored under `build/validation/qr-login-release/private/`.
