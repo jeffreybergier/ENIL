@@ -269,7 +269,22 @@ Using the current ignored, mode-0600 `.env` and the macOS arm64 release harness,
 (exit code 1). No successful live parity is established. Credentials and Worker
 configuration were not changed; only synthetic data was sent and no LINE
 requests were made. Local log: `build/validation/live-worker-parity/result.log`.
-Valid Worker authentication is still needed before the comparison can proceed.
+That attempt was blocked on Worker authentication; the successful retry below
+supersedes this blocker.
+
+### Live Worker parity confirmed — November 15, 2026
+
+- [x] The macOS arm64 release harness passed `compare-worker.mjs` against the
+  live Worker: **9 synthetic calls**, covering signatures, bidirectional
+  portable key restoration, user E2EE, and LEGY. The runner exited zero.
+- With user authorization, the prior ignored `.env` secret was preserved under
+  `ENIL_WORKER_SECRET_PREVIOUS`, and the active secret was replaced from the
+  user's saved environment backup. The Worker URL was unchanged and `.env`
+  remains mode 0600. No secret values are recorded here or in the result log.
+- No LINE requests or real account data were involved. This confirms the live
+  comparison's scope, not every operation covered by the broader offline suite.
+
+Log: `build/validation/live-worker-parity/result-updated-secret.log`.
 
 ### iOS standalone crypto validation — November 15, 2026
 
