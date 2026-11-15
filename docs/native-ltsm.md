@@ -277,6 +277,11 @@ arm64 devices and minimum-supported-OS behavior remain unverified.
   not established; do not treat this as successful Chrome login coverage.
 - [ ] **Tablet profile:** not confirmed. Shared implementation with Desktop
   does not establish acceptance of that client identity.
+- **Lifecycle and recovery — will not check (user decision):** force-quit /
+  relaunch, iOS background / foreground, network loss / reconnection, and
+  recovery after a failed operation. The user considers these checks to require
+  production use and has excluded them from the manual validation checklist.
+  This is an accepted validation gap, not a passing result.
 
 Read-only inspection of Application Support and console logs found the expected
 Desktop native-thrift account identity, nonempty access/refresh tokens and E2EE
