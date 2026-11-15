@@ -258,8 +258,34 @@ results. Passing differential fixtures is not an independent security audit.
 This establishes user-reported native app acceptance on iPhone 5 / iOS 6,
 not merely a cross-build. Individual login, messaging, backgrounding and
 recovery scenarios were not itemized in the report. The standalone iOS
-124-request suite and API/facade checks remain unrun; other iOS versions,
+124-request suite and API/facade checks were still unrun at that point; the
+November 15 iOS 8.4.1 armv7 results below supersede that gap. Other iOS versions,
 arm64 devices and minimum-supported-OS behavior remain unverified.
+
+### iOS standalone crypto validation — November 15, 2026
+
+- [x] **`koolphone5`, iPhone5,2 / iOS 8.4.1 (12H321), armv7:** both release
+  and debug configurations passed all **124 differential requests** against
+  the verified original WASM and independent crypto fixtures.
+- [x] Both configurations passed the public API / real app facade harness:
+  concurrent callers, cancellation during execution and lock wait, failure
+  recovery, credential-free operation, and the sticky health gate.
+- Targeted release/debug harness builds emitted no compiler warnings. The
+  executables were ad-hoc signed on-device and run over SSH below
+  `~/tmp_altivec/ENIL-LTSM-20261115/`. Only synthetic keys/messages were used;
+  no installed app was launched or replaced, and no LINE requests, real
+  credentials, or account files were involved.
+- The initial debug differential run exceeded the command runner's four-minute
+  outer timeout after passing its early groups. A complete rerun with a
+  longer-lived runner passed all 124 requests and exited zero. This is
+  functional coverage, not a performance or battery-life benchmark.
+
+Logs are retained locally under `build/validation/koolphone5-ltsm/` and test
+results alongside the staged phone executables. The successful debug result is
+`differential-debug-rerun.log`; the earlier partial log is not a complete pass.
+These results establish iOS 8.4.1 armv7 execution, not iOS arm64, iOS 5 minimum,
+or iOS 6 standalone-suite coverage. The November 9 table remains a historical
+record of that day's validation.
 
 ### Desktop QR login acceptance — November 15, 2026 (device date)
 
