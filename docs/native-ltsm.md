@@ -375,7 +375,8 @@ The latest local ENIL 1.1.4 release IPA was rebuilt/validated and installed with
 `appinst` (exit zero). Only the normal ENIL app is now registered. The transferred
 IPA SHA1 and installed executable SHA256 matched the local release artifact.
 The agent did not launch the app or run sync. The user subsequently confirmed
-successful Chrome login with this fresh installation.
+successful Chrome login with this fresh installation, followed by successful
+photo sending from the camera roll on `koolphone5` / iOS 8.4.1.
 
 - Device stage: `~/tmp_altivec/ENIL-install-20261115/`.
 - Local build, uninstall, install and verification logs:
@@ -388,9 +389,10 @@ successful Chrome login with this fresh installation.
 ### Current validation disposition — November 15, 2026
 
 **Complete for the current native-crypto acceptance effort, per user decision.**
-Desktop login on Tiger/PPC, Chrome login on iOS 8.4.1, image/stamp/sticon
-send/receive on the Desktop profile, iOS armv7 standalone suites in debug and
-release, and live Worker parity are confirmed as recorded above. Lifecycle and
+Desktop login on Tiger/PPC, Chrome login and camera-roll photo sending on
+iOS 8.4.1, image/stamp/sticon send/receive on the Desktop profile, iOS armv7
+standalone suites in debug and release, and live Worker parity are confirmed
+as recorded above. Lifecycle and
 legacy Worker Keychain checks retain their explicit waived/not-needed status.
 
 Untested scenarios and platforms remain coverage limits, not passing results
