@@ -262,6 +262,15 @@ recovery scenarios were not itemized in the report. The standalone iOS
 November 15 iOS 8.4.1 armv7 results below supersede that gap. Other iOS versions,
 arm64 devices and minimum-supported-OS behavior remain unverified.
 
+### Live Worker parity retry — November 15, 2026
+
+Using the current ignored, mode-0600 `.env` and the macOS arm64 release harness,
+`compare-worker.mjs` again stopped at **HTTP 401 on the first `/sign` request**
+(exit code 1). No successful live parity is established. Credentials and Worker
+configuration were not changed; only synthetic data was sent and no LINE
+requests were made. Local log: `build/validation/live-worker-parity/result.log`.
+Valid Worker authentication is still needed before the comparison can proceed.
+
 ### iOS standalone crypto validation — November 15, 2026
 
 - [x] **`koolphone5`, iPhone5,2 / iOS 8.4.1 (12H321), armv7:** both release
