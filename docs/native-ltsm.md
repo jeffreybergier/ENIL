@@ -322,10 +322,12 @@ record of that day's validation.
   `x4-vm`. The user subsequently also confirmed sending and receiving inline
   sticons. Direct-versus-group coverage and other platforms were not separately
   confirmed by these reports.
-- [ ] **Chrome profile:** not confirmed. The phone reported expired PIN/QR
-  codes. Console logs show an existing QR session/key being reused on retry,
-  followed by HTTP 400 expiry responses. The initial PIN failure's cause is
-  not established; do not treat this as successful Chrome login coverage.
+- [x] **Chrome profile:** the user subsequently confirmed fresh Chrome login
+  on `koolphone5` / iOS 8.4.1 with the new ENIL 1.1.4 installation. Earlier
+  `x4-vm` attempts reported expired PIN/QR codes; logs showed session/key reuse
+  on retry and HTTP 400 expiry responses. Slow emulated PPC execution is a
+  possible contributor, not an established root cause. Chrome login on physical
+  PPC hardware remains untested and is not a blocker for current acceptance.
 - [ ] **Tablet profile:** not confirmed. Shared implementation with Desktop
   does not establish acceptance of that client identity.
 - **Lifecycle and recovery — will not check (user decision):** force-quit /
@@ -372,7 +374,8 @@ of persistent Keychain entries; no separate Keychain wipe was performed.
 The latest local ENIL 1.1.4 release IPA was rebuilt/validated and installed with
 `appinst` (exit zero). Only the normal ENIL app is now registered. The transferred
 IPA SHA1 and installed executable SHA256 matched the local release artifact.
-The agent did not launch the app or run sync; fresh phone acceptance is pending.
+The agent did not launch the app or run sync. The user subsequently confirmed
+successful Chrome login with this fresh installation.
 
 - Device stage: `~/tmp_altivec/ENIL-install-20261115/`.
 - Local build, uninstall, install and verification logs:
@@ -381,3 +384,17 @@ The agent did not launch the app or run sync; fresh phone acceptance is pending.
   `8f4616b305a842c521832d23ed1ee4f53bc0a3e471d8124e5b62bc344a0d22c2`.
 - New bundle container: `9CCE82D1-C190-42F1-82BC-3F369989705F`.
 - New data container: `DF547DDB-2514-4A26-8D9C-9A3688BE92C1`.
+
+### Current validation disposition — November 15, 2026
+
+**Complete for the current native-crypto acceptance effort, per user decision.**
+Desktop login on Tiger/PPC, Chrome login on iOS 8.4.1, image/stamp/sticon
+send/receive on the Desktop profile, iOS armv7 standalone suites in debug and
+release, and live Worker parity are confirmed as recorded above. Lifecycle and
+legacy Worker Keychain checks retain their explicit waived/not-needed status.
+
+Untested scenarios and platforms remain coverage limits, not passing results
+or blockers to this acceptance decision. In particular, Tablet login and
+Chrome login on physical PPC hardware are not confirmed. The user may test
+Chrome login on their iMac G4 later; no production-device test is authorized
+or required by this record.
