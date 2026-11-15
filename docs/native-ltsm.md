@@ -319,8 +319,9 @@ record of that day's validation.
   `~/Desktop/ENIL-QR-login-20261115-081356/`; it is not a test harness.
 - [x] **Image and stamp/sticker messaging:** the user confirmed sending and
   receiving both images and stamps with the same Desktop-profile app on
-  `x4-vm`. Inline sticons, direct-versus-group coverage, and other platforms
-  were not separately confirmed by this report.
+  `x4-vm`. The user subsequently also confirmed sending and receiving inline
+  sticons. Direct-versus-group coverage and other platforms were not separately
+  confirmed by these reports.
 - [ ] **Chrome profile:** not confirmed. The phone reported expired PIN/QR
   codes. Console logs show an existing QR session/key being reused on retry,
   followed by HTTP 400 expiry responses. The initial PIN failure's cause is
@@ -353,6 +354,30 @@ certificate error 2 took the expected PIN-verification fallback. Initial SSE
 startup waited for the first sync cursor. Sync reported `Done` at 09:42:37 JST,
 then SSE started with a local revision. No new ENIL crash report was present
 at inspection. Together with the user's subsequent image/stamp confirmation,
-this establishes Desktop login, initial sync/startup, and image/stamp messaging,
+this establishes Desktop login, initial sync/startup, and image/stamp/sticon messaging,
 not all messaging, reconnect, or account-recovery scenarios. Private inspection
 artifacts remain ignored under `build/validation/qr-login-release/private/`.
+
+### Fresh test-phone installation — November 15, 2026
+
+With explicit user authorization to discard test-phone data, all three ENIL
+apps on `koolphone5` were uninstalled through the iOS application-management
+service: `com.altivecintelligence.ENIL`,
+`com.altivecintelligence.ENILSettingsTest`, and
+`com.jeffburg.enil.bulletinprobe`. All three registrations and their old bundle
+and data-container paths were verified absent before installation. No app
+folders were manually deleted. OS-managed uninstall does not establish removal
+of persistent Keychain entries; no separate Keychain wipe was performed.
+
+The latest local ENIL 1.1.4 release IPA was rebuilt/validated and installed with
+`appinst` (exit zero). Only the normal ENIL app is now registered. The transferred
+IPA SHA1 and installed executable SHA256 matched the local release artifact.
+The agent did not launch the app or run sync; fresh phone acceptance is pending.
+
+- Device stage: `~/tmp_altivec/ENIL-install-20261115/`.
+- Local build, uninstall, install and verification logs:
+  `build/validation/koolphone5-install/`.
+- Installed executable SHA256:
+  `8f4616b305a842c521832d23ed1ee4f53bc0a3e471d8124e5b62bc344a0d22c2`.
+- New bundle container: `9CCE82D1-C190-42F1-82BC-3F369989705F`.
+- New data container: `DF547DDB-2514-4A26-8D9C-9A3688BE92C1`.
