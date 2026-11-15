@@ -328,8 +328,11 @@ record of that day's validation.
   on retry and HTTP 400 expiry responses. Slow emulated PPC execution is a
   possible contributor, not an established root cause. Chrome login on physical
   PPC hardware remains untested and is not a blocker for current acceptance.
-- [ ] **Tablet profile:** not confirmed. Shared implementation with Desktop
-  does not establish acceptance of that client identity.
+- [x] **Tablet profile and certificate reuse on `x4-vm`:** the user confirmed
+  successful Tablet login, then signed out and completed a second Tablet QR
+  login without a PIN prompt. This establishes user-reported Tablet login and
+  certificate-reuse acceptance; no additional log inspection was performed for
+  this report.
 - **Lifecycle and recovery — will not check (user decision):** force-quit /
   relaunch, iOS background / foreground, network loss / reconnection, and
   recovery after a failed operation. The user considers these checks to require
@@ -396,7 +399,9 @@ as recorded above. Lifecycle and
 legacy Worker Keychain checks retain their explicit waived/not-needed status.
 
 Untested scenarios and platforms remain coverage limits, not passing results
-or blockers to this acceptance decision. In particular, Tablet login and
-Chrome login on physical PPC hardware are not confirmed. The user may test
-Chrome login on their iMac G4 later; no production-device test is authorized
-or required by this record.
+or blockers to this acceptance decision. Tablet login and same-profile
+certificate reuse were subsequently confirmed by the user on `x4-vm`, with
+no PIN requested on the second login after sign-out. Chrome login on physical
+PPC hardware remains unconfirmed. The user may test Chrome login on their
+iMac G4 later; no production-device test is authorized or required by this
+record.
