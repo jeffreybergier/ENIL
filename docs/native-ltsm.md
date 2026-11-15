@@ -282,6 +282,11 @@ arm64 devices and minimum-supported-OS behavior remain unverified.
   recovery after a failed operation. The user considers these checks to require
   production use and has excluded them from the manual validation checklist.
   This is an accepted validation gap, not a passing result.
+- **Legacy Worker Keychain persistence — not needed (user decision):** the
+  post-override iOS 6/iOS 8 library tests and Worker-settings app-relaunch check
+  concern optional remote-backend credentials, not default local crypto. They
+  are excluded from current acceptance, not recorded as passed. See
+  [Keychain migration](keychain-migration.md).
 
 Read-only inspection of Application Support and console logs found the expected
 Desktop native-thrift account identity, nonempty access/refresh tokens and E2EE

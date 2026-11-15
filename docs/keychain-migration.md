@@ -41,9 +41,13 @@ substitution differed. The prebuilt iOS library also contains the legacy
 persistent-reference/account/group handling. Both platforms now use the
 container's `AIKeychainStore` directly.
 
-The native results below predate removal of the override. Rerun the legacy
-persistence test on iOS 6 and iOS 8 with the container library before shipping;
-cross-build checks do not establish native Keychain behavior.
+The native results below predate removal of the override. **Not needed for
+current native-crypto acceptance (user decision):** rerunning legacy credential
+persistence on iOS 6/iOS 8 with the container library and verifying Worker
+settings after an app relaunch. These checks concern optional remote Worker
+credentials, not the default local-crypto flow. This supersedes the earlier
+before-shipping requirement; it is not a passing result or proof of native
+Keychain behavior after override removal.
 
 Native koolphone5 validation passed using the production facade, temporary
 implementation and normal ENIL entitlements. The test seeds an old-style entry,
@@ -70,8 +74,8 @@ Stage below `~/tmp_altivec` on the authorized test phone, then run `./facade see
 org.enil.keychain-test.<unique-run>` and `./facade read
 org.enil.keychain-test.<same-run>` as separate invocations. A failed/interrupted
 seed can leave its synthetic fixture; the read/failure path cleans that exact
-account. Force-quit/relaunch through the actual installed UI remains a user
-verification step.
+account. Force-quit/relaunch through the actual installed UI is also marked
+not needed for current native-crypto acceptance, as noted above.
 
 The facade test also checks missing/invalid inputs separately from injected
 native access failures, verifies OSStatus propagation into the shared alert
