@@ -112,10 +112,58 @@ class NativeTransportTests(unittest.TestCase):
                         self.assertEqual(headers.get('User-Agent'), user_agent)
                         for absent in ['origin', 'cookie', 'x-hmac', 'x-line-chrome-version']:
                             self.assertNotIn(absent, {k.lower() for k in headers})
+                    talk, sync = ('/S4', '/SYNC4') if profile == 'android' else ('/enc', '/enc')
+                    self.assertEqual([path for path, _, _, _ in records],
+                                     ['/TSHOP4', '/TSHOP4', talk, sync, '/EXT/auth/tokenrefresh/v1'])
+                    for _, _, headers, _ in records[2:4]:
+                        self.assertEqual(headers.get('X-LPV'), '1')
+                        self.assertEqual(headers.get('X-LHM'), 'POST')
+                        if profile == 'android':
+                            self.assertEqual(headers.get('X-Line-Access'), 'synthetic-token')
+                            self.assertNotIn('X-LCS', headers)
+                        else:
+                            self.assertEqual(headers.get('X-LCS'), '0008synthetic')
+                            self.assertNotIn('X-Line-Access', headers)
                     for (path, _, _, args), shop in zip(records[:2], ['stickershop', 'sticonshop']):
                         self.assertEqual(path, '/TSHOP4')
                         self.assertEqual(args, {2: shop, 3: 0, 4: 1000,
                                                 5: {1: language, 2: 'JP'}})
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+    def test_tablet_uses_next_access_header_from_direct_thrift(self):
+        requests = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_POST(self):
+                raw = self.rfile.read(int(self.headers['Content-Length']))
+                protocol = TCompactProtocol(TMemoryBuffer(raw))
+                method, _, _ = protocol.readMessageBegin()
+                requests.append((self.path, method, self.headers.get('X-Line-Access')))
+                wire = reply(method, [(0, TType.I64, 20)])
+                self.send_response(200)
+                if len(requests) == 1:
+                    self.send_header('X-Line-Next-Access', 'rotated')
+                self.send_header('Content-Length', str(len(wire)))
+                self.end_headers()
+                self.wfile.write(wire)
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as root:
+                session = Path(root) / 'session.json'
+                subprocess.run([self.binary, f'http://127.0.0.1:{server.server_port}',
+                                'tablet-rotation', str(session)], check=True, timeout=10)
+                self.assertEqual(json.loads(session.read_text())['accessToken'], 'rotated')
+            self.assertEqual(requests, [('/S4', 'getLastOpRevision', 'original'),
+                                        ('/S4', 'getLastOpRevision', 'rotated')])
         finally:
             server.shutdown()
             server.server_close()

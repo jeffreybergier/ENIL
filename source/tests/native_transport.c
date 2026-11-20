@@ -52,6 +52,9 @@ CURLcode __wrap_curl_easy_perform(CURL *c) {
   assert(url && !strncmp(url, "https://", 8));
   path = strchr(url + 8, '/');
   assert(path);
+  if (!strcmp(path, "/S4") || !strcmp(path, "/SYNC4"))
+    assert((size_t)(path - url) == strlen("https://legy.line-apps.com") &&
+           !strncmp(url, "https://legy.line-apps.com", (size_t)(path - url)));
   snprintf(buf, sizeof(buf), "%s%s", origin, path);
   curl_easy_setopt(c, CURLOPT_URL, buf);
   curl_easy_setopt(c, CURLOPT_PROXY, "");
@@ -261,8 +264,9 @@ int main(int argc, char **argv) {
   ENILLineResponse r;
   assert(argc >= 4);
   origin = argv[1];
-  assert(enil_identity_default(!strcmp(argv[2], "language") && argc > 4
-                              ? argv[4] : "desktopwin", &id));
+  assert(enil_identity_default(!strcmp(argv[2], "tablet-rotation") ? "android" :
+                               (!strcmp(argv[2], "language") && argc > 4
+                                ? argv[4] : "desktopwin"), &id));
   assert(enil_identity_bind(&id));
   if (!strcmp(argv[2], "language")) {
     sticker_package_t *stickers = NULL;
@@ -282,7 +286,19 @@ int main(int argc, char **argv) {
     r = enil_line_post("/api/auth/tokenRefresh", "{\"refreshToken\":\"synthetic-refresh\"}", "synthetic-token");
     assert(r.status == 200);
     enil_line_response_free(&r);
-    assert(requests == 5);
+    assert(requests == 5 && worker_calls == (!strcmp(id.profile_id, "android") ? 0 : 4));
+    return 0;
+  }
+  if (!strcmp(argv[2], "tablet-rotation")) {
+    cJSON *root = cJSON_Parse("{\"loginId\":\"tablet\",\"accessToken\":\"original\"}");
+    assert(root);
+    cJSON_AddItemToObject(root, "clientIdentity", enil_identity_to_json(&id));
+    assert(enil_session_write(argv[3], root));
+    cJSON_Delete(root);
+    assert(enil_session_bind_identity(argv[3]));
+    assert(TalkService_getLastOpRevision("stale") == 20);
+    assert(TalkService_getLastOpRevision("stale") == 20);
+    assert(requests == 2 && !worker_calls && !health_failed);
     return 0;
   }
   if (!strcmp(argv[2], "request-generation")) {

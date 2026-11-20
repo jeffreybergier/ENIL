@@ -22,6 +22,13 @@ Run these Make targets in the configured Altivec environment. Preparation may
 download the pinned LINE extension; generated JS/WASM/C are ignored build
 inputs, not checked-in sources. Cached builds and native crypto execute offline.
 
+With Podman Compose and the SDK archives in `~/.altivec/.altivec-sdk`, run:
+
+```sh
+podman compose --profile tools run --rm -e ALTIVEC_SDK_ARCHIVE_DIR=/root/.altivec-sdk altivec-sdk install
+podman compose run --rm --entrypoint /bin/bash altivec -lc \
+  'npm ci --prefix source/cloudflare && make ltsm-prepare && make debug release && make test-host'
+```
 
 Build roots are resolved from the project Makefile and inherited by child makes.
 `BUILD_ROOT=custom` is relative to the repository root. Native artifacts live in
@@ -41,6 +48,10 @@ and fresh QR attempts. Each login reads its slot immediately before certificate
 verification; LINE can still require PIN verification. Reauthentication can
 reuse an older account's certificate when no installation slot exists. Tokens
 and message encryption keys remain in the account's `session.json`.
+
+Tablet sessions use direct Compact Thrift over HTTPS for Talk (`/S4`) and
+live polling (`/SYNC4`). Desktop and Chrome routing is unchanged, and the
+Tablet transport change does not require signing in again or change message E2EE.
 
 `make test-host` covers certificate isolation, replacement, account removal,
 QR restart, persistence failures, and real C login requests against offline

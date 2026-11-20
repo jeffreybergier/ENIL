@@ -1,5 +1,5 @@
 #include "enil_atomic.h"
-/* Windows native transport. The Worker performs crypto; only ENIL calls LINE. */
+/* Native Thrift transport for Desktop and Tablet. Only ENIL calls LINE. */
 #include "enil_native.h"
 #include "enil_b64.h"
 #include "enil_cocoa_log.h"
@@ -62,7 +62,7 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
   ENILLineResponse out = {0, NULL};
   ENILBuf request = {NULL, 0}, response = {NULL, 0};
   const enil_identity_t *identity = enil_identity_current();
-  const char *method, *endpoint, *url;
+  const char *method, *endpoint, *url, *next_access = NULL;
   cJSON *args = NULL, *payload = NULL, *encoded = NULL, *decoded = NULL, *reply = NULL,
         *data = NULL, *envelope = NULL;
   CURL *curl = NULL;
@@ -70,7 +70,7 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
   CURLcode rc;
   char *base64 = NULL, *bound_token = NULL;
   unsigned char *wire = NULL;
-  int len, encrypted, contacts = 0;
+  int len, tablet, encrypted, contacts = 0;
   if (!identity || strcmp(identity->transport, "native-thrift") || !path || !body || !token)
     return out;
   if (cancel && enil_atomic_load(cancel))
@@ -88,8 +88,12 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
   args = cJSON_Parse(body);
   if (!args)
     goto done;
+  tablet = !strcmp(identity->profile_id, "android");
   endpoint = "/S4";
-  encrypted = 1;
+  /* Tablet Talk and polling use direct Compact Thrift over TLS. The legacy
+   * /enc route can return 404 for a valid Tablet session. Choose the route
+   * before sending rather than replaying a request that might have run. */
+  encrypted = !tablet;
   if (!strcmp(path, "/api/auth/tokenRefresh")) {
     cJSON *wrapper = cJSON_CreateArray();
     cJSON_AddItemToArray(wrapper, args);
@@ -160,8 +164,17 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
     append_header(&hs, "X-LCS", json_string(encoded, "xLcs"));
     append_header(&hs, "X-LHM", "POST");
   } else {
-    url = !strcmp(method, "refresh") ? "https://legy.line-apps.com/EXT/auth/tokenrefresh/v1"
-                                     : "https://legy.line-apps.com/TSHOP4";
+    if (!strcmp(endpoint, "/EXT/auth/tokenrefresh/v1"))
+      url = "https://legy.line-apps.com/EXT/auth/tokenrefresh/v1";
+    else if (!strcmp(endpoint, "/TSHOP4"))
+      url = "https://legy.line-apps.com/TSHOP4";
+    else {
+      if (strpbrk(token, "\r\n")) goto done;
+      url = !strcmp(endpoint, "/SYNC4") ? "https://legy.line-apps.com/SYNC4"
+                                        : "https://legy.line-apps.com/S4";
+      append_header(&hs, "X-LPV", "1");
+      append_header(&hs, "X-LHM", "POST");
+    }
     if (*token)
       append_header(&hs, "X-Line-Access", token);
   }
@@ -220,15 +233,8 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
       out.status = data->valueint;
       goto done;
     }
-    if (!current_login()) goto done;
-    {
-      const char *next =
-          json_string(cJSON_GetObjectItemCaseSensitive(decoded, "headers"), "x-line-next-access");
-      if (next && !enil_session_accept_next_access(token, next)) {
-        enil_health_set_failure(ENIL_ERR_LINE, "Could not save updated native access token");
-        goto done;
-      }
-    }
+    next_access =
+        json_string(cJSON_GetObjectItemCaseSensitive(decoded, "headers"), "x-line-next-access");
     len = enil_b64_decode_alloc(json_string(decoded, "body"), &wire);
     if (len < 0)
       goto done;
@@ -236,10 +242,18 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
     response.data = (char *)wire;
     response.size = (size_t)len;
     wire = NULL;
+  } else if (tablet && (!strcmp(endpoint, "/S4") || !strcmp(endpoint, "/SYNC4"))) {
+    struct curl_header *header = NULL;
+    if (curl_easy_header(curl, "x-line-next-access", 0, CURLH_HEADER, -1, &header) == CURLHE_OK)
+      next_access = header->value;
   }
   /* Refresh retains its response for the generation-checked recovery journal.
    * Other replies from an obsolete login must not reach account consumers. */
   if (strcmp(method, "refresh") && !current_login()) goto done;
+  if (next_access && !enil_session_accept_next_access(token, next_access)) {
+    enil_health_set_failure(ENIL_ERR_LINE, "Could not save updated native access token");
+    goto done;
+  }
   reply = enil_thrift_decode(method, response.data, response.size);
   if (!reply) {
     ENIL_LOG("Native.post", "invalid Thrift reply: %s", method);
