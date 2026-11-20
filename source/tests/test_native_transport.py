@@ -112,18 +112,14 @@ class NativeTransportTests(unittest.TestCase):
                         self.assertEqual(headers.get('User-Agent'), user_agent)
                         for absent in ['origin', 'cookie', 'x-hmac', 'x-line-chrome-version']:
                             self.assertNotIn(absent, {k.lower() for k in headers})
-                    talk, sync = ('/S4', '/SYNC4') if profile == 'android' else ('/enc', '/enc')
                     self.assertEqual([path for path, _, _, _ in records],
-                                     ['/TSHOP4', '/TSHOP4', talk, sync, '/EXT/auth/tokenrefresh/v1'])
+                                     ['/TSHOP4', '/TSHOP4', '/S4', '/SYNC4',
+                                      '/EXT/auth/tokenrefresh/v1'])
                     for _, _, headers, _ in records[2:4]:
                         self.assertEqual(headers.get('X-LPV'), '1')
                         self.assertEqual(headers.get('X-LHM'), 'POST')
-                        if profile == 'android':
-                            self.assertEqual(headers.get('X-Line-Access'), 'synthetic-token')
-                            self.assertNotIn('X-LCS', headers)
-                        else:
-                            self.assertEqual(headers.get('X-LCS'), '0008synthetic')
-                            self.assertNotIn('X-Line-Access', headers)
+                        self.assertEqual(headers.get('X-Line-Access'), 'synthetic-token')
+                        self.assertNotIn('X-LCS', headers)
                     for (path, _, _, args), shop in zip(records[:2], ['stickershop', 'sticonshop']):
                         self.assertEqual(path, '/TSHOP4')
                         self.assertEqual(args, {2: shop, 3: 0, 4: 1000,
@@ -133,7 +129,7 @@ class NativeTransportTests(unittest.TestCase):
             server.server_close()
             thread.join()
 
-    def test_tablet_uses_next_access_header_from_direct_thrift(self):
+    def test_native_profiles_use_next_access_header_from_direct_thrift(self):
         requests = []
 
         class Handler(BaseHTTPRequestHandler):
@@ -157,13 +153,15 @@ class NativeTransportTests(unittest.TestCase):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            with tempfile.TemporaryDirectory() as root:
-                session = Path(root) / 'session.json'
-                subprocess.run([self.binary, f'http://127.0.0.1:{server.server_port}',
-                                'tablet-rotation', str(session)], check=True, timeout=10)
-                self.assertEqual(json.loads(session.read_text())['accessToken'], 'rotated')
-            self.assertEqual(requests, [('/S4', 'getLastOpRevision', 'original'),
-                                        ('/S4', 'getLastOpRevision', 'rotated')])
+            for profile in ('desktopwin', 'android'):
+                with self.subTest(profile=profile), tempfile.TemporaryDirectory() as root:
+                    requests.clear()
+                    session = Path(root) / 'session.json'
+                    subprocess.run([self.binary, f'http://127.0.0.1:{server.server_port}',
+                                    'rotation', str(session), profile], check=True, timeout=10)
+                    self.assertEqual(json.loads(session.read_text())['accessToken'], 'rotated')
+                    self.assertEqual(requests, [('/S4', 'getLastOpRevision', 'original'),
+                                                ('/S4', 'getLastOpRevision', 'rotated')])
         finally:
             server.shutdown()
             server.server_close()
@@ -256,16 +254,15 @@ class NativeTransportTests(unittest.TestCase):
                 else:
                     self.assertEqual(status, '200')
                     self.assertEqual(data['message'], 'OK')
-            self.assertEqual([r[0] for r in records], ['/enc', '/EXT/auth/tokenrefresh/v1', '/enc'])
+            self.assertEqual([r[0] for r in records], ['/S4', '/EXT/auth/tokenrefresh/v1', '/S4'])
             for path, method, headers, raw in records:
                 lower = {k.lower(): v for k, v in headers.items()}
                 self.assertTrue(lower['x-line-application'].startswith('DESKTOPWIN\t'))
                 self.assertEqual(lower['user-agent'], 'Line/9.7.0.3556')
                 for absent in ['origin', 'cookie', 'x-hmac', 'x-line-chrome-version']:
                     self.assertNotIn(absent, lower)
-                if path == '/enc':
-                    self.assertEqual(lower['x-lcs'], '0008synthetic')
-                    self.assertNotIn('x-line-access', lower)
+                self.assertEqual(lower['x-line-access'], 'synthetic-token')
+                self.assertNotIn('x-lcs', lower)
         finally:
             server.shutdown()
             server.server_close()
@@ -286,9 +283,11 @@ class NativeTransportTests(unittest.TestCase):
                 raw = self.rfile.read(int(self.headers['Content-Length']))
                 protocol = TCompactProtocol(TMemoryBuffer(raw))
                 method, _, _ = protocol.readMessageBegin()
-                requests.append(method)
+                requests.append((method, self.headers.get('X-Line-Access')))
                 body = reply('getLastOpRevision', [(0, TType.I64, 20)])
                 self.send_response(200)
+                if len(requests) == 3:
+                    self.send_header('X-Line-Next-Access', 'obsolete')
                 self.send_header('Content-Length', str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
@@ -301,7 +300,8 @@ class NativeTransportTests(unittest.TestCase):
                 subprocess.run([self.binary, f'http://127.0.0.1:{server.server_port}',
                                 'request-generation', str(Path(root) / 'session.json')],
                                check=True, timeout=10)
-            self.assertEqual(requests, ['getLastOpRevision', 'getLastOpRevision'])
+            self.assertEqual(requests, [('getLastOpRevision', token)
+                                        for token in ('rotated-A', 'token-B', 'token-B')])
         finally:
             server.shutdown()
             server.server_close()

@@ -1,16 +1,17 @@
 #include "enil_atomic.h"
 /* Native Thrift transport for Desktop and Tablet. Only ENIL calls LINE. */
 #include "enil_native.h"
-#include "enil_b64.h"
 #include "enil_cocoa_log.h"
 #include "enil_health.h"
 #include "enil_identity.h"
 #include "enil_session.h"
 #include "enil_thrift.h"
-#include "enil_worker.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#define NATIVE_ORIGIN "https://legy.line-apps.com"
+
 static const char *json_string(cJSON *o, const char *key) {
   cJSON *v = cJSON_GetObjectItemCaseSensitive(o, key);
   return cJSON_IsString(v) ? v->valuestring : NULL;
@@ -62,15 +63,13 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
   ENILLineResponse out = {0, NULL};
   ENILBuf request = {NULL, 0}, response = {NULL, 0};
   const enil_identity_t *identity = enil_identity_current();
-  const char *method, *endpoint, *url, *next_access = NULL;
-  cJSON *args = NULL, *payload = NULL, *encoded = NULL, *decoded = NULL, *reply = NULL,
-        *data = NULL, *envelope = NULL;
+  const char *method, *url;
+  cJSON *args = NULL, *reply = NULL, *data = NULL, *envelope = NULL;
   CURL *curl = NULL;
   struct curl_slist *hs = NULL;
   CURLcode rc;
-  char *base64 = NULL, *bound_token = NULL;
-  unsigned char *wire = NULL;
-  int len, tablet, encrypted, contacts = 0;
+  char *bound_token = NULL;
+  int talk = 0, contacts = 0;
   if (!identity || strcmp(identity->transport, "native-thrift") || !path || !body || !token)
     return out;
   if (cancel && enil_atomic_load(cancel))
@@ -88,27 +87,26 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
   args = cJSON_Parse(body);
   if (!args)
     goto done;
-  tablet = !strcmp(identity->profile_id, "android");
-  endpoint = "/S4";
-  /* Tablet Talk and polling use direct Compact Thrift over TLS. The legacy
-   * /enc route can return 404 for a valid Tablet session. Choose the route
-   * before sending rather than replaying a request that might have run. */
-  encrypted = !tablet;
+  /* Both native profiles use direct Compact Thrift over TLS. The legacy
+   * /enc route returns 404 for valid sessions; don't replay requests across
+   * transports. Message E2EE is independent of the HTTPS route. */
   if (!strcmp(path, "/api/auth/tokenRefresh")) {
     cJSON *wrapper = cJSON_CreateArray();
     cJSON_AddItemToArray(wrapper, args);
     args = wrapper;
     method = "refresh";
-    endpoint = "/EXT/auth/tokenrefresh/v1";
-    encrypted = 0;
-  } else if (!strcmp(path, "/native/sync"))
-    endpoint = "/SYNC4";
-  else if (!strncmp(path, "/api/shop/thrift/ShopService/ShopService/",
-                    strlen("/api/shop/thrift/ShopService/ShopService/"))) {
-    endpoint = "/TSHOP4";
-    encrypted = 0;
-  } else if (strncmp(path, "/api/talk/thrift/Talk/TalkService/",
-                     strlen("/api/talk/thrift/Talk/TalkService/")))
+    url = NATIVE_ORIGIN "/EXT/auth/tokenrefresh/v1";
+  } else if (!strcmp(path, "/native/sync")) {
+    url = NATIVE_ORIGIN "/SYNC4";
+    talk = 1;
+  } else if (!strncmp(path, "/api/shop/thrift/ShopService/ShopService/",
+                      strlen("/api/shop/thrift/ShopService/ShopService/"))) {
+    url = NATIVE_ORIGIN "/TSHOP4";
+  } else if (!strncmp(path, "/api/talk/thrift/Talk/TalkService/",
+                      strlen("/api/talk/thrift/Talk/TalkService/"))) {
+    url = NATIVE_ORIGIN "/S4";
+    talk = 1;
+  } else
     goto done;
   if (!strcmp(method, "getContactsV2")) {
     cJSON *mids = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(args, 0), "targetUserMids");
@@ -135,49 +133,14 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
     ENIL_LOG("Native.post", "unsupported or invalid request: %s", method);
     goto done;
   }
-  if (encrypted) {
-    base64 = enil_b64_encode((unsigned char *)request.data, request.size);
-    payload = cJSON_CreateObject();
-    if (!base64 || !payload)
-      goto done;
-    cJSON_AddStringToObject(payload, "path", endpoint);
-    cJSON_AddStringToObject(payload, "body", base64);
-    cJSON_AddStringToObject(payload, "accessToken", token);
-    encoded = enil_worker_decrypt_ex("/transport/legy/encode", payload, cancel);
-    cJSON_Delete(payload);
-    payload = NULL;
-    free(base64);
-    base64 = NULL;
-    if ((cancel && enil_atomic_load(cancel)) || !json_string(encoded, "body") || !json_string(encoded, "key") || !json_string(encoded, "xLcs"))
-      goto done;
-    len = enil_b64_decode_alloc(json_string(encoded, "body"), &wire);
-    if (len < 0)
-      goto done;
-    enil_buf_free(&request);
-    request.data = (char *)wire;
-    request.size = (size_t)len;
-    wire = NULL;
-    url = "https://gf.line.naver.jp/enc";
-    append_header(&hs, "X-LE", "7");
-    append_header(&hs, "X-LAP", "5");
+  if (strpbrk(token, "\r\n"))
+    goto done;
+  if (talk) {
     append_header(&hs, "X-LPV", "1");
-    append_header(&hs, "X-LCS", json_string(encoded, "xLcs"));
     append_header(&hs, "X-LHM", "POST");
-  } else {
-    if (!strcmp(endpoint, "/EXT/auth/tokenrefresh/v1"))
-      url = "https://legy.line-apps.com/EXT/auth/tokenrefresh/v1";
-    else if (!strcmp(endpoint, "/TSHOP4"))
-      url = "https://legy.line-apps.com/TSHOP4";
-    else {
-      if (strpbrk(token, "\r\n")) goto done;
-      url = !strcmp(endpoint, "/SYNC4") ? "https://legy.line-apps.com/SYNC4"
-                                        : "https://legy.line-apps.com/S4";
-      append_header(&hs, "X-LPV", "1");
-      append_header(&hs, "X-LHM", "POST");
-    }
-    if (*token)
-      append_header(&hs, "X-Line-Access", token);
   }
+  if (*token)
+    append_header(&hs, "X-Line-Access", token);
   append_header(&hs, "Content-Type", "application/x-thrift");
   append_header(&hs, "Accept", "application/x-thrift");
   append_header(&hs, "X-Line-Application", identity->application);
@@ -199,9 +162,7 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, cancel_request);
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, (void *)cancel);
   }
-  /* LEGY encoding may have overlapped reauthentication. Do not send the
-   * prepared request if its login was replaced while the Worker ran. */
-  if (!current_login()) goto done;
+  if ((cancel && enil_atomic_load(cancel)) || !current_login()) goto done;
   ENIL_LOG("Native.post", "POST %s %s (%lu bytes)", url, method, (unsigned long)request.size);
   rc = curl_easy_perform(curl);
   curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &out.status);
@@ -216,43 +177,16 @@ ENILLineResponse enil_native_post(const char *path, const char *body, const char
   }
   if (out.status != 200)
     goto done;
-  if (encrypted) {
-    payload = cJSON_CreateObject();
-    base64 = enil_b64_encode((unsigned char *)response.data, response.size);
-    if (!base64 || !payload)
-      goto done;
-    cJSON_AddStringToObject(payload, "key", json_string(encoded, "key"));
-    cJSON_AddStringToObject(payload, "body", base64);
-    decoded = enil_worker_decrypt_ex("/transport/legy/decode", payload, cancel);
-    if (!json_string(decoded, "body"))
-      goto done;
-    data = cJSON_GetObjectItemCaseSensitive(decoded, "status");
-    ENIL_LOG("Native.post", "%s %s LEGY status=%d", endpoint, method,
-             cJSON_IsNumber(data) ? data->valueint : 200);
-    if (cJSON_IsNumber(data) && data->valueint != 200) {
-      out.status = data->valueint;
-      goto done;
-    }
-    next_access =
-        json_string(cJSON_GetObjectItemCaseSensitive(decoded, "headers"), "x-line-next-access");
-    len = enil_b64_decode_alloc(json_string(decoded, "body"), &wire);
-    if (len < 0)
-      goto done;
-    enil_buf_free(&response);
-    response.data = (char *)wire;
-    response.size = (size_t)len;
-    wire = NULL;
-  } else if (tablet && (!strcmp(endpoint, "/S4") || !strcmp(endpoint, "/SYNC4"))) {
-    struct curl_header *header = NULL;
-    if (curl_easy_header(curl, "x-line-next-access", 0, CURLH_HEADER, -1, &header) == CURLHE_OK)
-      next_access = header->value;
-  }
   /* Refresh retains its response for the generation-checked recovery journal.
    * Other replies from an obsolete login must not reach account consumers. */
   if (strcmp(method, "refresh") && !current_login()) goto done;
-  if (next_access && !enil_session_accept_next_access(token, next_access)) {
-    enil_health_set_failure(ENIL_ERR_LINE, "Could not save updated native access token");
-    goto done;
+  if (talk) {
+    struct curl_header *header = NULL;
+    if (curl_easy_header(curl, "x-line-next-access", 0, CURLH_HEADER, -1, &header) == CURLHE_OK &&
+        !enil_session_accept_next_access(token, header->value)) {
+      enil_health_set_failure(ENIL_ERR_LINE, "Could not save updated native access token");
+      goto done;
+    }
   }
   reply = enil_thrift_decode(method, response.data, response.size);
   if (!reply) {
@@ -301,14 +235,9 @@ done:
     enil_health_set_failure(ENIL_ERR_LINE,
                             "LINE rejected this session. Reauthentication is required.");
   cJSON_Delete(args);
-  cJSON_Delete(payload);
-  cJSON_Delete(encoded);
-  cJSON_Delete(decoded);
   cJSON_Delete(reply);
   cJSON_Delete(envelope);
   free(bound_token);
-  free(base64);
-  free(wire);
   enil_buf_free(&request);
   enil_buf_free(&response);
   curl_slist_free_all(hs);

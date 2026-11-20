@@ -1,6 +1,7 @@
 # ENIL
 
-ENIL performs request signing, E2EE and LEGY transport crypto locally by default.
+ENIL performs request signing and E2EE locally by default. The crypto library
+also retains the legacy LEGY codec for compatibility and offline verification.
 No Cloudflare Worker URL or secret is required. Existing account keys and
 version-1 `workerRestoreState` continue to work; there is no account migration
 or automatic remote fallback. The explicit `ENIL_LOCAL_CRYPTO=0` build option
@@ -49,9 +50,9 @@ verification; LINE can still require PIN verification. Reauthentication can
 reuse an older account's certificate when no installation slot exists. Tokens
 and message encryption keys remain in the account's `session.json`.
 
-Tablet sessions use direct Compact Thrift over HTTPS for Talk (`/S4`) and
-live polling (`/SYNC4`). Desktop and Chrome routing is unchanged, and the
-Tablet transport change does not require signing in again or change message E2EE.
+Desktop and Tablet sessions use direct Compact Thrift over HTTPS for Talk
+(`/S4`) and live polling (`/SYNC4`). Chrome uses its separate gateway. The
+native transport change does not require signing in again or change message E2EE.
 
 `make test-host` covers certificate isolation, replacement, account removal,
 QR restart, persistence failures, and real C login requests against offline

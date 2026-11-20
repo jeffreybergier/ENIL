@@ -9,7 +9,6 @@
 #include "enil_sse.h"
 #include "enil_thrift.h"
 #include "enil_worker.h"
-#include "enil_b64.h"
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -22,9 +21,8 @@ static long long last_revision;
 static const char *activate_staging, *activate_account;
 static const char *timeout_phase;
 static curl_off_t timeout_request_size;
-static const char *expected_worker_token, *replace_during_encode_path;
-static cJSON *replace_during_encode_session;
-static int worker_calls;
+static const char *replace_after_response_path;
+static cJSON *replace_after_response_session;
 CURLcode __real_curl_easy_getinfo(CURL *, CURLINFO, ...);
 CURLcode __wrap_curl_easy_getinfo(CURL *curl, CURLINFO info, ...) {
   void *value;
@@ -69,6 +67,10 @@ CURLcode __wrap_curl_easy_perform(CURL *c) {
       assert(enil_login_store_activate(activate_staging, activate_account));
       activate_staging = NULL;
     }
+    if (replace_after_response_path) {
+      assert(enil_session_activate(replace_after_response_path, replace_after_response_session));
+      replace_after_response_path = NULL;
+    }
     return rc;
   }
 }
@@ -100,29 +102,11 @@ char *enil_worker_sign(const char *p, const char *b, const char *t) {
   return NULL;
 }
 cJSON *enil_worker_decrypt_ex(const char *p, cJSON *v, const volatile int *cancel) {
-  cJSON *r = cJSON_CreateObject();
+  (void)p;
+  (void)v;
   (void)cancel;
-  worker_calls++;
-  cJSON_AddItemToObject(r, "body", cJSON_Duplicate(cJSON_GetObjectItem(v, "body"), 1));
-  if (strstr(p, "encode")) {
-    if (expected_worker_token)
-      assert(!strcmp(cJSON_GetObjectItem(v, "accessToken")->valuestring, expected_worker_token));
-    if (replace_during_encode_path) {
-      assert(enil_session_activate(replace_during_encode_path, replace_during_encode_session));
-      replace_during_encode_path = NULL;
-    }
-    if (timeout_phase) {
-      unsigned char *bytes = NULL;
-      int size = enil_b64_decode_alloc(cJSON_GetObjectItem(v, "body")->valuestring, &bytes);
-      assert(size > 0);
-      timeout_request_size = size;
-      free(bytes);
-    }
-    cJSON_AddStringToObject(r, "key", "synthetic");
-    cJSON_AddStringToObject(r, "xLcs", "0008synthetic");
-  } else
-    cJSON_AddNumberToObject(r, "status", 200);
-  return r;
+  assert(0); /* Native Thrift must not pass through the crypto backend. */
+  return NULL;
 }
 static void persistence(const char *path) {
   session_t stale, fresh;
@@ -209,17 +193,14 @@ static void request_generation(const char *path, const enil_identity_t *identity
   cJSON *root = cJSON_Parse("{\"loginId\":\"A\",\"accessToken\":\"token-A\"}"), *saved;
   ENILLineResponse r;
   char *token;
-  int before;
   cJSON_AddItemToObject(root, "clientIdentity", enil_identity_to_json(identity));
   assert(enil_session_write(path, root));
   assert(enil_session_bind_identity(path));
   /* Ordinary rotation within A must still be picked up by in-flight work. */
   assert(enil_session_accept_next_access("token-A", "rotated-A"));
-  expected_worker_token = "rotated-A";
   r = enil_line_post(rpc, "[]", "token-A");
   assert(r.status == 200 && r.body && requests == 1);
   enil_line_response_free(&r);
-  before = worker_calls;
   cJSON_ReplaceItemInObject(root, "loginId", cJSON_CreateString("B"));
   cJSON_ReplaceItemInObject(root, "accessToken", cJSON_CreateString("token-B"));
   assert(enil_session_activate(path, root));
@@ -228,7 +209,7 @@ static void request_generation(const char *path, const enil_identity_t *identity
   /* Nested media preparation must not rebind this operation to B. */
   assert(!enil_line_acquire_obs_token(path, "token-A"));
   r = enil_line_post(rpc, "[]", "token-A");
-  assert(!r.body && requests == 1 && worker_calls == before);
+  assert(!r.body && requests == 1);
   enil_line_response_free(&r);
   assert(!enil_session_accept_next_access("token-B", "late-A-response"));
   saved = enil_session_read(path);
@@ -236,24 +217,26 @@ static void request_generation(const char *path, const enil_identity_t *identity
   cJSON_Delete(saved);
   /* A new operation can explicitly start under B. */
   assert(enil_session_bind_identity(path));
-  expected_worker_token = "token-B";
   r = enil_line_post(rpc, "[]", "token-B");
   assert(r.status == 200 && r.body && requests == 2);
   enil_line_response_free(&r);
-  /* Replacement while the Worker is encoding also stops before LINE. */
+  /* A reply that races with reauthentication must not reach the caller
+   * or install its X-Line-Next-Access in the new session. */
   cJSON_ReplaceItemInObject(root, "loginId", cJSON_CreateString("C"));
   cJSON_ReplaceItemInObject(root, "accessToken", cJSON_CreateString("token-C"));
-  replace_during_encode_path = path;
-  replace_during_encode_session = root;
+  replace_after_response_path = path;
+  replace_after_response_session = root;
   r = enil_line_post(rpc, "[]", "token-B");
-  assert(!r.body && requests == 2);
+  assert(!r.body && requests == 3);
   enil_line_response_free(&r);
   assert(!enil_session_continue_identity(path));
+  saved = enil_session_read(path);
+  assert(cJSON_Compare(root, saved, 1));
+  cJSON_Delete(saved);
   assert(enil_session_bind_identity(path));
   assert(unlink(path) == 0);
-  before = worker_calls;
   r = enil_line_post(rpc, "[]", "token-C");
-  assert(!r.body && requests == 2 && worker_calls == before);
+  assert(!r.body && requests == 3);
   enil_line_response_free(&r);
   assert(!health_failed);
   cJSON_Delete(root);
@@ -264,9 +247,8 @@ int main(int argc, char **argv) {
   ENILLineResponse r;
   assert(argc >= 4);
   origin = argv[1];
-  assert(enil_identity_default(!strcmp(argv[2], "tablet-rotation") ? "android" :
-                               (!strcmp(argv[2], "language") && argc > 4
-                                ? argv[4] : "desktopwin"), &id));
+  assert(enil_identity_default((!strcmp(argv[2], "language") || !strcmp(argv[2], "rotation")) &&
+                               argc > 4 ? argv[4] : "desktopwin", &id));
   assert(enil_identity_bind(&id));
   if (!strcmp(argv[2], "language")) {
     sticker_package_t *stickers = NULL;
@@ -286,11 +268,11 @@ int main(int argc, char **argv) {
     r = enil_line_post("/api/auth/tokenRefresh", "{\"refreshToken\":\"synthetic-refresh\"}", "synthetic-token");
     assert(r.status == 200);
     enil_line_response_free(&r);
-    assert(requests == 5 && worker_calls == (!strcmp(id.profile_id, "android") ? 0 : 4));
+    assert(requests == 5);
     return 0;
   }
-  if (!strcmp(argv[2], "tablet-rotation")) {
-    cJSON *root = cJSON_Parse("{\"loginId\":\"tablet\",\"accessToken\":\"original\"}");
+  if (!strcmp(argv[2], "rotation")) {
+    cJSON *root = cJSON_Parse("{\"loginId\":\"native\",\"accessToken\":\"original\"}");
     assert(root);
     cJSON_AddItemToObject(root, "clientIdentity", enil_identity_to_json(&id));
     assert(enil_session_write(argv[3], root));
@@ -298,7 +280,7 @@ int main(int argc, char **argv) {
     assert(enil_session_bind_identity(argv[3]));
     assert(TalkService_getLastOpRevision("stale") == 20);
     assert(TalkService_getLastOpRevision("stale") == 20);
-    assert(requests == 2 && !worker_calls && !health_failed);
+    assert(requests == 2 && !health_failed);
     return 0;
   }
   if (!strcmp(argv[2], "request-generation")) {
@@ -485,9 +467,15 @@ int main(int argc, char **argv) {
     return 0;
   }
   if (!strncmp(argv[2], "timeout-", 8)) {
+    const char *body = "[{\"lastRevision\":\"10\",\"count\":100}]";
+    cJSON *args = cJSON_Parse(body);
+    ENILBuf wire = {NULL, 0};
+    assert(enil_thrift_encode("sync", args, &wire));
+    timeout_request_size = (curl_off_t)wire.size;
+    enil_buf_free(&wire);
+    cJSON_Delete(args);
     timeout_phase = argv[2] + 8;
-    r = enil_line_post("/native/sync", "[{\"lastRevision\":\"10\",\"count\":100}]",
-                       "synthetic-token");
+    r = enil_line_post("/native/sync", body, "synthetic-token");
     assert(requests == 1 && !health_failed);
   } else if (!strcmp(argv[2], "short-poll")) {
     r = enil_line_post_ex("/native/sync", "[{\"lastRevision\":\"10\",\"count\":100}]",
